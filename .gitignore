@@ -1,0 +1,14 @@
+# Dependency installs
+tools/node_modules/
+node_modules/
+
+# External Luau toolchain (installed by tools/setup-tools.sh)
+.tools/
+
+# Generated reports and build output (see tools/README.md)
+tools/reports/
+evaluation-report.json
+
+# Editor / OS
+.DS_Store
+*.swp
