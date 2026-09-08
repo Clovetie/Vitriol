@@ -110,7 +110,7 @@ game
 ├─ ServerStorage (SVC)
 │  └─ Vitriol (FL)
 │     ├─ Services (FL)                  ← long-lived singletons, one MD each
-│     │  ├─ CadenceService (MD)         ← THE ONLY LOOP: one Heartbeat driver for every
+│     │  ├─ CadenceService (MD)         ← THE ONLY GAMEPLAY LOOP: one Heartbeat driver for every
 │     │  │                                 cadence in §4, staggered, self-measuring
 │     │  ├─ SessionService (MD)         ← round/nite state machine, Threat Level
 │     │  ├─ TimeService (MD)            ← owns the clock; publishes to TimeModel/attrs

@@ -144,16 +144,17 @@ hot-loop-scan with no expensive calls flagged inside loops.
 
 > Delivered, and the acceptance line is executed rather than eyeballed:
 > `node tools/vitriol-session-test.js` runs the real `Bootstrap` + services on a fake
-> DataModel with a virtual clock (78 assertions). Notes on three places where the code
+> DataModel with a virtual clock (80 assertions). Notes on three places where the code
 > and the prompt differ on purpose: there is **no spawned loop to track** —
-> `Services/CadenceService` is one Heartbeat-driven scheduler and every service
+> `Services/CadenceService` is one Heartbeat-driven scheduler for all gameplay work and every service
 > registers a slot, so `stop()` unregisters slots (asserted: 0 still enabled after
 > stop); `Bootstrap` is a **ModuleScript**, because a Script parked in ServerStorage
 > never executes (docs/08 §10); and the phase machine lives in `TimeService` (the
 > clock) with `SessionService` deciding what a transition *means*, because two phase
 > machines would drift apart — see docs/06 §2.2 for why the clock is derived from the
 > phase rather than integrated from a rate curve. `Profiler` measures each cadence
-> against `GameConfig.Budgets` and auto-degrades one LOD tier after
+> against `GameConfig.Budgets` from its own Heartbeat binding — deliberately not a slot, so a
+> wedged scheduler cannot blind its watchdog and auto-degrades one LOD tier after
 > `WatchdogSamples` consecutive 2x windows, which the harness drives by burning
 > virtual time in a test slot.
 
