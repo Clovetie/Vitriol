@@ -1,0 +1,231 @@
+--!strict
+-- MonsterConfig.luau
+-- Location: ReplicatedStorage > Vitriol > Config > MonsterConfig  (ModuleScript)
+-- Purpose:  Creature genome ranges, sensory model, action set, and the RL
+--           hyper-parameters (docs/02-MONSTER-DESIGN.md).
+--           NOTE: Lib/Genetics carries a DEFAULT_GENES copy so it stays
+--           Config-free and unit-testable. THIS table is the runtime source of
+--           truth and is injected via Genetics.new(MonsterConfig.Genes).
+-- Requires: (none)
+-- Used by:  Services/{CreatureService,EvolutionService,PerceptionService},
+--           Creature/Brain/*, Lib/Genetics (injected)
+
+local MonsterConfig = {}
+
+---------------------------------------------------------------------------
+-- Genome (docs/02 §5.1). cost is multiplied by the gene value and summed
+-- against the metabolic budget, which is why there is no "good at everything".
+---------------------------------------------------------------------------
+MonsterConfig.Genes = {
+	{ name = "Speed", cost = 0.14, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Strength", cost = 0.13, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Endurance", cost = 0.09, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Mass", cost = 0.12, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Adhesion", cost = 0.07, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Softness", cost = 0.06, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "SenseVibration", cost = 0.05, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "SenseAir", cost = 0.05, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "SenseScent", cost = 0.05, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "SenseThermal", cost = 0.04, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "SenseEM", cost = 0.04, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Cunning", cost = 0.10, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Patience", cost = 0.04, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Aggression", cost = 0.05, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Metabolism", cost = 0.08, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Regeneration", cost = 0.06, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "Armour", cost = 0.09, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "ShearRate", cost = 0.06, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "GripTenacity", cost = 0.05, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "TendrilLength", cost = 0.05, min = 0, max = 1, kind = "float", default = 0.5 },
+	{ name = "TendrilCount", cost = 0.02, min = 6, max = 14, kind = "int", default = 8 },
+}
+
+-- Metabolic budget grows with Threat Level (docs/02 §5.2). Interpolated.
+MonsterConfig.Budget = {
+	Threat0 = 0.85,
+	Threat1 = 1.15,
+}
+
+MonsterConfig.Evolution = {
+	Sigma = 0.06, -- gaussian mutation width
+	StructuralChance = 0.10, -- chance of a tendril-count change (VISIBLE)
+	EliteCount = 12, -- genomes kept per lineage
+	Immigrants = 2, -- random newcomers, to keep genetic drift alive
+	CrossoverDominance = 0.5, -- bias toward the fitter parent
+	SpeciesPriorSmoothing = 0.15, -- exponential smoothing of the aggregate prior
+}
+
+---------------------------------------------------------------------------
+-- Senses (docs/02 §2). Ranges are multiplied by the acuity gene at runtime.
+---------------------------------------------------------------------------
+MonsterConfig.Senses = {
+	Channels = { "VIBRATION", "AIR", "SCENT", "THERMAL", "EM", "PRESSURE" },
+	-- Localisation error in studs at acuity 0, scaled by distance.
+	ErrorScale = { VIBRATION = 0.35, AIR = 0.20, SCENT = 0.60, THERMAL = 0.10, EM = 0.45, PRESSURE = 0.05 },
+	Threshold = { VIBRATION = 0.10, AIR = 0.08, SCENT = 0.06, THERMAL = 0.15, EM = 0.05, PRESSURE = 0.20 },
+	-- Material coupling for vibration (multiplier on emitted intensity).
+	VibrationCoupling = { Concrete = 1.6, Asphalt = 1.5, Wood = 1.2, Grass = 0.7, Sand = 0.5, Water = 0.1 },
+	-- How fast each channel's memory of an event decays (seconds, half-life).
+	DecayHalfLife = { VIBRATION = 1.2, AIR = 0.8, SCENT = 45, THERMAL = 3, EM = 0.5, PRESSURE = 0.3 },
+	MaxOcclusionRaysPerTick = 6,
+	MaxCandidatesPerTick = 12,
+}
+
+---------------------------------------------------------------------------
+-- Memory (docs/02 §3)
+---------------------------------------------------------------------------
+MonsterConfig.Memory = {
+	WorkingCapacity = 12,
+	CellSize = 8, -- spatial hash cell, studs
+	Interest = { Kill = 1.0, Grab = 0.6, PreyPerceived = 0.25, LoudNoise = 0.15 },
+	InterestDecayHalfLife = 90,
+	TimeHeatmapBuckets = 6, -- sixths of a night
+}
+
+---------------------------------------------------------------------------
+-- Prediction (docs/02 §4)
+---------------------------------------------------------------------------
+MonsterConfig.Prediction = {
+	LocationClasses = { "Open", "Road", "House", "Garage", "Basement", "Roof", "Woods", "Water" },
+	PostureClasses = { "Idle", "Scavenging", "Fleeing", "Hiding", "Driving", "Fighting" },
+	MinObservations = 12, -- before this, predictions are not trusted
+	PredictabilityHigh = 0.60, -- above this: ambush/intercept bonus + a tell
+	PredictabilityLow = 0.30, -- below this: fall back to searching
+	MinProbabilityToIntercept = 0.50,
+}
+
+---------------------------------------------------------------------------
+-- Actions (docs/02 §7). `requires` gates are checked against expressed stats.
+---------------------------------------------------------------------------
+MonsterConfig.Actions = {
+	SEARCH = {},
+	STALK = {},
+	AMBUSH = { requires = { Cunning = 0.25 } },
+	CHARGE = {},
+	CIRCLE = { requires = { Speed = 0.25 } },
+	FLUSH = { requires = { Strength = 0.30 } },
+	BREACH = { requires = { Strength = 0.45 } },
+	LURE = { requires = { Cunning = 0.55 } },
+	BURROW = { requires = { Softness = 0.45, Adhesion = 0.30 } },
+	FEIGN = { requires = { Cunning = 0.50 } },
+	INTERCEPT = { requires = { Cunning = 0.30 } },
+	RETREAT = {},
+	CONSUME = {}, -- only selectable while holding prey
+}
+
+-- Commitment timers stop the creature flip-flopping (docs/02 §9.2).
+MonsterConfig.Commitment = {
+	MinChargeSeconds = 0.8,
+	MaxChargeSeconds = 8.0,
+	PreemptScoreDelta = 0.25,
+	RefractorySeconds = 0.4,
+}
+
+---------------------------------------------------------------------------
+-- Learning (docs/02 §8). Linear function approximation + replacing traces.
+---------------------------------------------------------------------------
+MonsterConfig.Learning = {
+	Alpha = 0.09,
+	AlphaDecayN0 = 400, -- alpha = Alpha / (1 + n / N0)
+	Gamma = 0.94,
+	Lambda = 0.80, -- eligibility trace decay
+	TemperatureStart = 1.4,
+	TemperatureEnd = 0.35,
+	TemperatureTauNights = 3,
+	EpsilonFloor = 0.05, -- never stop being surprising
+	RewardClamp = 30,
+	WeightNormCap = 24,
+	KappaNewborn = 2.5, -- how much a newborn trusts its body
+	KappaVeteran = 0.60,
+	KappaTauDecisions = 120,
+	-- Potential-based shaping (Ng, Harada & Russell 1999). ONLY this form
+	-- preserves the optimal policy; do not "improve" it.
+	ShapingPotentialScale = 1 / 100,
+	Rewards = {
+		Grab = 8,
+		Consume = 25,
+		LocalisePrey = 1.2,
+		ProximityPerSecond = 0.10,
+		ProximityStuds = 5,
+		LoseHotTrail = -2.0,
+		DamagePerHp = -0.10,
+		KnownHazardExtra = -4.0,
+		AmbushRevealed = -1.5,
+		EnergyPerUnit = -0.008,
+		ElapsedPerSecond = -0.02,
+	},
+	FeatureBuckets = {
+		NightPhase = 6,
+		LightLevel = 4,
+		PreyDistance = 5,
+		PreyCount = 4,
+		PreyPosture = 6,
+		Predictability = 3,
+		LastChannel = 7, -- 6 channels + none
+		TimeSincePerception = 4,
+		TrailState = 4,
+		Injury = 4,
+		Metabolism = 4,
+		Confidence = 3,
+		Terrain = 3,
+		HazardNearby = 4,
+		RecentNoise = 4,
+	},
+}
+
+---------------------------------------------------------------------------
+-- Skeleton / IK (docs/03). Consumed by TendrilRig.
+---------------------------------------------------------------------------
+MonsterConfig.Rig = {
+	-- Cone limits taper along the tendril: stiff base, whippy tip.
+	MaxAngleProximal = 35,
+	MaxAngleDistal = 70,
+	Tolerance = 0.02,
+	MaxIterations = 8,
+	PlaneBias = 0.6,
+	RestBlendIdle = 0.35,
+	RestBlendUrgent = 0.0,
+	DampBaseStiffness = 30,
+	DampTipStiffness = 6,
+	NoiseAmplitude = 0.06,
+	NoiseFrequency = 0.7,
+	TaperExponent = 0.85, -- radius falloff along the chain
+}
+
+MonsterConfig.Locomotion = {
+	AnchorRayCount = 7,
+	AnchorRaySpreadDeg = 55,
+	MinAnchors = 2,
+	MaxAnchors = 4,
+	HaulSeconds = 0.35,
+	AnchorGrip = { Concrete = 1.0, Wood = 0.9, Metal = 0.8, Grass = 0.5, Glass = 0.2 },
+	GlideSpeedFraction = 0.45, -- open-ground fallback
+}
+
+---------------------------------------------------------------------------
+-- Archetypes (docs/02 §10). Adding a species = a new entry + a rig asset.
+---------------------------------------------------------------------------
+MonsterConfig.Archetypes = {
+	Braid = {
+		Enabled = true,
+		RigAsset = "Braid",
+		Actions = nil, -- nil = use MonsterConfig.Actions
+		Notes = "MVP generalist. All channels, all actions.",
+	},
+	Screamer = {
+		Enabled = false,
+		RigAsset = "Screamer",
+		GeneOverrides = { SenseAir = 1.0, SenseVibration = 0.15 },
+		ActionWhitelist = { "SEARCH", "STALK", "CHARGE", "FLUSH", "LURE" },
+		Notes = "Hunts by air-sound only; its call masks player hearing.",
+	},
+	Root = {
+		Enabled = false,
+		RigAsset = "Root",
+		GeneOverrides = { Speed = 0.0, TendrilLength = 1.0, SenseVibration = 1.0 },
+		ActionWhitelist = { "SEARCH", "AMBUSH", "FLUSH", "BREACH", "CONSUME" },
+		Notes = "Never relocates its core. A territory, not a pursuer.",
+	},
+}
+
+return MonsterConfig

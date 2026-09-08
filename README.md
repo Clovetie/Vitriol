@@ -1,0 +1,112 @@
+# VITRIOL
+
+A Roblox night-survival horror game about an **IK-controlled, blind, tendril
+creature** that hunts by vibration, scent and memory — and **learns your habits**.
+
+> **This repository is at Iteration 1: design, deep research, and a verified
+> pure-code foundation.** The docs are the deliverable; the Luau under `code/` is
+> the part that is already executable and tested.
+
+---
+
+## Read in this order
+
+| # | Document | What it settles |
+| --- | --- | --- |
+| 1 | [`docs/00-VISION.md`](docs/00-VISION.md) | Pillars, core loop, idea bank, scope, what AI builds vs what a human builds |
+| 2 | [`docs/01-ARCHITECTURE.md`](docs/01-ARCHITECTURE.md) | **Studio Explorer hierarchy**, ownership, tick budgets, replication rules |
+| 3 | [`docs/02-MONSTER-DESIGN.md`](docs/02-MONSTER-DESIGN.md) | Senses, memory, prediction, genetics, the RL specification |
+| 4 | [`docs/03-MONSTER-TECH.md`](docs/03-MONSTER-TECH.md) | FABRIK math, rig, anchor-and-haul movement, replication |
+| 5 | [`docs/04-KILL-CHOREOGRAPHY.md`](docs/04-KILL-CHOREOGRAPHY.md) | The procedural kill, body integrity, gore module contract |
+| 6 | [`docs/05-SURVIVAL.md`](docs/05-SURVIVAL.md) | Hunger/thirst coupling; `Parched`, `Starved`, `Collapse` |
+| 7 | [`docs/06-DAY-NIGHT.md`](docs/06-DAY-NIGHT.md) | Seamless cycle, keyframe table, client-authoritative lighting |
+| 8 | [`docs/07-DESTRUCTION-VEHICLES.md`](docs/07-DESTRUCTION-VEHICLES.md) | Breakable joint graph, integrity collapse, cars |
+| 9 | [`docs/08-RESEARCH-NOTES.md`](docs/08-RESEARCH-NOTES.md) | **Sourced** engine facts and gotchas |
+| 10 | [`docs/09-HANDOFF-PROMPTS.md`](docs/09-HANDOFF-PROMPTS.md) | Copy-paste prompts WP1–WP10 for the next iteration |
+| 11 | [`docs/10-HUMAN-AUTHORED.md`](docs/10-HUMAN-AUTHORED.md) | Briefs + hierarchies for map, UI, meshes, audio — **no code** |
+| — | [`ROADMAP.md`](ROADMAP.md) | Milestones and open decisions |
+
+---
+
+## The three findings that shape everything
+
+Research (2026-09-08) against the live Roblox documentation produced three
+non-obvious constraints. Every architectural decision follows from them. Full
+sources in [`docs/08-RESEARCH-NOTES.md`](docs/08-RESEARCH-NOTES.md).
+
+1. **`Lighting.ClockTime` is flagged `Not Replicated`.** A server-side day/night
+   system silently does nothing on clients. The clock is therefore published as a
+   replicated *value* and each client applies it locally (`LightingDriver`).
+
+2. **`Bone.Transform` is writable at runtime but bones are neither replicated nor
+   serialized.** Procedural bone animation is a *presentation* layer, so the
+   creature's skeleton is simulated on the server, packed into a `Buffer`, and
+   reconstructed per client.
+
+3. **`IKControl` is the wrong tool for this creature.** It needs a
+   `Humanoid`/`AnimationController` + `Animator`, has no notion of cone limits,
+   curl, taper or rest pose, and had a same-year regression (reported Feb 2026,
+   fixed May 2026). We implement **constrained FABRIK** ourselves instead — pure
+   Luau, unit-tested, and it is what makes the tendril character possible.
+
+---
+
+## Layout
+
+```
+docs/     11 design documents (the iteration-1 deliverable)
+code/     Copy-paste-ready Luau, mirroring the Studio Explorer tree
+tools/    The repo's analysis tooling + the Vitriol runtime smoke test
+ROADMAP.md
+```
+
+`code/` mirrors Explorer paths so the destination of each file is obvious, e.g.
+`code/ReplicatedStorage/Vitriol/Lib/Fabrik.luau` →
+`ReplicatedStorage > Vitriol > Lib > Fabrik (ModuleScript)`. Every file also
+states that path in a header comment.
+
+**There is no Rojo project and there must not be one** — the hierarchy is
+specified as a Studio Explorer tree (`docs/01-ARCHITECTURE.md` §2).
+
+---
+
+## Running the checks
+
+```bash
+npm --prefix tools install        # once
+
+node tools/vitriol-smoke-test.js  # EXECUTES the pure Luau modules (78 assertions)
+node tools/check-syntax.js $(find code -name '*.luau')
+node tools/metrics.js --src code
+node tools/hot-loop-scan.js --src code
+node tools/call-graph.js --src code
+node tools/find-dead-config.js --src code
+```
+
+`tools/vitriol-smoke-test.js` loads the **real** modules from `code/` into a
+Lua 5.3 VM (fengari) and asserts their behaviour — convergence, bone-length
+preservation, cone limits, determinism, genome budget projection, and that two
+different coil geometries produce different sever orders. It is not a
+reimplementation, so a regression in `Lib/` fails the suite.
+
+### Verified state at the end of iteration 1
+
+| Check | Result |
+| --- | --- |
+| `vitriol-smoke-test.js` | **78 passed, 0 failed** |
+| `check-syntax.js` | 11/12 OK. `Lib/RNG.luau` fails only because luaparse is a **Lua 5.1** parser and cannot read bitwise operators; the file executes under Lua 5.3 in the smoke test |
+| `metrics.js` | clean; highest complexity is `Genetics` (72) and `Fabrik` (68) |
+| `hot-loop-scan.js` | 7 flags, all `table.insert` in one-shot setup or per-sever paths — **none in a frame path** |
+| `call-graph.js` | all exports reported unused — expected; no consumers exist until WP1–WP10 |
+| `validate-project.js` | expects a Rojo project file; this project is Explorer-first by design |
+
+---
+
+## Outstanding dependency
+
+The project owner referenced a **"provided gore module"** which is **not present
+in this repository** (the tree contained only `tools/` at the start of this
+iteration). Rather than block, `docs/04-KILL-CHOREOGRAPHY.md` §3 specifies the
+exact contract that module must satisfy and `Config/GoreConfig.luau` defines a
+built-in fallback, so the kill system can be built and balanced before it lands.
+Only `Shared/GoreAdapter` changes when the real module arrives.
