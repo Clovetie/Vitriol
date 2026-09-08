@@ -3,9 +3,9 @@
 A Roblox night-survival horror game about an **IK-controlled, blind, tendril
 creature** that hunts by vibration, scent and memory — and **learns your habits**.
 
-> **This repository is at Iteration 1: design, deep research, and a verified
-> pure-code foundation.** The docs are the deliverable; the Luau under `code/` is
-> the part that is already executable and tested.
+> **This repository is at Iteration 2: the design bible from iteration 1, plus a
+> growing core of Luau that is executed under test.** `docs/` is the design; the
+> modules under `code/` are the parts that already run.
 
 ---
 
@@ -75,7 +75,7 @@ specified as a Studio Explorer tree (`docs/01-ARCHITECTURE.md` §2).
 ```bash
 npm --prefix tools install        # once
 
-node tools/vitriol-smoke-test.js  # EXECUTES the pure Luau modules (78 assertions)
+node tools/vitriol-smoke-test.js  # EXECUTES the pure Luau modules (198 assertions)
 node tools/check-syntax.js $(find code -name '*.luau')
 node tools/metrics.js --src code
 node tools/hot-loop-scan.js --src code
@@ -89,15 +89,17 @@ preservation, cone limits, determinism, genome budget projection, and that two
 different coil geometries produce different sever orders. It is not a
 reimplementation, so a regression in `Lib/` fails the suite.
 
-### Verified state at the end of iteration 1
+### Verified state
+
+Re-run every time; these are the numbers the tools actually printed.
 
 | Check | Result |
 | --- | --- |
-| `vitriol-smoke-test.js` | **78 passed, 0 failed** |
-| `check-syntax.js` | 11/12 OK. `Lib/RNG.luau` fails only because luaparse is a **Lua 5.1** parser and cannot read bitwise operators; the file executes under Lua 5.3 in the smoke test |
-| `metrics.js` | clean; highest complexity is `Genetics` (72) and `Fabrik` (68) |
+| `vitriol-smoke-test.js` | **198 passed, 0 failed** |
+| `check-syntax.js` | 20/22 OK. `Lib/RNG.luau` and `Lib/Noise.luau` fail only because luaparse is a **Lua 5.1** parser and cannot read bitwise operators; both execute under Lua 5.3 in the smoke test |
+| `metrics.js` | 22 files, 4,598 LOC, 152 exports, comment ratio 19.5%. Highest complexity: `QLearning` (85), `Genetics` (72), `Fabrik` (68) |
 | `hot-loop-scan.js` | 7 flags, all `table.insert` in one-shot setup or per-sever paths — **none in a frame path** |
-| `call-graph.js` | all exports reported unused — expected; no consumers exist until WP1–WP10 |
+| `call-graph.js` | 152 exports, 2 used (`NoiseField` → `SpatialHash`, `Tables`), 150 orphaned — expected; consumers arrive with WP2–WP10 |
 | `validate-project.js` | expects a Rojo project file; this project is Explorer-first by design |
 
 ---

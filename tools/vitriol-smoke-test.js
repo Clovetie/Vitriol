@@ -32,7 +32,17 @@ const MODULES = {
 	RNG: "code/ReplicatedStorage/Vitriol/Lib/RNG.luau",
 	Fabrik: "code/ReplicatedStorage/Vitriol/Lib/Fabrik.luau",
 	Genetics: "code/ReplicatedStorage/Vitriol/Lib/Genetics.luau",
+	Tables: "code/ReplicatedStorage/Vitriol/Lib/Tables.luau",
+	Signal: "code/ReplicatedStorage/Vitriol/Lib/Signal.luau",
+	Noise: "code/ReplicatedStorage/Vitriol/Lib/Noise.luau",
+	SpatialHash: "code/ReplicatedStorage/Vitriol/Lib/SpatialHash.luau",
+	UtilityAI: "code/ReplicatedStorage/Vitriol/Lib/UtilityAI.luau",
+	QLearning: "code/ReplicatedStorage/Vitriol/Lib/QLearning.luau",
+	MarkovPredictor: "code/ReplicatedStorage/Vitriol/Lib/MarkovPredictor.luau",
 	RegionIntegrity: "code/ReplicatedStorage/Vitriol/Shared/RegionIntegrity.luau",
+	Skeleton: "code/ReplicatedStorage/Vitriol/Shared/Skeleton.luau",
+	SkeletonCodec: "code/ReplicatedStorage/Vitriol/Shared/SkeletonCodec.luau",
+	NoiseField: "code/ReplicatedStorage/Vitriol/Shared/NoiseField.luau",
 };
 
 // ---------------------------------------------------------------------------
@@ -51,6 +61,7 @@ function transformLuau(src, label) {
 	let typeDepth = 0;
 	let inBlockComment = false;
 	let inFnHead = false;
+	let parenDebt = 0;
 
 	for (let raw of lines) {
 		const trimmed = raw.trim();
@@ -68,6 +79,20 @@ function transformLuau(src, label) {
 		}
 
 		const isComment = trimmed.startsWith("--");
+
+		// A compound assignment whose right-hand side spans several lines cannot
+		// be closed on the same line, so the opening paren is left open here and
+		// closed on the line where the expression actually ends.
+		if (!isComment && parenDebt > 0) {
+			parenDebt -= (raw.match(/\)/g) || []).length - (raw.match(/\(/g) || []).length;
+			if (parenDebt <= 0) {
+				// Exactly one wrapper paren is outstanding: each compound
+				// assignment opens one, and a second cannot start before the
+				// first expression ends.
+				raw += ")";
+				parenDebt = 0;
+			}
+		}
 
 		if (!isComment) {
 			// Strip `type X = ...` / `export type X = ...` (multi-line aware).
@@ -122,10 +147,26 @@ function transformLuau(src, label) {
 			// Type assertion casts: `expr :: T` -> `expr`
 			raw = raw.replace(/\s*::\s*[A-Za-z_][\w?|{}]*/g, "");
 
+			// require(script.Parent.Parent.Lib.Foo) -> VitriolRequire("Foo").
+			// Shipping modules must use real `require()` with a real Instance path;
+			// the harness resolves the LAST path segment against the flat MODULES
+			// map. Without this, any module that has a dependency is untestable here.
+			raw = raw.replace(/require\(\s*([A-Za-z_][\w.:]*)\s*\)/g, (_all, path) => {
+				const parts = path.split(/[.:]/).filter(Boolean);
+				return `VitriolRequire("${parts[parts.length - 1]}")`;
+			});
+
 			// Compound assignment.
 			const m = raw.match(/^(\s*)([A-Za-z_][\w.[\]"']*)\s*(\+=|-=|\*=|\/=)(.+)$/);
 			if (m) {
-				raw = `${m[1]}${m[2]} = ${m[2]} ${m[3][0]} (${m[4].trim()})`;
+				const rhs = m[4].trim();
+				const unbalanced = (rhs.match(/\(/g) || []).length - (rhs.match(/\)/g) || []).length;
+				if (unbalanced > 0) {
+					raw = `${m[1]}${m[2]} = ${m[2]} ${m[3][0]} (${rhs}`;
+					parenDebt = unbalanced;
+				} else {
+					raw = `${m[1]}${m[2]} = ${m[2]} ${m[3][0]} (${rhs})`;
+				}
 			}
 
 			// Generalized iteration.

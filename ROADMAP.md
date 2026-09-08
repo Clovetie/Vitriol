@@ -23,6 +23,38 @@ Brainstorming, deep research, architecture, and a verified pure-code foundation.
 | `Config/{Game,DayNight,Monster,Survival,Destruction,Vehicle,Gore}Config` | ✅ |
 | `tools/vitriol-smoke-test.js` + 78 runtime assertions | ✅ |
 
+## Iteration 2 — **this one** 🟨
+
+Building the verified foundation outward, one work package at a time. Every module
+below is *executed* by `tools/vitriol-smoke-test.js`, not merely parsed.
+
+| Deliverable | Status |
+| --- | --- |
+| WP1 `Lib/Tables` — object pool (zero-allocation hot paths) | ✅ |
+| WP1 `Lib/Signal` — connect/once/fire, safe disconnect during fire | ✅ |
+| WP1 `Lib/Noise` — seeded value noise (permutation table) | ✅ |
+| WP1 `Lib/SpatialHash` — fixed-cell spatial index + decay sampling | ✅ |
+| WP1 `Lib/UtilityAI` — softmax option selection | ✅ |
+| WP1 `Lib/QLearning` — linear Q, replacing traces, Boltzmann + instinct prior | ✅ |
+| WP1 `Lib/MarkovPredictor` — player-pattern prediction + predictability | ✅ |
+| WP3 `Shared/Skeleton` — flat-array joint chain, Fabrik-compatible | ✅ |
+| WP3 `Shared/SkeletonCodec` — core-relative quantisation, DPCM feedback | ✅ |
+| WP3 `Shared/NoiseField` — 6-channel decaying impulse field | ✅ |
+| Harness: `require()` shim + multi-line `+=` support | ✅ |
+| 198 runtime assertions (was 78) | ✅ |
+| WP2 `Shared/Remotes`, `Shared/NetContract` | ⬜ |
+| WP4 `Services/*`, `Bootstrap` | ⬜ |
+
+### Bugs found by writing the code (all fixed, all now regression-tested)
+
+| Where | What was wrong |
+| --- | --- |
+| `Lib/Noise` | xorshift32 used as a *lattice hash* collapsed to a near-constant (`value1(i)` spanned 0.0742–0.0816 over 64 samples — a dynamic range of 0.007). Replaced with a seeded permutation table. |
+| `Lib/Noise` | the Fisher–Yates draw divided by 2⁴⁸ instead of 2³², so the shuffle was a fixed near-reversal. |
+| `Lib/SpatialHash` | re-`insert`ing an existing id left `entries[id]` pointing at the old table with stale coordinates, while the cell index used the new ones. |
+| `Lib/QLearning` | trace decay skipped the taken action, so stale eligibilities stayed pinned at 1.0 and credit flowed back at full strength forever. |
+| `Shared/SkeletonCodec` | parent-relative quantisation (as originally specified in `docs/03` §7.1) costs 0.02748 studs at the tip vs a 0.00866 budget; switched to core-relative and corrected the doc. |
+
 ## Milestones
 
 ### M0 — Foundations ✅ (this iteration)

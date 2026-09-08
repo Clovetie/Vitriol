@@ -474,14 +474,24 @@ unambiguous even without Studio open.
 Explorer-first, so treat its "missing project file" output as expected rather than
 a failure. Everything else must be green.
 
-Two documented exceptions, both verified at iteration 1:
+Three documented exceptions, all verified by running the tools:
 
 - `tools/check-syntax.js` uses **luaparse (Lua 5.1)**, which cannot parse bitwise
-  operators or `{T}?` optional type annotations. `Lib/RNG.luau` legitimately uses
-  bitwise ops (xorshift32) and will always fail this one tool; it is instead
-  *executed* for real by `vitriol-smoke-test.js` under Lua 5.3, which is stronger
-  evidence than a parse. Prefer `any` over `{T}?` elsewhere so the parser stays
-  useful.
+  operators or `{T}?` optional type annotations. `Lib/RNG.luau` (xorshift32) and
+  `Lib/Noise.luau` (permutation-table indexing) legitimately use bitwise ops and
+  will always fail this one tool; both are instead *executed* for real by
+  `vitriol-smoke-test.js` under Lua 5.3, which is stronger evidence than a parse.
+  Prefer `any` over `{T}?` elsewhere so the parser stays useful.
+- Both `check-syntax.js` and `vitriol-smoke-test.js` expand the Luau compound
+  assignment operators (`+=` and friends) **on one line**. A multi-line
+  right-hand side — `total += f(x, function() ... end)` — therefore breaks them.
+  Assign to a local first, then accumulate. (`vitriol-smoke-test.js` now tracks
+  the open paren across lines; `check-syntax.js` does not, so treat the one-line
+  form as the rule.)
+- `Shared/NoiseField.luau` and any other module that `require`s a sibling is only
+  testable because `vitriol-smoke-test.js` rewrites `require(script.Parent.X.Foo)`
+  to a lookup of the last path segment in its `MODULES` map. **A new module with a
+  dependency must be added to that map** or the harness cannot load it.
 - `tools/call-graph.js` and `tools/find-dead-config.js` will report every
   `Lib`/`Shared` export and Config key as unused until WP1–WP10 build their
   consumers. That is the expected state of a foundations iteration, not a defect —

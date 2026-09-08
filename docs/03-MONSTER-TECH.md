@@ -269,11 +269,25 @@ A mangled player is harder to escape — systems compounding (P7).
 | --- | --- | --- |
 | creatureId | uint8 | 1 |
 | tick / snapshot seq | uint16 | 2 |
-| core position | 3 × int16 (0.02 stud quantised, relative to last core) | 6 |
+| core position | 3 × int16 (0.02 stud quantised, delta from the last **reconstructed** core) | 6 |
 | core orientation | 4 × int8 (quantised quaternion) | 4 |
-| per joint | 3 × int16 (offset from parent joint, 0.01 stud) | 6 |
+| per joint | 3 × int16 (offset from the **core**, 0.01 stud) | 6 |
 
 8 tendrils × 12 joints = 96 joints → **~590 B per snapshot**.
+
+Two details that are easy to get wrong, both asserted in `tools/vitriol/tests.luau`:
+
+- **Joints are offsets from the core, not from their parent joint.** Quantising
+  against the parent and decoding by accumulation lets each joint's rounding error
+  feed into the next: measured on a 12-joint pose, **0.02748 studs** at the tip,
+  against a 0.00866 stud budget. Core-relative error does not grow with joint
+  index. (`Shared/SkeletonCodec`'s header records the full argument, including why
+  the parent-relative *with feedback* variant is bounded but costs more state.)
+- **The core delta is measured from the last *reconstructed* core, not the last
+  true one.** `encode` returns the core the client will compute, and the caller
+  passes it back as the reference next snapshot. Without that feedback the core
+  random-walks; with it the error is bounded — asserted over 1,000 snapshots of a
+  creature travelling 137 studs.
 
 | Rate | Payload | Bandwidth |
 | --- | --- | --- |
