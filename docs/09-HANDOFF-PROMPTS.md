@@ -38,7 +38,8 @@ Hard rules:
   9. If something is better made by a human (meshes, map, UI, audio, animations),
      do NOT generate it. Extend docs/10-HUMAN-AUTHORED.md with a precise spec and
      hierarchy instead.
- 10. Update docs/ROADMAP.md status when you finish a WP.
+ 10. Update the root ROADMAP.md status when you finish a WP (it is at the repo
+     root, not under docs/).
 
 Roblox docs are available as Markdown: append .md to any create.roblox.com/docs
 URL, or fetch https://create.roblox.com/docs/reference/engine/llms.txt for the
@@ -47,7 +48,7 @@ engine API index. Prefer that over searching.
 
 ---
 
-## WP1 — Pure math core + tests  ✅ *partially delivered by iteration 1*
+## WP1 — Pure math core + tests  ✅ *delivered: iterations 1 and 2*
 
 **Status:** `Lib/RNG`, `Lib/Fabrik`, `Lib/Genetics` and the smoke harness exist.
 Remaining: `MathExt`, `Noise`, `SpatialHash`, `UtilityAI`, `QLearning`,
@@ -101,7 +102,14 @@ reader that needs it. Do not leave speculative knobs.
 
 ---
 
-## WP3 — Shared layer: Skeleton, SkeletonCodec, NoiseField, Remotes
+## WP3 — Shared layer: Skeleton, SkeletonCodec, NoiseField, Remotes  🟨 *partial*
+
+> Delivered and tested: `Skeleton`, `SkeletonCodec`, `NoiseField`. Still owed:
+> `Remotes`, `NetContract`; `Skeleton:reset()`; the quantised-quaternion core
+> orientation in the codec payload (docs/03 §7.1 lists 4 bytes for it, the codec
+> currently emits none); `buffer` adapters for `encode`/`decode`; wind advection,
+> rain masking and the material-coupling table in `NoiseField`; and the
+> 200-random-chain round-trip test this WP asks for.
 
 ```
 Implement the Shared modules from docs/01-ARCHITECTURE.md §2 under
