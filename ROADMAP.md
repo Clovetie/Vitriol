@@ -62,7 +62,7 @@ executing real code. Everything below is *run*, not parsed.
 | WP4 `SessionService` / `ThreatService` / `HealthService` + `Bootstrap` + `Main` | ✅ |
 | WP4 `Diagnostics/Profiler` — per-cadence budget watchdog, auto-degrade one LOD tier | ✅ |
 | WP4 `RemoteHandlers/{ClientIntentHandler,DebugHandler}` — validation applied; `RF_DebugQuery` is read-only by schema | ✅ |
-| New gate: `tools/vitriol-session-test.js` (fake DataModel + virtual clock), 78 assertions | ✅ |
+| New gate: `tools/vitriol-session-test.js` (fake DataModel + virtual clock), 80 assertions | ✅ |
 | 363 runtime assertions in the smoke test (was 198) | ✅ |
 | WP2 remainder — `find-dead-config` still reports blocks whose readers arrive in WP5–WP10 (`Genes`, `Memory`, `Prediction`, `CollisionGroups`, `Tags`, `AnimationIds`, …) | ⬜ |
 
@@ -103,7 +103,7 @@ Design locked, pure math core executing under test, all tunables in Config.
 `Bootstrap` on a fake DataModel with a virtual clock and asserts that a zero-player
 server runs a full cycle, logs exactly one line per phase change with the elapsed time,
 never touches `Lighting`, and registers exactly two `Heartbeat` connections (the
-cadence pump and the watchdog). 78 assertions, 0 failures.
+cadence pump and the watchdog). 80 assertions, 0 failures.
 
 ### M2 — The body, no brain (WP5) ⬜
 `TendrilRig`, `Locomotion`, `CreatureCore`, part-mode renderer, `BulkMoveTo`

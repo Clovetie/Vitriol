@@ -106,7 +106,7 @@ Iteration 3's work is committed on `arena/01a08196-vitriol` (WP3 close-out + WP4
 | `vitriol-smoke-test.js` | `VITRIOL smoke test: 363 passed, 0 failed` |
 | `vitriol-session-test.js` | `VITRIOL session test: 80 passed, 0 failed` |
 | `check-syntax.js code` | 34 OK / `2 file(s) failed` — `Lib/RNG.luau`, `Lib/Noise.luau` (§3) |
-| `metrics.js --src code` | `LOC 8944 \| code 6239 \| comments 1978 \| exports 305 \| requires 24` (36 files) |
+| `metrics.js --src code` | `LOC 8945 \| code 6240 \| comments 1978 \| exports 305 \| requires 24` (36 files) |
 | `hot-loop-scan.js --src code` | `Priced calls: 16 \| inside-a-loop: 7 \| in a RunService file: 0` |
 | `call-graph.js --src code` | `Exports: 305 (used 11, orphaned 294)` — the graph has real edges now: `Bootstrap -> NoiseField/CadenceService/Remotes`, `ClientIntentHandler -> NetContract.stats`, `DebugHandler -> Time/Threat/Health/Cadence snapshots` |
 | `find-dead-config.js --src code` | only the two hard-coded `src/...Gerstner...: not found` lines |
@@ -170,7 +170,10 @@ iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSl
 - `Main` (Script) — requires Bootstrap, calls `ensure()`. The only server Script that runs on its own by design.
 - `RemoteHandlers/ClientIntentHandler` (Script) — `NetContract.admit` → route table filled by services (`runtime:routeIntent`), counts unrouted, `runtime.intentStats()`.
 - `RemoteHandlers/DebugHandler` (Script) — `RF_DebugQuery` `OnServerInvoke`, read-only: `clock/phases/cadence/budget/help`.
-- `Diagnostics/Profiler` (Script) — one 1 Hz slot: reads `CadenceService:stats` +
+- `Diagnostics/Profiler` (Script) — binds `RunService.Heartbeat` **itself**: the only
+  binding besides `Bootstrap`'s pump, and it lives outside `CadenceService` on purpose
+  (a slot the scheduler fails to run would blind the watchdog that detects exactly
+  that). It only *reads*: `CadenceService:stats` +
   `summary`, drops one LOD tier after `WatchdogSamples` consecutive over-budget
   windows and walks it back a tier at a time when they come in under (there is no
   separate "recover" entry point — recovery is the same poll), replicates
@@ -202,7 +205,10 @@ throws rather than mangling**, so tested code must avoid:
 
 Module resolution differs between the two, on purpose:
 - `vitriol-smoke-test.js` uses a hand-kept `MODULES` map — **add new modules to it**,
-  including indirect `require`s.
+  including indirect `require`s. `Services/*` are deliberately **not** in it: a service
+  needs the fake DataModel, the poisoned `task`/`Lighting` and the virtual clock, which
+  is the session harness's job. Put reusable logic in `Shared/` or `Lib/` and unit it in
+  the smoke test; the service stays thin enough to test by booting it.
 - `vitriol-session-test.js` scans all of `code/` and resolves `require(...)` by
   **last path segment**, so two files with the same basename is a hard error (the
   harness says so and exits).
@@ -329,8 +335,10 @@ core-relative vs parent-relative quantisation). Iteration 3 added:
    `|tendril velocity| × grip × region vulnerability`; zero integrity severs, then
    hands off via `GoreAdapter`.
 8. **One scheduler.** `CadenceService` is driven by Bootstrap's single
-   `RunService.Heartbeat` binding; services register slots. Consequence worth
-   remembering when you add one: the file that touches `RunService` must contain no
+   `RunService.Heartbeat` binding and every piece of *gameplay* work is a registered
+   slot on it. The only other binding is the Profiler's read-only watchdog, deliberately
+   outside the scheduler it audits; the session harness asserts the total is exactly 2,
+   so neither number can creep. Consequence worth remembering when you add one: the file that touches `RunService` must contain no
    priced call, so measurement lives inside `CadenceService:_runSlot` and the frame
    `dt` is passed in rather than timed. `hot-loop-scan.js`'s "in a RunService file:
    0" is the visible sign that this is holding.
