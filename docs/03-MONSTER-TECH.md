@@ -262,20 +262,35 @@ A mangled player is harder to escape — systems compounding (P7).
 ## 7. Replication of the creature
 
 ### 7.1 Payload
-`Shared/SkeletonCodec` packs **positions only** (client derives orientation with
-`CFrame.lookAt` + its own stable-up logic):
+`Shared/SkeletonCodec` packs **joint positions plus one rotation: the core's.**
+Tendril orientation is derived locally from consecutive joint positions, but the
+core's cannot be: `§5.1` derives it from the anchor-centroid normal, which the
+client never sees, and a `CFrame.lookAt(forward, worldUp)` reconstruction rolls at
+exactly the moment the core moves straight up or straight down - i.e. during the
+wall and ceiling traversal this creature is built around. Four bytes buy that
+whole bug class out, and the skinned-mesh mode (`§4`, mode B) needs a core CFrame
+to place its root bone anyway.
 
 | Field | Type | Bytes |
 | --- | --- | --- |
 | creatureId | uint8 | 1 |
 | tick / snapshot seq | uint16 | 2 |
 | core position | 3 × int16 (0.02 stud quantised, delta from the last **reconstructed** core) | 6 |
-| core orientation | 4 × int8 (quantised quaternion) | 4 |
+| core orientation | 4 × int8 (quantised quaternion, xyzw, renormalised on decode) | 4 |
 | per joint | 3 × int16 (offset from the **core**, 0.01 stud) | 6 |
 
-8 tendrils × 12 joints = 96 joints → **~590 B per snapshot**.
+8 tendrils × 12 joints = 96 joints → **589 B per snapshot** (header 13 B, asserted
+by `SkeletonCodec.byteCount` in the smoke test).
 
-Two details that are easy to get wrong, both asserted in `tools/vitriol/tests.luau`:
+The quaternion is `±127` per component, so `±1/254` before renormalisation: worst
+case **0.91°** (`SkeletonCodec.MAX_ANGLE_ERROR`, measured worst over 200,000 random
+orientations 0.85°). That displacement only touches the core *mesh* and the frame
+tendrils hang from — 0.13 studs at an 8-stud radius (`coreDisplacement(8)`) — because
+joint positions are absolute and never inherit it. It is an absolute channel, not a
+DPCM one: the server encodes its own true orientation every snapshot, so even a 1
+LSB difference when a client re-quantises a decoded quaternion cannot accumulate.
+
+Three details that are easy to get wrong, all asserted in `tools/vitriol/tests.luau`:
 
 - **Joints are offsets from the core, not from their parent joint.** Quantising
   against the parent and decoding by accumulation lets each joint's rounding error
@@ -288,12 +303,22 @@ Two details that are easy to get wrong, both asserted in `tools/vitriol/tests.lu
   passes it back as the reference next snapshot. Without that feedback the core
   random-walks; with it the error is bounded — asserted over 1,000 snapshots of a
   creature travelling 137 studs.
+- **The round trip is tested over 200 RANDOM chains, not one pose.** Random
+  tendrils (1–8 tendrils × 2–16 joints, bone-preserving random walks, random core
+  and orientation) with max positional error **0.00820 studs** against the 0.02
+  budget; the same sweep through the naive parent-relative scheme reaches
+  **0.03955**. One hand-picked pose is how a quantisation bug ships.
+
+`Creature/Replicator` (server) is the only writer. It keeps the codec array-only and
+pure, converts that array with `buffer.create` + `buffer.writeu8`, and the harness
+proves both representations carry identical bytes (see `docs/01` §13 for the
+`buffer` shim that makes that executable).
 
 | Rate | Payload | Bandwidth |
 | --- | --- | --- |
-| `NEAR` 15 Hz | 590 B | **~8.9 KB/s per creature** |
-| `MID` 8 Hz, 8 joints/tendril | ~400 B | ~3.2 KB/s |
-| `FAR` 4 Hz, 4 joints/tendril | ~200 B | ~0.8 KB/s |
+| `NEAR` 15 Hz | 589 B | **~8.8 KB/s per creature** |
+| `MID` 8 Hz, 8 joints/tendril | ~397 B | ~3.2 KB/s |
+| `FAR` 4 Hz, 4 joints/tendril | ~205 B | ~0.8 KB/s |
 
 Only sent to players inside `GameConfig.LOD.StreamRadius`. Two creatures at `NEAR`
 ≈ 18 KB/s — comfortable. **Never** use per-joint attributes or one remote per joint.

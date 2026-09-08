@@ -7,8 +7,9 @@
 //      Lua 5.3: strips `type` aliases and type annotations, rewrites compound
 //      assignment, and generalises `for x in t`.
 //   2. Runs them inside fengari (a Lua 5.3 VM in JS) with a tiny shim for the
-//      Luau-only stdlib functions the modules use (table.create/clone/find/clear,
-//      math.clamp).
+//      Luau-only stdlib the modules use (table.create/clone/find/clear, math.clamp,
+//      and `buffer` - see PREAMBLE - which is what lets Creature/Replicator's
+//      byte-array <-> Buffer adapters be executed, not just read).
 //   3. Executes tools/vitriol/tests.luau and prints PASS/FAIL per assertion.
 //
 // The modules under test are deliberately PURE (no game:GetService, no Instances,
@@ -39,158 +40,28 @@ const MODULES = {
 	UtilityAI: "code/ReplicatedStorage/Vitriol/Lib/UtilityAI.luau",
 	QLearning: "code/ReplicatedStorage/Vitriol/Lib/QLearning.luau",
 	MarkovPredictor: "code/ReplicatedStorage/Vitriol/Lib/MarkovPredictor.luau",
+	// Config is pure data with no requires, so the modules that consume it
+	// (NoiseField, NetContract, TimeModel, Remotes) can be loaded for real.
+	GameConfig: "code/ReplicatedStorage/Vitriol/Config/GameConfig.luau",
+	DayNightConfig: "code/ReplicatedStorage/Vitriol/Config/DayNightConfig.luau",
+	MonsterConfig: "code/ReplicatedStorage/Vitriol/Config/MonsterConfig.luau",
+	SurvivalConfig: "code/ReplicatedStorage/Vitriol/Config/SurvivalConfig.luau",
 	RegionIntegrity: "code/ReplicatedStorage/Vitriol/Shared/RegionIntegrity.luau",
 	Skeleton: "code/ReplicatedStorage/Vitriol/Shared/Skeleton.luau",
 	SkeletonCodec: "code/ReplicatedStorage/Vitriol/Shared/SkeletonCodec.luau",
 	NoiseField: "code/ReplicatedStorage/Vitriol/Shared/NoiseField.luau",
+	Remotes: "code/ReplicatedStorage/Vitriol/Shared/Remotes.luau",
+	NetContract: "code/ReplicatedStorage/Vitriol/Shared/NetContract.luau",
+	TimeModel: "code/ReplicatedStorage/Vitriol/Shared/TimeModel.luau",
+	// ServerStorage, but its codec/adapter half is pure Lua + a `buffer` shim, which
+	// is what the Replicator parity test needs to prove array/buffer agreement.
+	Replicator: "code/ServerStorage/Vitriol/Creature/Replicator.luau",
 };
 
 // ---------------------------------------------------------------------------
-// Luau -> Lua 5.3 transform
+// Luau -> Lua 5.3 transform (shared with vitriol-session-test.js; see tools/lib)
 // ---------------------------------------------------------------------------
-//
-// Deliberately stricter than a general Luau parser: rather than silently
-// mangling constructs it does not understand, it THROWS. Pure modules are
-// expected to avoid multi-line function heads, `continue`, interpolated strings
-// and generics; if a future module uses one, this fails loudly instead of
-// testing something other than what was written.
-function transformLuau(src, label) {
-	const lines = src.split("\n");
-	const out = [];
-	let inTypeBlock = false;
-	let typeDepth = 0;
-	let inBlockComment = false;
-	let inFnHead = false;
-	let parenDebt = 0;
-
-	for (let raw of lines) {
-		const trimmed = raw.trim();
-
-		// Block comments: pass through untouched.
-		if (inBlockComment) {
-			if (/\]\]/.test(trimmed)) inBlockComment = false;
-			out.push(raw);
-			continue;
-		}
-		if (/^--\[\[/.test(trimmed)) {
-			inBlockComment = !/\]\]/.test(trimmed.slice(4));
-			out.push(raw);
-			continue;
-		}
-
-		const isComment = trimmed.startsWith("--");
-
-		// A compound assignment whose right-hand side spans several lines cannot
-		// be closed on the same line, so the opening paren is left open here and
-		// closed on the line where the expression actually ends.
-		if (!isComment && parenDebt > 0) {
-			parenDebt -= (raw.match(/\)/g) || []).length - (raw.match(/\(/g) || []).length;
-			if (parenDebt <= 0) {
-				// Exactly one wrapper paren is outstanding: each compound
-				// assignment opens one, and a second cannot start before the
-				// first expression ends.
-				raw += ")";
-				parenDebt = 0;
-			}
-		}
-
-		if (!isComment) {
-			// Strip `type X = ...` / `export type X = ...` (multi-line aware).
-			if (inTypeBlock) {
-				typeDepth += (raw.match(/[{(]/g) || []).length;
-				typeDepth -= (raw.match(/[})]/g) || []).length;
-				if (typeDepth <= 0) inTypeBlock = false;
-				out.push("-- (type declaration stripped)");
-				continue;
-			}
-			if (/^\s*(export\s+)?type\s+[A-Za-z_]\w*\s*=/.test(raw)) {
-				typeDepth = (raw.match(/[{(]/g) || []).length - (raw.match(/[})]/g) || []).length;
-				inTypeBlock = typeDepth > 0;
-				out.push("-- (type declaration stripped)");
-				continue;
-			}
-
-			if (/\bcontinue\b/.test(raw)) {
-				throw new Error(`${label}: \`continue\` is not supported by the smoke harness: ${trimmed}`);
-			}
-			if (/`/.test(raw)) {
-				throw new Error(`${label}: interpolated strings are not supported by the smoke harness: ${trimmed}`);
-			}
-
-			// Function declarations: drop the return annotation, then param
-			// annotations. Heads may span several lines, so track whether the
-			// parameter list is still open.
-			if (inFnHead) {
-				// Continuation lines of a multi-line parameter list can only
-				// contain a `:` for a type annotation (the method `:` of a
-				// `function Foo:bar()` head is on the opening line), so strip
-				// them without needing a lookahead - the last param on a line
-				// has no trailing comma to anchor on.
-				const closes = /\)/.test(raw);
-				let l = raw;
-				if (closes) l = l.replace(/^(.*\))\s*:\s*.*$/, "$1");
-				l = l.replace(/:\s*[A-Za-z_{][^,()=]*/g, "");
-				raw = l;
-				if (closes) inFnHead = false;
-			} else if (/^\s*(local\s+)?function\b/.test(raw)) {
-				const noReturn = raw.replace(/^(.*\))\s*:\s*.*$/, "$1");
-				raw = noReturn.replace(/:\s*[A-Za-z_{][^,()=]*?(?=[,)])/g, "");
-				const opens = (raw.match(/\(/g) || []).length;
-				const closes = (raw.match(/\)/g) || []).length;
-				if (opens > closes) inFnHead = true;
-			}
-
-			// `local x: T = v` / `local x: T`
-			raw = raw.replace(/^(\s*local\s+[A-Za-z_]\w*)\s*:\s*[A-Za-z_][\w?]*\s*=\s*/, "$1 = ");
-			raw = raw.replace(/^(\s*local\s+[A-Za-z_]\w*)\s*:\s*[A-Za-z_][\w?]*\s*$/, "$1");
-
-			// Type assertion casts: `expr :: T` -> `expr`
-			raw = raw.replace(/\s*::\s*[A-Za-z_][\w?|{}]*/g, "");
-
-			// require(script.Parent.Parent.Lib.Foo) -> VitriolRequire("Foo").
-			// Shipping modules must use real `require()` with a real Instance path;
-			// the harness resolves the LAST path segment against the flat MODULES
-			// map. Without this, any module that has a dependency is untestable here.
-			raw = raw.replace(/require\(\s*([A-Za-z_][\w.:]*)\s*\)/g, (_all, path) => {
-				const parts = path.split(/[.:]/).filter(Boolean);
-				return `VitriolRequire("${parts[parts.length - 1]}")`;
-			});
-
-			// Compound assignment.
-			const m = raw.match(/^(\s*)([A-Za-z_][\w.[\]"']*)\s*(\+=|-=|\*=|\/=)(.+)$/);
-			if (m) {
-				const rhs = m[4].trim();
-				const unbalanced = (rhs.match(/\(/g) || []).length - (rhs.match(/\)/g) || []).length;
-				if (unbalanced > 0) {
-					raw = `${m[1]}${m[2]} = ${m[2]} ${m[3][0]} (${rhs}`;
-					parenDebt = unbalanced;
-				} else {
-					raw = `${m[1]}${m[2]} = ${m[2]} ${m[3][0]} (${rhs})`;
-				}
-			}
-
-			// Generalized iteration.
-			const fm = raw.match(/^(\s*for\s+[A-Za-z_][\w,\s]*?\s+)in\s+(.+?)\s+do$/);
-			if (fm && !/^(pairs|ipairs|next)\s*\(/.test(fm[2].trim())) {
-				raw = `${fm[1]}in pairs(${fm[2]}) do`;
-			}
-		}
-
-		out.push(raw);
-	}
-
-	if (inTypeBlock) throw new Error(`${label}: unterminated type declaration`);
-	return out.join("\n");
-}
-
-function luaLongString(level, s) {
-	const eq = "=".repeat(level);
-	return `[${eq}[${s}]${eq}]`;
-}
-
-function read(p) {
-	return fs.readFileSync(path.join(ROOT, p), "utf8");
-}
+const { transformLuau, luaLongString, read } = require("./lib/luau-transform");
 
 // ---------------------------------------------------------------------------
 // Bundle
@@ -239,6 +110,39 @@ math.clamp = function(x, lo, hi)
 	if x > hi then return hi end
 	return x
 end
+
+-- The Roblox buffer library, minimal but faithful to the documented semantics
+-- (create/len/readu8/writeu8; offsets are 0-based and fixed-size; an access
+-- outside the buffer errors; writeu8 requires an integer in [0,255]).
+-- It exists so Creature/Replicator's adapters can be EXECUTED here rather than
+-- eyeballed: what this proves is the adapter's indexing arithmetic and byte
+-- fidelity, not Roblox's allocator.
+buffer = {
+	create = function(size)
+		if type(size) ~= "number" or size < 0 or size ~= math.floor(size) then
+			error("buffer.create: size must be a non-negative integer", 2)
+		end
+		return { __size = size, __bytes = table.create(size, 0) }
+	end,
+	len = function(b)
+		return b.__size
+	end,
+	writeu8 = function(b, offset, value)
+		if type(offset) ~= "number" or offset < 0 or offset >= b.__size then
+			error("buffer.writeu8: offset out of range", 2)
+		end
+		if type(value) ~= "number" or value < 0 or value > 255 or value ~= math.floor(value) then
+			error("buffer.writeu8: value must be an integer in [0,255]", 2)
+		end
+		b.__bytes[offset + 1] = value
+	end,
+	readu8 = function(b, offset)
+		if type(offset) ~= "number" or offset < 0 or offset >= b.__size then
+			error("buffer.readu8: offset out of range", 2)
+		end
+		return b.__bytes[offset + 1]
+	end,
+}
 
 LOGSTRING = ""
 local origPrint = print

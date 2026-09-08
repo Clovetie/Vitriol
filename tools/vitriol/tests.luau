@@ -19,6 +19,13 @@ local RegionIntegrity = VitriolRequire("RegionIntegrity")
 local Skeleton = VitriolRequire("Skeleton")
 local SkeletonCodec = VitriolRequire("SkeletonCodec")
 local NoiseField = VitriolRequire("NoiseField")
+local GameConfig = VitriolRequire("GameConfig")
+local DayNightConfig = VitriolRequire("DayNightConfig")
+local MonsterConfig = VitriolRequire("MonsterConfig")
+local Remotes = VitriolRequire("Remotes")
+local NetContract = VitriolRequire("NetContract")
+local Replicator = VitriolRequire("Replicator")
+local TimeModel = VitriolRequire("TimeModel")
 
 TESTS = { passed = 0, failed = 0 }
 
@@ -941,6 +948,736 @@ check(pruneField.pools.PRESSURE:stats().created == poolCreatedBefore, "pruned en
 
 pruneField:clear()
 check(pruneField:count() == 0, "clear empties every channel")
+
+end
+do
+print("=== Skeleton: rest pose and reset() (WP3) ===")
+
+local restSkel = Skeleton.new(6, {
+	segmentLength = 2,
+	restOrigin = { X = 4, Y = 1, Z = -2 },
+	restDirection = { X = 0, Y = -1, Z = 0 },
+})
+check(approx(restSkel.x[1], 4, 1e-9) and approx(restSkel.y[1], 1, 1e-9), "restOrigin anchors the constructed pose")
+check(approx(restSkel.y[6], -9, 1e-9), "restDirection lays a hanging tendril straight down from its root")
+check(approx(restSkel.z[6], -2, 1e-9), "the hanging pose stays in its own plane")
+Fabrik.solve(restSkel, 0, 0, 0)
+local knotted = restSkel.z[6] ~= -2
+restSkel:reset()
+check(knotted, "a solve really did move the chain (otherwise this test proves nothing)")
+check(approx(restSkel.x[1], 4, 1e-9) and approx(restSkel.y[6], -9, 1e-9), "reset returns the chain to its rest pose")
+check(restSkel:isDirty() == true, "reset marks the pose dirty so the renderer picks it up")
+check(Fabrik.maxBoneError(restSkel) < 1e-9, "reset keeps every bone length exact")
+local restClone = Skeleton.new(2)
+restClone:copyFrom(restSkel)
+local clonedRestX = restClone:restPose()
+check(approx(clonedRestX, 4, 1e-9), "copyFrom carries the rest pose, so a pooled chain resets to the right shoulder")
+
+local defaultSkel = Skeleton.new(5)
+check(defaultSkel.z[5] == 8 and defaultSkel.x[1] == 0, "a default Skeleton is built STRAIGHT, not collapsed to a knot")
+check(approx(defaultSkel:totalLength(), 8, 1e-9), "the straight construction agrees with totalLength")
+
+end
+do
+print("=== SkeletonCodec: 200 random chains (docs/03 §7.1 round trip) ===")
+-- WP3 asks for max positional error < 0.02 studs over 200 RANDOM chains. One hand
+-- -picked pose is how the collapsed-noise bug in iteration 2 nearly shipped: a
+-- single input passes for the wrong reason every time.
+
+local rng = RNG.new(20260908)
+local WIRE_BUDGET = 0.02
+local encBytes = {}
+local cmpBytes = {}
+local worstJoint = 0
+local worstTip = 0
+local worstCore = 0
+local worstAngle = 0
+local worstParentRelative = 0
+local sizeMismatch = 0
+local nonIdempotent = 0
+local worstQuatDrift = 0
+local seqMismatch = 0
+local idMismatch = 0
+local jointsSeen = 0
+local refX, refY, refZ = 0, 0, 0
+
+for chain = 1, 200 do
+	local tendrils = rng:int(1, 8)
+	local jointsPer = rng:int(2, 16)
+	local seg = rng:range(1.2, 3.5)
+	local coreX = rng:range(-240, 240)
+	local coreY = rng:range(-20, 160)
+	local coreZ = rng:range(-240, 240)
+
+	local skels = {}
+	local decoded = {}
+	local jointsTotal = 0
+	for t = 1, tendrils do
+		local skel = Skeleton.new(jointsPer, { segmentLength = seg })
+		-- A random walk that preserves every bone length: the distribution a solved
+		-- tendril actually has, so the offsets the codec quantises are realistic.
+		skel:setJoint(1, coreX + rng:range(-6, 6), coreY + rng:range(-6, 6), coreZ + rng:range(-6, 6))
+		for i = 2, jointsPer do
+			local dx = rng:range(-1, 1)
+			local dy = rng:range(-1, 1)
+			local dz = rng:range(-1, 1)
+			local m = math.sqrt(dx * dx + dy * dy + dz * dz)
+			if m < 1e-6 then
+				dx = 1
+				dy = 0
+				dz = 0
+				m = 1
+			end
+			local bone = skel.len[i - 1]
+			skel:setJoint(i, skel.x[i - 1] + dx / m * bone, skel.y[i - 1] + dy / m * bone, skel.z[i - 1] + dz / m * bone)
+		end
+		skels[t] = skel
+		decoded[t] = Skeleton.new(jointsPer, { segmentLength = seg })
+		jointsTotal = jointsTotal + jointsPer
+	end
+
+	-- Random unit orientation for the core.
+	local qx = rng:range(-1, 1)
+	local qy = rng:range(-1, 1)
+	local qz = rng:range(-1, 1)
+	local qw = rng:range(-1, 1)
+	local qm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+	if qm < 1e-6 then
+		qx, qy, qz, qw = 0, 0, 0, 1
+	else
+		qx = qx / qm
+		qy = qy / qm
+		qz = qz / qm
+		qw = qw / qm
+	end
+
+	local prevRefX, prevRefY, prevRefZ = refX, refY, refZ
+	local count, reconX, reconY, reconZ = SkeletonCodec.encode(
+		encBytes, skels, coreX, coreY, coreZ, refX, refY, refZ, chain, chain % 251, qx, qy, qz, qw
+	)
+	if count ~= SkeletonCodec.byteCount(tendrils, jointsPer) then
+		sizeMismatch = sizeMismatch + 1
+	end
+
+	local dX, dY, dZ, dSeq, dQX, dQY, dQZ, dQW = SkeletonCodec.decode(encBytes, decoded, refX, refY, refZ)
+	if dSeq ~= (chain % 65536) then
+		seqMismatch = seqMismatch + 1
+	end
+	if SkeletonCodec.creatureId(encBytes) ~= chain % 251 then
+		idMismatch = idMismatch + 1
+	end
+
+	-- Core: bounded, never accumulating, even though the reference here is the
+	-- PREVIOUS chain's reconstruction rather than a fresh anchor.
+	local coreErr = math.sqrt((dX - coreX) ^ 2 + (dY - coreY) ^ 2 + (dZ - coreZ) ^ 2)
+	if coreErr > worstCore then
+		worstCore = coreErr
+	end
+	refX = reconX
+	refY = reconY
+	refZ = reconZ
+
+	for t = 1, tendrils do
+		local skel = skels[t]
+		local dec = decoded[t]
+		for i = 1, jointsPer do
+			local e = math.sqrt((dec.x[i] - skel.x[i]) ^ 2 + (dec.y[i] - skel.y[i]) ^ 2 + (dec.z[i] - skel.z[i]) ^ 2)
+			if e > worstJoint then
+				worstJoint = e
+			end
+			if i == jointsPer then
+				-- The tip is where a parent-relative scheme loses the most, so it is
+				-- tracked on its own: this is the number the doc quotes.
+				if e > worstTip then
+					worstTip = e
+				end
+			end
+			jointsSeen = jointsSeen + 1
+		end
+		-- Same sweep through the naive scheme (quantise against the TRUE parent,
+		-- decode by accumulation) to show the budget would have been blown.
+		local accX = skel.x[1]
+		local accY = skel.y[1]
+		local accZ = skel.z[1]
+		local step = SkeletonCodec.JOINT_STEP
+		for i = 2, jointsPer do
+			accX = accX + math.floor((skel.x[i] - skel.x[i - 1]) / step + 0.5) * step
+			accY = accY + math.floor((skel.y[i] - skel.y[i - 1]) / step + 0.5) * step
+			accZ = accZ + math.floor((skel.z[i] - skel.z[i - 1]) / step + 0.5) * step
+			local e = math.sqrt((accX - skel.x[i]) ^ 2 + (accY - skel.y[i]) ^ 2 + (accZ - skel.z[i]) ^ 2)
+			if e > worstParentRelative then
+				worstParentRelative = e
+			end
+		end
+	end
+
+	-- Orientation: geodesic angle between the true and decoded unit quaternions.
+	local dot = math.abs(dQX * qx + dQY * qy + dQZ * qz + dQW * qw)
+	if dot > 1 then
+		dot = 1
+	end
+	local angle = 2 * math.acos(dot)
+	if angle > worstAngle then
+		worstAngle = angle
+	end
+
+	-- Idempotence: encoding the DECODED pose against the same reference must
+	-- reproduce the same bytes, or the client's next frame would disagree with the
+	-- server about what the server just sent.
+	-- Idempotence, and the precise scope of it: POSITIONS must reproduce byte for
+	-- byte, because the core is a DPCM channel (a one-unit difference there would
+	-- walk). The quaternion is absolute - the server encodes its own true
+	-- orientation every snapshot and never feeds a reconstruction back - so a 1 LSB
+	-- difference when re-quantising a decoded, renormalised quaternion is harmless.
+	-- It is bounded below instead, which is the property that actually matters.
+	local reCount = SkeletonCodec.encode(cmpBytes, decoded, dX, dY, dZ, prevRefX, prevRefY, prevRefZ, chain, chain % 251, dQX, dQY, dQZ, dQW)
+	if reCount ~= count then
+		nonIdempotent = nonIdempotent + 1
+	else
+		for b = 1, count do
+			local isQuatByte = b >= 10 and b <= SkeletonCodec.HEADER_BYTES
+			if not isQuatByte and cmpBytes[b] ~= encBytes[b] then
+				nonIdempotent = nonIdempotent + 1
+				break
+			end
+		end
+	end
+	local quatDrift = 0
+	for b = 10, SkeletonCodec.HEADER_BYTES do
+		local d = cmpBytes[b] - encBytes[b]
+		if d < 0 then
+			d = -d
+		end
+		if d > quatDrift then
+			quatDrift = d
+		end
+	end
+	if quatDrift > worstQuatDrift then
+		worstQuatDrift = quatDrift
+	end
+end
+
+check(sizeMismatch == 0, "byteCount agrees with encode for every chain size (2..16 joints x 1..8 tendrils)")
+check(jointsSeen > 6000, "the sweep really did cover thousands of joints (" .. jointsSeen .. " joints)")
+check(worstJoint < WIRE_BUDGET, "max positional error over 200 random chains is inside the 0.02 stud wire budget (worst=" .. string.format("%.5f", worstJoint) .. ")")
+check(worstJoint <= SkeletonCodec.MAX_JOINT_ERROR + 1e-12, "and inside the analytic per-joint bound (worst=" .. string.format("%.5f", worstJoint) .. " <= " .. string.format("%.5f", SkeletonCodec.MAX_JOINT_ERROR) .. ")")
+check(worstTip <= SkeletonCodec.MAX_JOINT_ERROR + 1e-12, "the TIP of a 16-joint chain is no worse than its root (worst=" .. string.format("%.5f", worstTip) .. ")")
+check(worstParentRelative > WIRE_BUDGET, "the naive parent-relative scheme blows the budget on these chains (worst=" .. string.format("%.5f", worstParentRelative) .. ")")
+check(worstCore <= SkeletonCodec.MAX_CORE_ERROR + 1e-12, "core delta stays inside its own bound across 200 chained snapshots (worst=" .. string.format("%.5f", worstCore) .. ")")
+check(worstAngle <= SkeletonCodec.MAX_ANGLE_ERROR + 1e-12, "core orientation error is inside the int8 quaternion bound (worst=" .. string.format("%.5f", math.deg(worstAngle)) .. " deg <= " .. string.format("%.5f", math.deg(SkeletonCodec.MAX_ANGLE_ERROR)) .. ")")
+check(nonIdempotent == 0, "positions re-encode byte for byte from the decoded pose (no DPCM drift, client and server agree)")
+check(worstQuatDrift <= 1, "re-quantising a decoded quaternion moves it at most one LSB, and it is absolute so even that cannot accumulate (" .. worstQuatDrift .. " LSB)")
+check(seqMismatch == 0, "every sequence number survives 200 snapshots")
+check(idMismatch == 0, "every creature id survives 200 snapshots")
+check(SkeletonCodec.coreDisplacement(8) < 0.15, "the orientation cost on an 8-stud core is under 0.15 studs (" .. string.format("%.4f", SkeletonCodec.coreDisplacement(8)) .. ")")
+
+-- The header, as data, so the doc and the codec cannot drift apart silently.
+check(SkeletonCodec.HEADER_BYTES == 1 + 2 + 6 + 4, "the header is creatureId+seq+core delta+quat (13 B)")
+check(SkeletonCodec.byteCount(8, 12) == 589, "a Braid snapshot is 589 B, the number docs/03 §7.1 quotes")
+
+-- A caller with no orientation yet must still produce a decodable frame.
+local noQuat = {}
+local skel1 = Skeleton.new(3, { segmentLength = 1 })
+skel1:straighten(0, 0, 0, 1, 0, 0)
+SkeletonCodec.encode(noQuat, { skel1 }, 0, 0, 0, 0, 0, 0, 1, 1)
+local dec1 = Skeleton.new(3)
+local _, _, _, _, nqX, nqY, nqZ, nqW = SkeletonCodec.decode(noQuat, { dec1 }, 0, 0, 0)
+check(nqW == 1 and nqX == 0 and nqY == 0 and nqZ == 0, "a missing quaternion decodes as identity, not as garbage")
+
+end
+do
+print("=== NoiseField: wind advection, weather masking, surface coupling (docs/02 §2) ===")
+local Monster = MonsterConfig.Senses
+
+local advected = NoiseField.new({
+	Halflife = { SCENT = 1000, VIBRATION = 1000 },
+	Coupling = Monster.VibrationCoupling,
+	AdvectedMaxAge = Monster.AdvectionMaxAgeSeconds,
+})
+check(advected:advectionWindow("SCENT") == Monster.AdvectionMaxAgeSeconds, "advection is searched over a bounded age window, not the whole half-life")
+check(advected:advectionWindow("VIBRATION") == 0, "and only for advected channels")
+-- 1 stud/s along +X. A scent emitted at the origin is 5 studs downwind after 5 s.
+advected:setWind(1, 0, 0)
+local wx, wy, wz = advected:wind()
+check(wx == 1 and wy == 0 and wz == 0, "setWind stores the vector for the debug overlay")
+advected:emit("SCENT", 0, 0, 0, 1, 0)
+advected:emit("VIBRATION", 0, 0, 0, 1, 0)
+check(advected:sample("SCENT", 5, 0, 0, 1, 5) > 0.9, "scent has drifted downwind: 5 studs away, 5 s later, it is heard where the plume actually is")
+check(advected:sample("SCENT", 0, 0, 0, 1, 5) < 0.05, "and NOT at the source, which is now upwind of the plume")
+check(advected:sample("VIBRATION", 0, 0, 0, 1, 5) > 0.9, "vibration is ground-borne: the wind does not move it")
+check(advected:sample("VIBRATION", 5, 0, 0, 1, 5) < 0.05, "so nothing appears at the drifted position on a non-advected channel")
+
+-- A scent older than the window is not modelled here (it belongs to memory).
+advected:emit("SCENT", 200, 0, 0, 1, 1000)
+check(advected:sample("SCENT", 2020, 0, 0, 1, 1010) == 0, "an impulse older than the advection window is skipped, not clamped to the window edge")
+
+-- Exact parity with the plain decay path when there is no wind: advection must not
+-- change a single number, or the Attune UI and the creature would disagree.
+local calm = NoiseField.new({ Halflife = { SCENT = 1000, VIBRATION = 1000 } })
+calm:emit("SCENT", 3, 1, -2, 0.75, 0)
+local calmHash = calm.hashes.SCENT
+local plainValue = calmHash:sampleDecay(3, 1, -2, 8, 4)
+check(approx(calm:sample("SCENT", 3, 1, -2, 8, 4), plainValue, 1e-12), "with zero wind an advected sample equals SpatialHash:sampleDecay exactly")
+calm:setWind(0, 0, 0)
+check(approx(calm:sample("SCENT", 3, 1, -2, 8, 4), plainValue, 1e-12), "setWind(0,0,0) restores that parity (no sqrt of zero, no drift term)")
+
+-- A second consumer of the same field sees the same plume: this is the Attune rule.
+local observer = NoiseField.new({ Halflife = { SCENT = 1000, VIBRATION = 1000 }, AdvectedMaxAge = Monster.AdvectionMaxAgeSeconds })
+observer:setWind(1, 0, 0)
+observer:emit("SCENT", 0, 0, 0, 1, 0)
+check(approx(observer:sample("SCENT", 5, 0, 0, 1, 5), advected:sample("SCENT", 5, 0, 0, 1, 5), 1e-12), "two fields with the same wind and impulse agree to the last bit")
+
+-- Weather: rain halves vibration propagation (docs/00 §5.1.3).
+local wet = NoiseField.new()
+wet:emit("VIBRATION", 0, 0, 0, 1, 0)
+wet:emit("AIR", 0, 0, 0, 1, 0)
+wet:emit("SCENT", 0, 0, 0, 1, 0)
+local dryVibration = wet:sample("VIBRATION", 0, 0, 0, 20, 0)
+wet:setWeather(DayNightConfig.Weather.Rain)
+check(approx(wet:sample("VIBRATION", 0, 0, 0, 20, 0), dryVibration * DayNightConfig.Weather.Rain.VibrationMask, 1e-12), "rain masks VIBRATION by the config multiplier")
+check(approx(wet:sample("AIR", 0, 0, 0, 20, 0), DayNightConfig.Weather.Rain.AirMask, 1e-12), "rain masks AIR by its own multiplier (rain noise drowns voices, not the reverse)")
+check(wet:sample("SCENT", 0, 0, 0, 20, 0) == 1, "a channel with no mask key is untouched by weather")
+check(wet:channelMask("SCENT") == 1, "channelMask reports the neutral gain for an unmasked channel")
+local storm = NoiseField.new()
+storm:emit("VIBRATION", 0, 0, 0, 1, 0)
+storm:setWeather(DayNightConfig.Weather.Storm)
+check(storm:sample("VIBRATION", 0, 0, 0, 20, 0) < wet:sample("VIBRATION", 0, 0, 0, 20, 0), "a storm hides you better than rain does")
+storm:setWeather(nil)
+check(storm:sample("VIBRATION", 0, 0, 0, 20, 0) == 1, "setWeather(nil) clears the mask")
+check(storm:setChannelMask("NOPE", 0.5) == false, "an unknown channel cannot be masked")
+
+-- Surface coupling (docs/02 §2: hard surfaces amplify, water decouples).
+local coupled = NoiseField.new({ Coupling = Monster.VibrationCoupling })
+coupled:emitAt("VIBRATION", 0, 0, 0, 1, 0, nil, "Concrete")
+coupled:emitAt("VIBRATION", 40, 0, 0, 1, 0, nil, "Water")
+coupled:emitAt("VIBRATION", -40, 0, 0, 1, 0, nil, "Unobtainium")
+check(approx(coupled:sample("VIBRATION", 0, 0, 0, 20, 0), Monster.VibrationCoupling.Concrete, 1e-12), "concrete couples a footstep at its config multiplier")
+check(approx(coupled:sample("VIBRATION", 40, 0, 0, 20, 0), Monster.VibrationCoupling.Water, 1e-12), "water decouples it (0.1) - the reason the creek is a hiding place")
+check(coupled:sample("VIBRATION", -40, 0, 0, 20, 0) == 1, "an unknown material is neutral, never silent and never amplified")
+check(coupled:couple("AIR", "Concrete") == 1, "coupling applies to the coupling channel only (air sound does not care what you stepped on)")
+coupled:emit("AIR", 0, 0, 0, 1, 0, { Material = "Concrete" })
+check(coupled:sample("AIR", 0, 0, 0, 20, 0) == 1, "so passing a Material on AIR changes nothing")
+check(coupled:emit("VIBRATION", 0, 0, 0, 1, 0, { Material = "Water", Halflife = 5 }) ~= nil, "opts also carries the per-event half-life")
+
+-- Sampling must not mutate the field (no drift writes, no allocations).
+local before = coupled:count()
+local createdBefore = coupled.pools.VIBRATION:stats().created
+for i = 1, 500 do
+	coupled:sampleAll(0, 0, 0, 30, i * 0.01)
+end
+check(coupled:count() == before, "500 sweeps changed nothing in the index")
+check(coupled.pools.VIBRATION:stats().created == createdBefore, "500 sweeps allocated no entries")
+local allOut = coupled:sampleAll(0, 0, 0, 20, 0)
+check(allOut.VIBRATION == coupled:sample("VIBRATION", 0, 0, 0, 20, 0), "sampleAll and sample agree on the same channel")
+check(coupled:loudestChannel(0, 0, 0, 20, 0) == "VIBRATION", "the loudest-channel probe respects coupling")
+
+end
+do
+print("=== Remotes: the contract is the set in docs/01 §2 ===")
+
+local names = Remotes.names()
+check(#names == 7, "exactly seven remotes exist (" .. #names .. ")")
+local wanted = {
+	RE_TimeSync = "RemoteEvent",
+	RE_SkeletonStream = "RemoteEvent",
+	RE_CreatureEvent = "RemoteEvent",
+	RE_SurvivalSync = "RemoteEvent",
+	RE_ClientIntent = "RemoteEvent",
+	RE_Destruction = "RemoteEvent",
+	RF_DebugQuery = "RemoteFunction",
+}
+local allWanted = true
+for i = 1, #names do
+	if wanted[names[i]] == nil then
+		allWanted = false
+	end
+end
+check(allWanted, "every declared remote is one from the architecture tree (no ad hoc remotes)")
+local missingFromDoc = 0
+for name in pairs(wanted) do
+	local found = false
+	for i = 1, #names do
+		if names[i] == name then
+			found = true
+		end
+	end
+	if not found then
+		missingFromDoc = missingFromDoc + 1
+	end
+end
+check(missingFromDoc == 0, "and every remote in the tree is declared here")
+local classesOk = true
+for name, class in pairs(wanted) do
+	local def = Remotes.definition(name)
+	if def == nil or def.Class ~= class then
+		classesOk = false
+	end
+end
+check(classesOk, "each one has the class the tree says (RF_ is a RemoteFunction)")
+check(Remotes.FolderName == "Comms", "the folder name comes from GameConfig.Net.CommsFolder")
+check(Remotes.BindTimeoutSeconds == GameConfig.Net.BindTimeoutSeconds, "the client bind timeout comes from config, not a literal")
+local c2s = Remotes.clientToServer()
+check(#c2s == 2, "two remotes carry client->server traffic (RE_ClientIntent, RF_DebugQuery)")
+check(Remotes.coverageProblems(NetContract.Schemas)[1] == nil, "the contract is covered: every client->server remote has a schema that exists")
+
+end
+do
+print("=== NetContract: the server never trusts a client ===")
+local gate = NetContract.newGate()
+local now = 100
+local function okFor(payload, t)
+	return NetContract.admit(gate, t or "player:1", "ClientIntent", payload, now)
+end
+
+local good = { Action = "OpenDoor", TargetId = 17, Sequence = 1, Position = { X = 4, Y = 0, Z = -2 }, HeldSeconds = 0.8 }
+local accepted, code = okFor(good)
+check(accepted == true, "a well-formed intent is accepted (" .. tostring(code) .. ")")
+check(NetContract.Actions.OpenDoor == true, "the intent enum is derived from GameConfig.Intents")
+check(#NetContract.ActionNames >= 12, "and covers the whole interaction table (" .. #NetContract.ActionNames .. " actions)")
+
+check(okFor({ Action = "OpenDoor", TargetId = 17 }) == false, "a missing required field is rejected")
+local ok1, code1, field1 = NetContract.validate("ClientIntent", { Action = "OpenDoor", TargetId = 17, Sequence = 1, Loot = "everything" })
+check(ok1 == false and code1 == NetContract.Reject.UnknownField, "an unknown field is rejected outright (" .. tostring(code1) .. " on " .. tostring(field1) .. ")")
+check(NetContract.validate("ClientIntent", nil) == false, "a nil payload is rejected")
+check(NetContract.validate("ClientIntent", "OpenDoor") == false, "a bare string is rejected")
+check(NetContract.validate("ClientIntent", 42) == false, "a number is rejected")
+check(NetContract.validate("Nada", {}) == false, "an unknown schema is rejected rather than passed through")
+local ok2, code2 = NetContract.validate("ClientIntent", { Action = "GiveMeAllTheLoot", TargetId = 1, Sequence = 1 })
+check(ok2 == false and code2 == NetContract.Reject.NotAllowed, "an action outside the vocabulary is refused")
+local ok3, code3 = NetContract.validate("ClientIntent", { Action = "OpenDoor", TargetId = 1.5, Sequence = 1 })
+check(ok3 == false and code3 == NetContract.Reject.BadType, "a fractional 'integer' id is refused")
+local ok4, code4 = NetContract.validate("ClientIntent", { Action = "OpenDoor", TargetId = -1, Sequence = 1 })
+check(ok4 == false and code4 == NetContract.Reject.OutOfRange, "a negative id is refused")
+local ok5, code5 = NetContract.validate("ClientIntent", { Action = "OpenDoor", TargetId = 1, Sequence = 1, Position = { X = 0 / 0, Y = 0, Z = 0 } })
+check(ok5 == false and code5 == NetContract.Reject.NotFinite, "a NaN position is refused")
+local ok6, code6 = NetContract.validate("ClientIntent", { Action = "OpenDoor", TargetId = 1, Sequence = 1, Position = { X = math.huge, Y = 0, Z = 0 } })
+check(ok6 == false and code6 == NetContract.Reject.NotFinite, "an infinite position is refused")
+local ok7, code7 = NetContract.validate("ClientIntent", { Action = "OpenDoor", TargetId = 1, Sequence = 1, Position = { X = 1e9, Y = 0, Z = 0 } })
+check(ok7 == false and code7 == NetContract.Reject.OutOfRange, "a position outside the world bound is refused")
+local ok8, code8 = NetContract.validate("ClientIntent", { Action = "OpenDoor", TargetId = 1, Sequence = 1, HeldSeconds = 100000 })
+check(ok8 == false and code8 == NetContract.Reject.OutOfRange, "a 27-hour 'hold' is refused (MaxHeldSeconds = " .. GameConfig.Net.MaxHeldSeconds .. ")")
+local ok9 = NetContract.validate("ClientIntent", { Action = "OpenDoor", TargetId = 1, Sequence = 1, TargetId2 = "x" })
+check(ok9 == false, "a near-miss field name is refused, not coerced")
+local longString = "a"
+while #longString < GameConfig.Net.MaxStringBytes + 1 do
+	longString = longString .. "a"
+end
+check(NetContract.validate("ClientIntent", { Action = longString, TargetId = 1, Sequence = 1 }) == false, "an oversized string is refused before it is compared to the enum")
+check(NetContract.validate("ClientIntent", { Action = "OpenDoor", TargetId = 1, Sequence = 0 }) == true, "Sequence 0 is legal (the first packet)")
+
+-- Rate limiting: a burst then refusal, then refill. Two players are independent.
+local spamGate = NetContract.newGate()
+local limits = NetContract.limits("ClientIntent")
+local burst = limits.Burst
+local spammed = 0
+local t = 0
+for i = 1, burst + 40 do
+	if NetContract.allow(spamGate, "bot", "ClientIntent", t) then
+		spammed = spammed + 1
+	end
+end
+check(spammed == burst, "exactly the configured burst is admitted in one instant (" .. burst .. ")")
+check(NetContract.allow(spamGate, "bot", "ClientIntent", t) == false, "the next message in that instant is refused")
+local afterRefill = 0
+for i = 1, 100 do
+	t = t + 1 / 60
+	if NetContract.allow(spamGate, "bot", "ClientIntent", t) then
+		afterRefill = afterRefill + 1
+	end
+end
+local window = 100 / 60
+local expected = window * limits.SustainedPerSecond
+check(afterRefill >= math.floor(expected) - 1 and afterRefill <= math.ceil(expected) + 1, "the bucket refills at SustainedPerSecond (" .. afterRefill .. " admitted over " .. string.format("%.2f", window) .. " s, expected " .. string.format("%.1f", expected) .. ")")
+check(NetContract.allow(spamGate, "someoneElse", "ClientIntent", t) == true, "a neighbour player is unaffected by the bot's flood")
+check(NetContract.limits("Nope") == nil, "an undocumented message kind gets NO default limit (closed by default)")
+check(NetContract.allow(spamGate, "bot", "Nope", t) == false, "and refuses that kind outright")
+
+-- Replay protection.
+local seqGate = NetContract.newGate()
+local first = NetContract.admit(seqGate, "p1", "ClientIntent", { Action = "KickDoor", TargetId = 3, Sequence = 5 }, 0)
+local replay = NetContract.admit(seqGate, "p1", "ClientIntent", { Action = "KickDoor", TargetId = 3, Sequence = 5 }, 0.5)
+local stale = NetContract.admit(seqGate, "p1", "ClientIntent", { Action = "KickDoor", TargetId = 3, Sequence = 2 }, 0.6)
+local later = NetContract.admit(seqGate, "p1", "ClientIntent", { Action = "KickDoor", TargetId = 3, Sequence = 6 }, 0.7)
+check(first == true and later == true, "monotonic sequences are accepted")
+check(replay == false and stale == false, "a replayed or reordered packet is dropped (a door cannot be kicked twice by one click)")
+NetContract.forget(seqGate, "p1")
+check(NetContract.admit(seqGate, "p1", "ClientIntent", { Action = "KickDoor", TargetId = 3, Sequence = 1 }, 0.8) == true, "after forget(), a rejoining player starts clean")
+
+-- Fuzz: nothing may get through that is not a legal intent.
+local fuzzGate = NetContract.newGate()
+local frng = RNG.new(4242)
+local acceptedBad = 0
+local rejected = 0
+local fieldPool = { "Action", "TargetId", "Sequence", "Position", "HeldSeconds", "Loot", "Admin", "Payload" }
+local valuePool = { 0, -1, 1.5, 42, math.huge, 0 / 0, "OpenDoor", "", "a" .. "b", true, {}, { X = 1, Y = 2, Z = 3 }, { X = 0 / 0, Y = 0, Z = 0 }, 1e30 }
+for trial = 1, 400 do
+	local payload = {}
+	local fields = frng:int(0, 5)
+	for f = 1, fields do
+		payload[fieldPool[frng:int(1, #fieldPool)]] = valuePool[frng:int(1, #valuePool)]
+	end
+	local ok = NetContract.admit(fuzzGate, "fuzz", "ClientIntent", payload, trial * 10)
+	if ok then
+		local valid = NetContract.validate("ClientIntent", payload)
+		if not valid or payload.Action == nil or NetContract.Actions[payload.Action] == nil then
+			acceptedBad = acceptedBad + 1
+		end
+	else
+		rejected = rejected + 1
+	end
+end
+check(acceptedBad == 0, "400 hostile payloads: nothing was accepted that validate() would reject")
+check(rejected > 350, "and nearly all of them were refused (" .. rejected .. "/400)")
+
+-- Debug query surface.
+local dbgOk = NetContract.validate("DebugQuery", { Command = "phases" })
+check(dbgOk == true, "a bare debug command is valid")
+check(NetContract.validate("DebugQuery", { Command = "rm -rf" }) == false, "an unlisted command is refused")
+check(NetContract.validate("DebugQuery", { Command = "clock", Argument = 18.5 }) == true, "setclock 18.5 is in range")
+check(NetContract.validate("DebugQuery", { Command = "clock", Argument = 1e6 }) == false, "and 1e6 is not")
+
+end
+do
+print("=== Replicator: the byte array and the Buffer agree (docs/03 §7.1) ===")
+
+local rep = Replicator.new(9, { Codec = SkeletonCodec, Config = GameConfig })
+check(approx(rep.secPerSnapshot, 1 / GameConfig.Ticks.SkeletonStreamHzNear, 1e-12), "the default stream rate is the NEAR tier from config (" .. string.format("%.1f", 1 / rep.secPerSnapshot) .. " Hz)")
+
+local skels = {}
+for t = 1, 8 do
+	local skel = Skeleton.new(12, { segmentLength = 2 })
+	skel:straighten(0, 0, 0, math.cos(t), math.sin(t * 0.5), math.sin(t))
+	skels[t] = skel
+end
+local count = rep:encode(skels, 30, 4, -12, 0.1, 0.2, 0.3, 0.92)
+check(count == SkeletonCodec.byteCount(8, 12), "encode sized the payload from the joint counts (" .. count .. " B)")
+check(count == SkeletonCodec.HEADER_BYTES + 8 * 12 * SkeletonCodec.JOINT_BYTES, "and that matches Replicator's own capacity formula")
+
+local buf, bufCount = rep:snapshot(skels, 30, 4, -12, 0.1, 0.2, 0.3, 0.92)
+check(buffer.len(buf) == bufCount, "buffer.create was given exactly the codec's byte count")
+local recovered, recCount = Replicator.toBytes(buf)
+check(recCount == bufCount, "toBytes reports the same length")
+local parity, mismatchAt = Replicator.checkParity(rep.bytes, recovered, bufCount)
+check(parity == true, "every byte survives array -> buffer -> array (first mismatch at " .. tostring(mismatchAt) .. ")")
+
+-- Decoding the recovered array must reproduce exactly what decoding the array did.
+local decA = {}
+local decB = {}
+for t = 1, 8 do
+	decA[t] = Skeleton.new(12)
+	decB[t] = Skeleton.new(12)
+end
+local ax, ay, az, aseq, aqx, aqy, aqz, aqw = SkeletonCodec.decode(rep.bytes, decA, 30, 4, -12)
+local bx, by, bz, bseq, bqx, bqy, bqz, bqw = SkeletonCodec.decode(recovered, decB, 30, 4, -12)
+check(ax == bx and ay == by and az == bz and aseq == bseq, "core + sequence decode identically through both paths")
+check(aqx == bqx and aqy == bqy and aqz == bqz and aqw == bqw, "and so does the core quaternion")
+local jointsEqual = true
+for t = 1, 8 do
+	for i = 1, 12 do
+		if decA[t].x[i] ~= decB[t].x[i] or decA[t].y[i] ~= decB[t].y[i] or decA[t].z[i] ~= decB[t].z[i] then
+			jointsEqual = false
+		end
+	end
+end
+check(jointsEqual, "all 96 joints decode identically through both paths")
+
+-- The reader half on the client: a Buffer arriving from the remote unpacks to the
+-- same skeleton the server packed, with the DPCM reference the client holds.
+local fromWire = {}
+local wireSkels = {}
+for t = 1, 8 do
+	wireSkels[t] = Skeleton.new(12)
+end
+local wireBytes, wireCount = Replicator.toBytes(buf, fromWire)
+check(wireCount == bufCount, "a caller-supplied buffer array is reused, not reallocated")
+SkeletonCodec.decode(wireBytes, wireSkels, 30, 4, -12)
+check(SkeletonCodec.creatureId(wireBytes) == 9, "the creature id rides in byte 1 on the wire too")
+
+-- Out-of-range offsets must error, not silently truncate: that is the property the
+-- adapter relies on when it trusts the codec's count.
+local failed = false
+local ok = pcall(function()
+	buffer.readu8(buf, bufCount)
+end)
+if not ok then
+	failed = true
+end
+check(failed, "reading past the end of a Buffer errors in both implementations (the adapter's off-by-one guard)")
+
+-- Rate limiting + a fake remote, to prove the send path fires with the right shape.
+local fired = 0
+local firedBytes = 0
+local lastPayload
+local fakeRemote = {}
+fakeRemote.FireAllClients = function(self, payload)
+	if self ~= fakeRemote then
+		error("FireAllClients was not called with the remote as self", 2)
+	end
+	fired = fired + 1
+	lastPayload = payload
+	firedBytes = firedBytes + buffer.len(payload)
+end
+fakeRemote.FireClient = function(self, player, payload)
+	fired = fired + 1
+	lastPayload = payload
+	firedBytes = firedBytes + buffer.len(player)
+end
+rep:setRemote(fakeRemote)
+local sends = 0
+local sentImmediate = rep:publish(1 / 60, nil, skels, 30, 4, -12)
+if sentImmediate then
+	sends = sends + 1
+end
+check(sentImmediate == true, "the first frame publishes immediately (a creature must not wait a period to appear)")
+check(fired == 1 and lastPayload ~= nil, "and it really did fire the remote once with a Buffer")
+local payloadBytes = buffer.len(lastPayload)
+check(payloadBytes == SkeletonCodec.byteCount(8, 12), "the Buffer on the wire is exactly the documented payload (" .. payloadBytes .. " B)")
+local rejectedFrames = 0
+for i = 1, 20 do
+	local sent = rep:publish(1 / 60, nil, skels, 31, 4, -12)
+	if sent then
+		sends = sends + 1
+	else
+		rejectedFrames = rejectedFrames + 1
+	end
+end
+-- 20 frames at 60 Hz is 1/3 s; the NEAR tier is 15 Hz, so 4-5 snapshots. The point
+-- of the range is that it paces at all: an unthrottled stream would say 20.
+check(sends >= 4 and sends <= 6, "and then it paces itself: 21 frames produced " .. sends .. " snapshots at the " .. GameConfig.Ticks.SkeletonStreamHzNear .. " Hz tier")
+check(rejectedFrames > 14, "the surplus frames were dropped rather than queued (a backlog is how a stream jitters)")
+local beforeFires = fired
+local sentEmpty, emptyBytes = rep:publish(1 / 15, {}, skels, 32, 4, -12)
+if sentEmpty then
+	sends = sends + 1
+end
+check(sentEmpty == true and fired == beforeFires, "an empty recipient list encodes but sends nothing (nobody in range, no bandwidth)")
+check(rep:publish(0.001, nil, skels, 33, 4, -12) == false, "a frame shorter than the period is skipped")
+rep:setRate(GameConfig.Ticks.SkeletonStreamHzFar)
+local farStart = sends
+for i = 1, 40 do
+	if rep:publish(1 / 60, nil, skels, 34, 4, -12) then
+		sends = sends + 1
+	end
+end
+check(sends - farStart == 2, "setRate to the FAR tier: 40 frames produced " .. (sends - farStart) .. " snapshots (" .. GameConfig.Ticks.SkeletonStreamHzFar .. " Hz)")
+local stats = rep:stats()
+check(stats.snapshots == sends, "stats counts every snapshot produced (" .. stats.snapshots .. ")")
+check(stats.bytesSent == firedBytes + emptyBytes, "and the bytes it produced, including the ones nobody was close enough to receive")
+check(stats.byteCount == SkeletonCodec.byteCount(8, 12), "stats reports the last payload size for the bandwidth budget")
+check(rep.seq > 0, "the sequence number advanced with the stream")
+
+-- Feedback continuity: two snapshots in a row must not re-anchor to the true core.
+rep:reset()
+local first = rep:encode(skels, 100, 0, 0)
+check(rep.refX == 100, "after reset the first snapshot is absolute (no stale reference from the last life)")
+local secondCount = rep:encode(skels, 100.001, 0, 0)
+check(secondCount == first, "a same-length pose costs the same bytes regardless of movement")
+check(rep.refX == 100, "the 1 mm nudge is absorbed by the 0.02 stud core grid, so a hovering creature does not jitter (" .. rep.refX .. ")")
+local third = rep:encode(skels, 104.5, 0, 0)
+check(math.abs(rep.refX - 104.5) <= SkeletonCodec.MAX_CORE_ERROR + 1e-9, "and a real 4.5 stud move still lands inside the core budget (" .. rep.refX .. ")")
+check(third == first, "same pose shape, same byte count")
+
+end
+do
+print("=== TimeModel: one clock, so the sky can never disagree with the phase (docs/06 §2) ===")
+
+check(TimeModel.minutesToClock(0) == 0, "midnight is hour 0")
+check(TimeModel.minutesToClock(TimeModel.MINUTES_PER_DAY) == 0, "and 1440 minutes wraps to the same hour")
+check(TimeModel.minutesToClock(750) == 12.5, "12:30 is hour 12.5")
+check(TimeModel.clockToMinutes(6.25) == 375, "hours convert back to minutes")
+check(TimeModel.phaseOf(6.5) == "Dawn", "06:30 is Dawn")
+check(TimeModel.phaseOf(12) == "Day", "noon is Day")
+check(TimeModel.phaseOf(18.5) == "Dusk", "18:30 is Dusk")
+check(TimeModel.phaseOf(2.0) == "Night", "2 a.m. is Night")
+check(TimeModel.phaseOf(TimeModel.PHASE_HOURS.NightStart - 0.001) == "Dusk", "the last instant of Dusk is still Dusk")
+check(TimeModel.phaseOf(TimeModel.PHASE_HOURS.NightStart) == "Night", "the first instant of Night is Night")
+check(TimeModel.nextPhase("Dusk") == "Night" and TimeModel.nextPhase("Night") == "Dawn", "the cycle order is Dawn->Day->Dusk->Night->Dawn")
+
+check(approx(TimeModel.warp(0, -0.6), 0, 1e-12), "warp(0) is exactly 0 whatever the ease")
+check(approx(TimeModel.warp(1, 0.9), 1, 1e-12), "warp(1) is exactly 1, and an over-range ease is clamped, not obeyed")
+local mono = true
+local prevWarp = -1
+for i = 0, 20 do
+	local w = TimeModel.warp(i / 20, -TimeModel.MAX_EASE)
+	if w < prevWarp then
+		mono = false
+	end
+	prevWarp = w
+end
+check(mono, "warp is monotone at the negative ease clamp, so the sun never runs backwards mid-phase")
+-- Derivation, so the direction of the sign is not folklore: smoothstep(p) < p for
+-- p < 0.5 and > p above it, so warp = p + ease*(smoothstep - p) runs AHEAD early
+-- and BEHIND late when ease is negative - i.e. it spends the phase's second half
+-- dawdling, which is where a Dusk wants to live (18.5-19.8, the money shot).
+check(TimeModel.warp(0.25, -TimeModel.MAX_EASE) > 0.25, "a negative ease runs ahead through the first half")
+check(TimeModel.warp(0.75, -TimeModel.MAX_EASE) < 0.75, "and dawdles through the second half")
+check(TimeModel.warp(0.25, TimeModel.MAX_EASE) < 0.25, "a positive ease is the mirror image")
+check(approx(TimeModel.warp(0.5, TimeModel.MAX_EASE), 0.5, 1e-12), "both are exact at the midpoint, where smoothstep crosses the line")
+local duskPhase, duskWeight = TimeModel.phaseWeight(18.75)
+check(duskPhase == "Dusk", "phaseWeight reports the phase alongside the blend")
+check(approx(duskWeight, 0.5, 1e-9), "and dusk's midpoint is exactly its midpoint hour (18.75), the ease acting on either side of it")
+
+-- THE property WP4's acceptance hangs on: the clock lands exactly on the next
+-- phase's start hour, at Threat 0 and Threat 1, for all four phases.
+local boundaryOk = true
+local spanOk = true
+for i = 1, #TimeModel.PHASES do
+	local phase = TimeModel.PHASES[i]
+	local startHour, length = TimeModel.phaseSpan(phase)
+	local endHour = TimeModel.phaseClock(phase, 1)
+	local nextStart = TimeModel.phaseSpan(TimeModel.nextPhase(phase))
+	if math.abs(endHour - nextStart) > 1e-9 then
+		boundaryOk = false
+	end
+	local covered = endHour - startHour
+	if covered < 0 then
+		covered = covered + TimeModel.HOURS_PER_DAY
+	end
+	if math.abs(covered - length) > 1e-9 then
+		spanOk = false
+	end
+end
+check(boundaryOk, "each phase ends EXACTLY on the next phase's boundary hour")
+check(spanOk, "and traverses exactly its documented hour span")
+
+local nightAt0 = TimeModel.phaseSeconds("Night", 0)
+local nightAt1 = TimeModel.phaseSeconds("Night", 1)
+local threatAdds = DayNightConfig.Pacing.NightPerThreatSeconds * DayNightConfig.Pacing.NightThreatMultiplier
+check(nightAt1 - nightAt0 == threatAdds, "Night grows 45 s x 4 across the Threat range (" .. nightAt0 .. " -> " .. nightAt1 .. " s)")
+check(TimeModel.phaseSeconds("Day", 1) == DayNightConfig.Pacing.DaySeconds, "Day does not care about Threat (docs/00 P5: the NIGHT is the dial)")
+local expectCycle = DayNightConfig.Pacing.DawnSeconds + DayNightConfig.Pacing.DaySeconds + DayNightConfig.Pacing.DuskSeconds + DayNightConfig.Pacing.NightBaseSeconds
+check(TimeModel.cycleSeconds(0) == expectCycle, "the cycle sums the four phases at Threat 0 (" .. expectCycle .. " s)")
+check(TimeModel.cycleSeconds(1) == expectCycle + threatAdds, "and Threat only lengthens the Night")
+check(TimeModel.cycleSeconds(0) / 60 >= 8 and TimeModel.cycleSeconds(1) / 60 <= 14, "the session stays inside the 8-14 minute target (" .. string.format("%.1f", TimeModel.cycleSeconds(0) / 60) .. "-" .. string.format("%.1f", TimeModel.cycleSeconds(1) / 60) .. " min)")
+check(TimeModel.phaseSeconds("Night", 1) / TimeModel.cycleSeconds(1) > TimeModel.phaseSeconds("Night", 0) / TimeModel.cycleSeconds(0), "and Night is a bigger SHARE of the round at high Threat, not just longer")
+
+check(TimeModel.skyKey(12) == "Sky_Day", "noon takes the day sky")
+check(TimeModel.skyKey(19.0) == "Sky_Dusk", "19:00 is still the dusk sky")
+check(TimeModel.skyKey(21.5) == "Sky_Night", "the switch happened at the fog-thick hour")
+check(TimeModel.skyKey(2.0) == "Sky_Night", "and the small hours are night")
+local skyOk = true
+for i = 0, 1439 do
+	local key = TimeModel.skyKey(TimeModel.minutesToClock(i))
+	if key ~= "Sky_Day" and key ~= "Sky_Dusk" and key ~= "Sky_Night" then
+		skyOk = false
+	end
+end
+check(skyOk, "skyKey answers for all 1440 minutes of the day")
+
+check(TimeModel.sunElevation(12) > 20, "the sun is well up at local noon at the configured latitude (" .. string.format("%.1f", TimeModel.sunElevation(12)) .. " deg)")
+check(TimeModel.sunElevation(0) < -20, "and well down at midnight")
+check(TimeModel.isDaylight(12) == true and TimeModel.isDaylight(0) == false, "isDaylight follows the horizon crossing")
+
+local moon = DayNightConfig.Moon.StartPhase
+for i = 1, 20 do
+	moon = TimeModel.nextMoonPhase(moon)
+end
+check(moon >= 0 and moon < DayNightConfig.Moon.Phases, "moon phase stays inside 0..Phases-1 after 20 nights (" .. moon .. ")")
+check(moon == (DayNightConfig.Moon.StartPhase + 20) % DayNightConfig.Moon.Phases, "and it really did walk forward 20 steps")
+local fullMoon = TimeModel.moonBrightnessDelta(DayNightConfig.Moon.Phases / 2)
+local newMoon = TimeModel.moonBrightnessDelta(0)
+check(fullMoon > newMoon, "a full moon adds more light than a new one (" .. string.format("%.3f", fullMoon) .. " vs " .. string.format("%.3f", newMoon) .. ")")
+check(approx(fullMoon, DayNightConfig.Moon.BrightnessDelta, 1e-9), "and the peak is exactly the configured delta")
 
 end
 return TESTS

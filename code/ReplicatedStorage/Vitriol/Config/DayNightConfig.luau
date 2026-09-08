@@ -22,6 +22,11 @@ DayNightConfig.Pacing = {
 }
 
 -- Phase boundaries in CLOCK HOURS (0-24). Used for phase lookup + blending.
+-- The phase ORDER, next to the hours that bound it. This lives in config rather than
+-- in TimeModel because SessionService, the debug dump and the client all walk the same
+-- list, and a second copy of an order is how two systems start disagreeing about it.
+DayNightConfig.PHASES = { "Dawn", "Day", "Dusk", "Night" }
+
 DayNightConfig.PhaseHours = {
 	DawnStart = 5.0,
 	DayStart = 8.0,
@@ -29,21 +34,24 @@ DayNightConfig.PhaseHours = {
 	NightStart = 20.0,
 }
 
--- Clock rate curve: the in-game clock does NOT run at a constant rate. It slows
--- through dusk (long cinematic sunset) and speeds through the day. This is what
--- makes the transition feel seamless instead of a steady crawl (docs/06 §2.2).
--- Each entry: { hour = clock hour, rate = in-game minutes per real second }.
-DayNightConfig.RateCurve = {
-	{ hour = 0.0, rate = 2.4 },
-	{ hour = 4.0, rate = 2.4 },
-	{ hour = 5.0, rate = 1.6 }, -- dawn, lingering
-	{ hour = 8.0, rate = 3.2 }, -- day, brisk
-	{ hour = 16.0, rate = 3.2 },
-	{ hour = 17.5, rate = 1.2 }, -- dusk, slowest point of the cycle
-	{ hour = 20.0, rate = 1.6 }, -- nightfall
-	{ hour = 22.0, rate = 2.4 },
-	{ hour = 24.0, rate = 2.4 },
+-- How the clock MOVES inside a phase (docs/06 §2.2, rewritten in WP4).
+-- The phase machine owns real durations; the clock is derived, so 'Ease' is the
+-- only knob left for "slow dusk, brisk day" and it can never desynchronise the sky
+-- from the gameplay phase. Semantics (see Shared/TimeModel.warp): 0 is linear,
+-- +1 slows the ends and speeds the middle, -1 speeds the ends and HANGS the middle.
+-- Dusk hangs, which is where the golden hour lives. Clamped to +-2/3 so the clock
+-- can never run backwards inside a phase.
+DayNightConfig.Pacing.Ease = {
+	Dawn = 0.35,
+	Day = 0.60,
+	Dusk = -0.60,
+	Night = -0.20,
 }
+
+-- NIGHT = NightBaseSeconds + NightPerThreatSeconds * NightThreatMultiplier * Threat.
+-- The multiplier is written out instead of buried in the arithmetic so the doc's
+-- "240 s + 45 s x (ThreatLevel x 4)" is a lookup, not a reading test.
+DayNightConfig.Pacing.NightThreatMultiplier = 4
 
 -- Moon phase drives night brightness AND the creature's effective visual range
 -- (docs/06 §4.2). Advanced once per night by NightService.
@@ -56,9 +64,13 @@ DayNightConfig.Moon = {
 
 DayNightConfig.Latitude = 45 -- steeper latitude = longer, more cinematic dusks
 
+-- Season, for the sun-elevation check behind creature sunlight avoidance
+-- (docs/06 §4.1, TimeModel.sunElevation). 0 = equinox, +23.44 = northern summer.
+DayNightConfig.SunDeclinationDegrees = 12.0
+
 -- The keyframe table. Everything between stops is interpolated. Colours
 -- interpolate in HSV, scalars via smoothstep on the phase weight (docs/06 §3).
--- Values below are a TUNED STARTING POINT - refine in Studio with `setclock`.
+-- Values below are a TUNED STARTING POINT - refine in Studio with 'setclock'.
 DayNightConfig.Keyframes = {
 	{
 		Hour = 0.0, SkyKey = "Sky_Night",
@@ -207,6 +219,7 @@ DayNightConfig.Driver = {
 	JoinEaseSeconds = 1.0, -- ease in on join instead of snapping
 	SnapshotRateHz = 1, -- how often the server republishes the clock attribute
 	InterpolationLagSeconds = 0.0, -- clock is smooth, no need for lag
+	AnchorMaterial = "Plastic", -- the 0-size TimeAnchor part; invisible either way (docs/06 §6)
 }
 
 return DayNightConfig

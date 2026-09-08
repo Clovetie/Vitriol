@@ -73,12 +73,32 @@ creature *and* the player's Attune UI (see `00-VISION.md` §5.1.1).
 
 Implementation notes (all verified API in `08-RESEARCH-NOTES.md`):
 - Occlusion is **one** `workspace:Raycast` per candidate per tick, budgeted
-  (`PerceptionConfig.MaxOcclusionRaysPerTick`).
+  (`MonsterConfig.Senses.MaxOcclusionRaysPerTick`).
 - Broad-phase candidate discovery is **one** `workspace:GetPartBoundsInRadius`
   with a cached `OverlapParams` per tick — never `.Touched`.
-- Wind is a single server-side vector that changes slowly (weather system).
 - `NoiseField` is a **`SpatialHash`** of decaying impulses; `sample()` sums
   contributions in the relevant cells. O(1)-ish, allocation-free.
+
+**Who owns which term** (settled in WP3 — the module and this table must agree):
+
+| Term | Owner | Why there |
+| --- | --- | --- |
+| exponential decay, half-life per channel | `Shared/NoiseField` | propagation, observer-independent |
+| **wind advection** of `SCENT` | `Shared/NoiseField` | the plume moves in the world; every observer sees the same shift |
+| **rain / storm masking** of `VIBRATION`, `AIR` | `Shared/NoiseField` (`setWeather(DayNightConfig.Weather.X)`) | the Attune overlay must show what the creature hears (P2); a multiplier per sense module would let them disagree |
+| **surface coupling** (`×1.6` concrete, `×0.1` water) | `Shared/NoiseField` at **emit** time, from `MonsterConfig.Senses.VibrationCoupling` | the surface is a property of the event, and it is stored once instead of multiplied per sample |
+| acuity thresholds, localisation error, the downwind `×1.5` sniff boost, water-immersion masking of the *smeller* | `Creature/Brain/Senses` | these describe a nose, not a world |
+| advection search window | `MonsterConfig.Senses.AdvectionMaxAgeSeconds` | see below |
+
+Advection is evaluated at **sample** time by tracing the query point backwards along
+the wind by the age of each impulse, so nothing is ever re-inserted or moved — the
+field stays write-cheap, parallel-safe and unit-testable. The cost of doing it
+honestly is that the cell search has to widen by the largest drift it could miss, so
+the search is capped at `AdvectionMaxAgeSeconds` of drift (20 s ⇒ 60 studs at a
+brisk wind, versus 344 studs for the scent's full audibility lifetime). An impulse
+older than that is skipped rather than sampled at a clamped position, which is the
+right split anyway: *old* evidence is episodic memory (`§3`), stored in interest
+cells, not a live field.
 
 ### 2.1 From sensation to perception
 

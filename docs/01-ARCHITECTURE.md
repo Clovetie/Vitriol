@@ -110,6 +110,8 @@ game
 ├─ ServerStorage (SVC)
 │  └─ Vitriol (FL)
 │     ├─ Services (FL)                  ← long-lived singletons, one MD each
+│     │  ├─ CadenceService (MD)         ← THE ONLY LOOP: one Heartbeat driver for every
+│     │  │                                 cadence in §4, staggered, self-measuring
 │     │  ├─ SessionService (MD)         ← round/nite state machine, Threat Level
 │     │  ├─ TimeService (MD)            ← owns the clock; publishes to TimeModel/attrs
 │     │  ├─ ThreatService (MD)          ← Threat Level curve + director
@@ -152,7 +154,8 @@ game
 │     │  ├─ CreatureRigs (FL)           ← skinned meshes + bone chains per archetype
 │     │  ├─ GoreAssets (FL)             ← limb chunks, blood, viscera
 │     │  └─ Audio (FL)                  ← creature voices, foley, ambience
-│     └─ Bootstrap (SC)                  ← the only server Script that starts services
+│     └─ Bootstrap (MD)                   ← starts services; ServerScriptService's Main
+│                                          (SC) is the only thing in the tree that runs
 │
 ├─ ServerScriptService (SVC)
 │  └─ Vitriol (FL)
@@ -258,6 +261,35 @@ Rules:
 4. **Raycasts are batched**: one `GetPartBoundsInRadius` + a capped raycast fan, not
    N separate queries.
 
+**The driver.** These four cadences are not four loops. `Services/CadenceService` is
+the one scheduler: `Bootstrap` binds `RunService.Heartbeat` exactly once and hands the
+cadence service a `dt`; every service registers a slot (`{Name, PeriodSeconds,
+BudgetMs, Run}`) and gets staggered, pcall-guarded, and measured by the same code
+path. Consequences that matter:
+
+- A service cannot get its own `while true do` loop *or* its own `task.spawn` timer,
+  because then the budget table above is fiction and `stop()` is a lie.
+- Slots that fall behind by more than `GameConfig.Ticks.CadenceSlopSeconds` **skip** a
+  beat instead of running a catch-up burst. Four creature decisions landing in one
+  frame after a hiccup is read as cheating; the frame budget exists to protect the
+  player's sense of fairness, not the profiler's numbers.
+- The budgets in the table are per-row totals, so `GameConfig.Budgets` carries
+  `SlowShares` / `FrameShares`: the split of a row across the services that use it.
+  `Bootstrap` asserts the shares still fit the row at boot — a config that silently
+  exceeds the documented budget is a bug in the config, and it should say so at
+  startup rather than in a stutter at 3 a.m.
+- Because the pump receives `dt`, the scheduler measures its own cost with `os.clock`
+  only *per slot dispatch* (a 1 Hz job does not deserve a syscall per frame), and the
+  file that touches `RunService` — `Bootstrap` — contains no priced call at all, which
+  is what keeps `hot-loop-scan.js`'s "in a RunService file" count at zero.
+- **to verify in Studio:** that measurement cost. The ~190 µs figure for `os.clock()`
+  that this rule was written around is a `tick()`-in-a-Script measurement; from a
+  ModuleScript `os.clock()` is a `workspace.DistributedGameTime` read, which is very
+  probably cheaper. `CadenceService:summary()` prints peak and mean per slot, so the
+  difference is visible: if `TimePublish`'s peak at 1 Hz is anywhere near a tenth of
+  its 0.30 ms budget while doing nothing, sampling every Nth dispatch (one counter in
+  `_runSlot`) is the fix.
+
 ---
 
 ## 5. Replication rules (the non-obvious ones)
@@ -345,9 +377,12 @@ These are the rules that come from the actual engine behaviour, verified in
 | `Lib/UtilityAI` | `select(options, ctx, rng) -> action`, `score(...)` | mutate the creature |
 | `Lib/QLearning` | `new(cfg)`, `:q(feats, action)`, `:act(feats, rng)`, `:learn(feats, a, r, feats2)`, `:serialize()` | persist directly |
 | `Lib/MarkovPredictor` | `observe(from,to)`, `predict(from, k)`, `serialize()` | allocate per call |
-| `Shared/NoiseField` | `emit(kind, pos, intensity, opts)`, `sample(pos, sense) -> number`, `query(...)` | raycast (perception does) |
-| `Shared/Skeleton` | `new(jointCount)`, `:setJoint(i, cf)`, `:joint(i)`, `:len()` | allocate per frame |
-| `Shared/SkeletonCodec` | `pack(skel) -> Buffer`, `unpack(buf) -> skel` | use JSON |
+| `Shared/NoiseField` | `new(cfg)`, `:emit(channel, x, y, z, i, now, opts?)`, `:emitAt(...)`, `:sample(channel, x, y, z, radius, now)`, `:sampleAll`, `:loudestChannel`, `:setWind(x, y, z)`, `:setWeather(entry)`, `:remove`, `:prune(now)`, `:count`, `:clear` | raycast (perception does); move/re-insert impulses (advection is sampled backwards from `now`) |
+| `Shared/Skeleton` | `new(count, opts)`, `:setJoint(i, x, y, z)`, `:straighten`, `:setRestPose`, `:reset`, `:copyFrom`, `:totalLength`, `:radiusAt`, `:setUp`, `:markDirty/:isDirty/:clearDirty` | allocate per frame; change lengths or taper (genome data, replicated once) |
+| `Shared/SkeletonCodec` | `encode(out, skels, core, ref, seq, id, quat) -> count, reconCore`, `decode(bytes, skels, ref) -> core, seq, quat`, `byteCount`, `normaliseQuat`, `coreDisplacement` | use JSON; touch a `buffer` (the adapters live in `Creature/Replicator`) |
+| `Shared/Remotes` | `init()`, `get(name)`, `await(name, timeout)`, `bindAll(timeout)`, `names()`, `clientToServer()`, `definition(name)`, `coverageProblems(schemas)` | create a remote on a client; create anything not in `Definition` |
+| `Shared/NetContract` | `validate(schema, payload)`, `admit(gate, key, schema, payload, now)`, `newGate()`, `allow`, `forget`, `limits`, `stats`, `.Schemas`, `.Reject`, `.Actions` | coerce a bad payload into a plausible one (reject instead); trust any field it did not declare |
+| `Shared/TimeModel` | `phaseOf`, `phaseClock`, `phaseSpan`, `phaseProgress`, `phaseWeight`, `phaseSeconds`, `cycleSeconds`, `nextPhase`, `minutesToClock`, `clockToMinutes`, `skyKey`, `sunElevation`, `nextMoonPhase`, `moonBrightnessDelta` | write Lighting (clients only); invent a phase boundary that is not in `DayNightConfig` |
 | `Services/*` | `init()`, `start()`, `stop()`, plus domain API | be required by `Lib` |
 | `CreatureCore` | `new(genome, spawn)`, `:step(dt)`, `:think()`, `:sense()`, `:destroy()` | call remotes directly |
 
@@ -467,8 +502,21 @@ unambiguous even without Studio open.
 | `node tools/hot-loop-scan.js --src code` | expensive calls inside loops/frames |
 | `node tools/call-graph.js --src code` | dependency direction + orphaned exports |
 | `node tools/find-dead-config.js --src code` | config keys nothing reads |
-| `node tools/vitriol-smoke-test.js` | **executes** the pure `Lib` modules in fengari and asserts real behaviour |
+| `node tools/vitriol-smoke-test.js` | **executes** the pure `Lib`/`Shared` modules in fengari and asserts real behaviour |
+| `node tools/vitriol-session-test.js` | **executes** the server: a fake DataModel + virtual clock, the real `Bootstrap` and services, and the WP4 acceptance criteria (a zero-player cycle, one log line per phase change, `Lighting` untouched, no second scheduler) |
 | `bash tools/audit.sh` | all of the above (note: `validate-project` expects a Rojo `default.project.json`, which this project deliberately does not have — that one check is expected to report the missing project file) |
+
+Both harnesses share `tools/lib/luau-transform.js`, and that is load-bearing: the
+transform is *stricter* than a Lua parser on purpose (it throws on `continue`, on a
+backtick anywhere in a line of code — including inside a comment — and on a multi-line
+function head), because a harness that silently mangles a file tests something other
+than what was written. `task.wait`, `task.spawn` and `task.delay` are poisoned in the
+session harness for the same reason: a service that invents a scheduler should fail
+loudly, and it does.
+
+`find-dead-config.js` scans two paths by default; to check a config you just changed,
+pass both flags — `--src code --file code/ReplicatedStorage/Vitriol/Config/X.luau` — or
+it will report every top-level block as dead.
 
 `tools/validate-project.js` is Rojo-oriented by design; this project is
 Explorer-first, so treat its "missing project file" output as expected rather than
@@ -492,7 +540,42 @@ Three documented exceptions, all verified by running the tools:
   testable because `vitriol-smoke-test.js` rewrites `require(script.Parent.X.Foo)`
   to a lookup of the last path segment in its `MODULES` map. **A new module with a
   dependency must be added to that map** or the harness cannot load it.
+- The backtick rule in `vitriol-smoke-test.js` fires on the **raw line**, before
+  comments are masked. A prose comment that quotes an identifier in backticks
+  therefore fails the harness exactly as an interpolated string does. Use 'single
+  quotes' in the comment text of any module under test.
+- `buffer` is shimmed in the harness preamble with the documented Roblox semantics
+  (0-based offsets, fixed size, out-of-range access errors, `writeu8` requires an
+  integer in `[0,255]`). That is what lets `Creature/Replicator`'s byte-array ⇄
+  Buffer adapters be *executed* here: it proves the adapter's indexing arithmetic
+  and byte fidelity, not Roblox's allocator. Anything else about buffers must still
+  be checked in Studio.
+- A module under test must resolve its dependencies through `require(script.Parent…)`
+  or an injected `cfg` field — never a service lookup at load time. `Replicator`,
+  `Remotes` and `TimeService` therefore take their dependencies from Bootstrap and
+  only fall back to `game:GetService` lazily, inside a function.
+- Two harnesses, two purposes: `tools/vitriol-smoke-test.js` runs the **pure** layer
+  (`Lib/`, `Shared/`) and its `MODULES` map is hand-kept, while
+  `tools/vitriol-session-test.js` boots the **whole server** (Bootstrap + services + the
+  two handler Scripts) on a fake DataModel with a virtual clock, resolving `require`
+  against every file in `code/` by basename. That is why the session harness has no
+  module map — a service can be added without touching tooling, and adding a slot
+  cannot silently skip the cadence accounting, because the harness asserts against
+  `CadenceService:summary()` rather than a hand-written expectation.
+- Luau forms that the harness **rejects** rather than mangling: backtick strings,
+  `continue`, `{T}?` generics, multiplicative hash mixers (overflow 2^53 in fengari
+  → `no integer representation`), `x + 2^32` integer normalisers, and any multi-line
+  function head whose close is not `,)`. Prefer `any` over `{T}?`; prefer `local q =
+  ...; x = x + q` over a multi-line `+=`. Shared transform (both harnesses):
+  `tools/lib/luau-transform.js`.
 - `tools/call-graph.js` and `tools/find-dead-config.js` will report every
   `Lib`/`Shared` export and Config key as unused until WP1–WP10 build their
   consumers. That is the expected state of a foundations iteration, not a defect —
   but it must trend to zero.
+- **Citations follow one house style:** `docs/NN §A.B` means heading `A.B` where the
+  target has sub-headings, and item `B` of `§A`'s numbered list where it does not
+  (`docs/01 §5.1` = rule 1 of §5; `docs/02 §9.2` = a real sub-heading; `docs/06 §5.6` =
+  rule 6 of §5). A third form letters a sub-option: `docs/07 §3.1A` is option A inside
+  §3.1. Check both readings before "fixing" a pointer — and never leave a citation to a
+  section that resolves under neither (docs/03's §9 is collision groups; an audio contract
+  does not live there, it is `docs/06 §5.6`).

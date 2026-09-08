@@ -143,12 +143,52 @@ SurvivalConfig.Consumables = {
 	Medkit = { bleeding = true, health = 25, seconds = 4.0, noiseAir = 0.40 },
 }
 
+-- Health, wounds and bleeding (docs/05 §1, §3.3; the part HealthService owns).
+-- SurvivalService drives hunger/thirst; this block is the body's own ledger, and
+-- the split is deliberate: HealthService is the ONLY writer of Humanoid health for
+-- wounds, so a wound's rate cannot be applied twice.
+SurvivalConfig.Health = {
+	Max = 100,
+	-- Below this the player is Incapacitated rather than dead (docs/05 §3.2:
+	-- collapse is a compound state, and a corpse has no second chance).
+	IncapacitatedThreshold = 15,
+	-- Natural recovery, per second, only while it is cheap to heal: no bleeding and
+	-- both meters below the coupling threshold (docs/05 §2).
+	RegenPerSecond = 0.06,
+	-- Regen additionally requires the meters (docs/05 §2), which SurvivalService owns
+	-- from WP8; it reports that precondition through HealthService:metersAllowRegen
+	-- rather than writing HP here. No threshold is duplicated in this table, because a
+	-- second copy of "how hungry is too hungry" is two numbers that can disagree.
+	-- A severed limb re-ranks the wound that caused it (docs/04 §4).
+	SeveredBleedMultiplier = 2.5,
+	-- Wounds are data, so a new injury type never needs a code change.
+	--   BleedRate    : health lost per second while untreated
+	--   ScentRate    : multiplier on Emission.BloodScentPerRate (docs/02 §2, blood x6)
+	--   ClotSeconds  : time to stop bleeding unaided; bandages cut it to zero
+	--   TreatSeconds : how long a bandage takes, and therefore how loud it is
+	Wounds = {
+		Laceration = { BleedRate = 0.30, ScentRate = 1.0, ClotSeconds = 45, TreatSeconds = 3.0 },
+		Puncture = { BleedRate = 0.45, ScentRate = 1.4, ClotSeconds = 60, TreatSeconds = 3.5 },
+		Avulsion = { BleedRate = 0.75, ScentRate = 2.0, ClotSeconds = 90, TreatSeconds = 4.5 },
+		Bruise = { BleedRate = 0.0, ScentRate = 0.0, ClotSeconds = 20, TreatSeconds = 2.0 },
+		Burn = { BleedRate = 0.20, ScentRate = 0.4, ClotSeconds = 30, TreatSeconds = 4.0 },
+	},
+	BleedCueSeconds = 4, -- how often the drip audio is re-cued; the HUD stays empty
+}
+
 -- Noise emitted by the player's own body, feeding NoiseField (docs/02 §2).
 SurvivalConfig.Emission = {
 	FootstepVibration = { Resting = 0.0, Walking = 0.25, Sprinting = 0.70, Crawling = 0.08, Carrying = 0.35 },
 	BreathAir = 0.05,
 	BaseScent = 0.20,
 	BloodScentPerRate = 6.0,
+	-- The drip a bleeding player makes (docs/05 §3.1's "drip audio" cue). Intensity is
+	-- in the noise field's 0..1 perceptual units, the same currency every other
+	-- emission here uses; what "loud" means for a given creature is its own
+	-- threshold, which is MonsterConfig.Senses.Threshold's job (WP6), not this
+	-- number's. Deliberately far below FootstepVibration: bleeding is a clue you can
+	-- be quieter than, not a dinner bell.
+	BloodAirIntensity = 0.06,
 	CorpseScent = 0.80,
 	CorpseScentDecaySeconds = 360,
 }

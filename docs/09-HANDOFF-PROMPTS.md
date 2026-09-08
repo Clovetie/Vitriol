@@ -102,14 +102,18 @@ reader that needs it. Do not leave speculative knobs.
 
 ---
 
-## WP3 — Shared layer: Skeleton, SkeletonCodec, NoiseField, Remotes  🟨 *partial*
+## WP3 — Shared layer: Skeleton, SkeletonCodec, NoiseField, Remotes, NetContract  ✅ *delivered: iterations 2 and 3*
 
-> Delivered and tested: `Skeleton`, `SkeletonCodec`, `NoiseField`. Still owed:
-> `Remotes`, `NetContract`; `Skeleton:reset()`; the quantised-quaternion core
-> orientation in the codec payload (docs/03 §7.1 lists 4 bytes for it, the codec
-> currently emits none); `buffer` adapters for `encode`/`decode`; wind advection,
-> rain masking and the material-coupling table in `NoiseField`; and the
-> 200-random-chain round-trip test this WP asks for.
+> Closed in iteration 3. `Remotes` (server-creates / client-binds with a timeout, and
+> it polices `Comms` for strays) and `NetContract` (declarative schemas + token-bucket
+> admission + a monotonic sequence guard, executed against a 400-payload fuzz) exist;
+> `Skeleton:reset()` and its rest pose exist; the codec emits the quantised-quaternion
+> core orientation docs/03 §7.1 asked for (header 13 B, snapshot 589 B);
+> `Creature/Replicator` holds the `buffer` adapters and the harness proves array /
+> Buffer byte parity; `NoiseField` does decay, wind advection, weather masking and
+> surface coupling, and docs/02 §2 now records which term belongs to the field and
+> which to the senses; and the round-trip test is the 200-random-chain sweep WP3
+> asked for (worst 0.00820 studs) rather than one pose.
 
 ```
 Implement the Shared modules from docs/01-ARCHITECTURE.md §2 under
@@ -136,7 +140,23 @@ hot-loop-scan with no expensive calls flagged inside loops.
 
 ---
 
-## WP4 — Server services skeleton + session flow
+## WP4 — Server services skeleton + session flow  ✅ *delivered: iteration 3*
+
+> Delivered, and the acceptance line is executed rather than eyeballed:
+> `node tools/vitriol-session-test.js` runs the real `Bootstrap` + services on a fake
+> DataModel with a virtual clock (78 assertions). Notes on three places where the code
+> and the prompt differ on purpose: there is **no spawned loop to track** —
+> `Services/CadenceService` is one Heartbeat-driven scheduler and every service
+> registers a slot, so `stop()` unregisters slots (asserted: 0 still enabled after
+> stop); `Bootstrap` is a **ModuleScript**, because a Script parked in ServerStorage
+> never executes (docs/08 §10); and the phase machine lives in `TimeService` (the
+> clock) with `SessionService` deciding what a transition *means*, because two phase
+> machines would drift apart — see docs/06 §2.2 for why the clock is derived from the
+> phase rather than integrated from a rate curve. `Profiler` measures each cadence
+> against `GameConfig.Budgets` and auto-degrades one LOD tier after
+> `WatchdogSamples` consecutive 2x windows, which the harness drives by burning
+> virtual time in a test slot.
+
 
 ```
 Implement ServerStorage/Vitriol/Services/{SessionService, TimeService,

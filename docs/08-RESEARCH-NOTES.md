@@ -368,3 +368,24 @@ DataStore outage end a round.
 | Whether `Model:PivotTo` on a 200-part model is cheaper than `BulkMoveTo` | renderer | MicroProfile in Studio |
 | `Humanoid.BreakJointsOnDeath` + `ChangeState(Physics)` interaction with `IKMoveTo` | grab system | Studio test place |
 | Terrain water `CanQuery` behaviour | scent/vibration masking by water | Studio test |
+
+---
+
+## 10. Verified engine facts added by iteration 3 (WP3/WP4)
+
+- ✅ **Attributes are read on the client with `Instance:GetAttributeChangedSignal(name)`.**
+  There is **no** `GetAttributeChangeListener` — the name appears in a lot of
+  third-party tutorials and does not resolve. Verified
+  `create.roblox.com/docs/reference/engine/classes/Script.md` (inherited `Instance`
+  members list), 2026-09-08. This is the API `LightingDriver` must use for the
+  `TimeAnchor` attributes in `06` §6.
+- ✅ **A `Script` only runs when it is a descendant of `Workspace` or
+  `ServerScriptService`.** Code parked in `ServerStorage` never executes there, so
+  `ServerStorage/Vitriol/Bootstrap` is a **ModuleScript** and `ServerScriptService`'s
+  `Main` requires it (docs/01 §2 updated to match). Same source, §"Description".
+- ✅ **`buffer` semantics** (`libraries/buffer.md`): `buffer.create(n)` is zero-filled,
+  max 1 GiB; `readu8`/`writeu8`/… take **0-based byte offsets** and error out of
+  range; multi-byte reads are little-endian; a `Buffer` sent through a `RemoteEvent`
+  is **copied** (so `Replicator` may reuse its scratch buffer between sends), and one
+  buffer object cannot be shared between parallel `Actor`s (so an actor must be given
+  bytes, not the shared scratch).

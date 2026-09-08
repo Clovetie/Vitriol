@@ -40,11 +40,24 @@ Transport:
 `Shared/TimeModel` is pure and shared by both sides.
 
 ```lua
-TimeModel.minutesToClock(min)   -> number      -- 0..24
-TimeModel.phaseOf(clockHours)   -> Phase       -- Dawn|Day|Dusk|Night
-TimeModel.phaseWeight(clock)    -> number      -- 0..1 blend for cross-fades
-TimeModel.sunElevation(clock, latitudeDeg) -> number   -- for realism checks
+TimeModel.minutesToClock(min)      -> number    -- 0..24, wraps
+TimeModel.clockToMinutes(h)        -> number
+TimeModel.phaseOf(clockHours)      -> Phase     -- Dawn|Day|Dusk|Night
+TimeModel.phaseSpan(phase)         -> startHour, lengthHours
+TimeModel.phaseClock(phase, p)     -> clockHours          -- the forward map
+TimeModel.phaseProgress(clock, ph) -> 0..1                -- the inverse
+TimeModel.phaseWeight(clock)       -> phase, 0..1         -- cross-fade scalar
+TimeModel.warp(p, ease)            -> warped, monotone
+TimeModel.phaseSeconds(phase, threat) / cycleSeconds(threat)
+TimeModel.nextPhase(phase)         -> Phase
+TimeModel.skyKey(clockHours)       -> "Sky_Day" | "Sky_Dusk" | "Sky_Night"
+TimeModel.sunElevation(clock, latitudeDeg) -> number      -- for realism checks
+TimeModel.nextMoonPhase(p) / moonBrightnessDelta(p)
 ```
+
+That is the complete shared surface, and it is the whole reason both sides agree:
+`TimeService` advances it, `LightingDriver` paints it, and neither may re-derive a
+boundary locally.
 
 ### 2.1 Pacing (`DayNightConfig.Pacing`)
 
@@ -58,14 +71,22 @@ TimeModel.sunElevation(clock, latitudeDeg) -> number   -- for realism checks
 
 `NIGHT` length is driven by **Threat Level, not by a constant** (`00-VISION.md` P5).
 
-### 2.2 The clock itself
-- One in-game day = one real cycle above. `ClockMinutes` advances at
-  `1440 / cycleSeconds` minutes per real second.
-- Dusk/night are **not** linearly mapped from the real cycle: the clock *slows*
-  through `DUSK` (a longer, more cinematic sunset) and *speeds* through `DAY`.
-  Implemented as a piecewise rate table in `DayNightConfig.RateCurve` — this is
-  what makes the transition feel "seamless and realistic" instead of a constant
-  crawl.
+### 2.2 The clock itself (rewritten in WP4 — read this before adding a second clock)
+- One in-game day = one real cycle above.
+- **The phase machine is authoritative and the clock is derived from it.** Each
+  phase owns a fixed span of clock hours (`PhaseHours`) and a real duration
+  (`Pacing`, Night scaled by Threat); `TimeModel.phaseClock(phase, progress)` maps
+  one to the other. There is no free-running `1440 / cycleSeconds` accumulator any
+  more, and no `RateCurve` table: a clock integrated from a rate lands on
+  `DayStart` at 45 s *by luck*, so one server would say **Night** while the sky
+  still said **Dusk** — the exact seam §9.3 forbids. Derived instead of integrated,
+  the boundary is hit to the last bit at every Threat Level, which is asserted in
+  `tools/vitriol/tests.luau`.
+- The "slow dusk, brisk day" feel that `RateCurve` existed to provide is now
+  `DayNightConfig.Pacing.Ease`, a per-phase warp of `progress` through smoothstep
+  (negative = dawdle through the second half, which is where 18.5–19.8 lives).
+  Clamped to ±2/3 so it can never be non-monotone, and exact at both endpoints by
+  construction — so it can tint a transition but never move one.
 
 ---
 
@@ -173,17 +194,29 @@ Small additions that punch far above their cost:
 ## 6. What the server publishes
 
 ```lua
--- attributes on Workspace.Vitriol.World.TimeAnchor
-ClockMinutes : number    -- 0..1440, updated 1 Hz (clients interpolate)
-NightIndex   : number    -- 1..N
-ThreatLevel  : number    -- 0..1
-MoonPhase    : number    -- 0..7
-WeatherSeed  : number    -- for client-side rain/fog variation
-PhaseName    : string    -- "Dawn"|"Day"|"Dusk"|"Night"  (UI only)
+-- attributes on Workspace.Vitriol.World.TimeAnchor, all written by TimeService and
+-- nothing else, each only when it actually changed (an attribute write replicates
+-- even at the same value). See §2.2 for why the hour hand is derived, not counted.
+ClockMinutes  : number   -- 0..1440, updated at Driver.SnapshotRateHz
+NightIndex    : number   -- 0..N; "nights survived so far", so it increments on Night -> Dawn
+ThreatLevel   : number   -- 0..1
+MoonPhase     : number   -- 0..7 index into DayNightConfig.Moon.Phases
+WeatherSeed   : number   -- for client-side rain/fog variation
+PhaseName     : string   -- "Dawn"|"Day"|"Dusk"|"Night"  (UI and audio beds read this)
+PhaseProgress : number   -- 0..1 within the current phase; the mid-transition blend
+LodTier       : number   -- 0..3, only after the budget watchdog degrades (docs/01 §4)
+WindX/WindY/WindZ, WeatherKind : only while GameConfig.Features.Weather is on
 ```
 
-`RE_TimeSync` carries the same payload plus `cycleSeconds` and `rateCurveVersion`,
-so a late-joining client can reconstruct the exact clock without waiting.
+`RE_TimeSync` carries, in order: `clockMinutes, phase, phaseProgress, threatLevel,
+nightIndex, weatherKind, cycleSeconds` — the same state, but addressed to one client
+on join (`TimeService.onPlayerAdded`) and re-broadcast at the snapshot rate, so a
+late joiner reconstructs the exact clock and the exact mid-phase blend without waiting.
+
+When `GameConfig.Features.Weather` is switched on, the wind vector is published
+alongside the clock (`WindX/Y/Z`) for the same reason the clock is: `NoiseField`
+advects scent from it, and the Attune overlay has to advect by the same number or it
+would show players a plume the creature is not smelling.
 
 **Anti-cheat note:** the clock is server-authoritative and clients only *render*
 it. A client tampering with its own Lighting gains nothing gameplay-relevant,
@@ -235,4 +268,15 @@ Without these, tuning a day/night cycle takes hours instead of minutes.
 4. `Night` length responds to `ThreatLevel` exactly per `Pacing`.
 5. Zero `Lighting` property writes originate from a server script
    (grep-verifiable: no `Lighting` reference under `ServerStorage`/`ServerScriptService`).
+   **Stronger, and executed:** `tools/vitriol-session-test.js` runs the real services on
+   a fake DataModel whose `Lighting` is a poisoned object — fetching it is *counted*,
+   writing it *errors*. The run asserts both counters are zero, which is the property the
+   rule is about rather than the text pattern that approximates it.
 6. Moon phase measurably changes night brightness and creature visual range.
+   The clock half is executed (`moonBrightnessDelta`, `nextMoonPhase` advance exactly at
+   Night -> Dawn and nowhere else); the "visual range" half belongs to `Senses`, in WP6.
+7. **A server with zero players runs a full cycle and logs exactly one line per phase
+   change, with the elapsed time in it** — executed by the same harness:
+   `node tools/vitriol-session-test.js` counts the log lines against
+   `SessionService`'s own transition counter, so a second emitter or a dropped one breaks
+   the gate rather than the expected number of cycles this test happens to simulate.

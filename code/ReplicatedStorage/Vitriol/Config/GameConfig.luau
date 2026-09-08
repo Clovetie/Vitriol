@@ -21,6 +21,57 @@ GameConfig.Features = {
 	DebugPilot = false, -- keyboard-drive a creature in Studio
 	DebugNoiseMarkers = false,
 	DebugDecisionDump = false,
+	DataPersistence = false, -- session records; blocking on GetAsync at boot is a bug
+}
+
+-- Network contract (WP2/WP3). One place defines the remotes, the bind timeout and
+-- the admission limits the server applies to anything a client sends.
+GameConfig.Net = {
+	CommsFolder = "Comms", -- ReplicatedStorage > Vitriol > Comms
+	BindTimeoutSeconds = 5, -- client WaitForChild per remote; then degrade, never hang
+	-- Token buckets for NetContract, per player per message kind.
+	--   Burst             tokens available after idling
+	--   SustainedPerSecond  refill rate
+	--   MinGapSeconds     hard floor between two accepted messages of a kind
+	Rate = {
+		ClientIntent = { Burst = 8, SustainedPerSecond = 12, MinGapSeconds = 0.04 },
+		DebugQuery = { Burst = 3, SustainedPerSecond = 2, MinGapSeconds = 0.25 },
+	},
+	-- Payload bounds for NetContract. A hold longer than MaxHeldSeconds is either a
+	-- stuck key or a lie, and either way the server has its own timer for it.
+	MaxHeldSeconds = 30,
+	MaxStringBytes = 48,
+	MaxListLength = 16,
+	MaxPositionMagnitude = 20000, -- studs; the map is far smaller, so larger is a bug
+	DebugArgumentMin = -24, -- 'setclock' / 'speedtime' range, docs/06 §8
+	DebugArgumentMax = 1000,
+}
+
+-- What a client is allowed to ask for, grouped by the service that answers it
+-- (docs/07 §4). NetContract builds its intent enum from this list, and
+-- DestructionConfig.Interactions holds the noise cost of each one that makes noise.
+-- Adding an interaction = one line here + one line in the owning service.
+GameConfig.Intents = {
+	{
+		Group = "Destruction",
+		Actions = {
+			"OpenDoor",
+			"KickDoor",
+			"Barricade",
+			"RemoveBarricade",
+			"SmashPlank",
+			"BreakWindow",
+			"ClimbThroughWindow",
+			"SearchContainer",
+			"CarryObject",
+			"ThrowObject",
+			"PushVehicle",
+			"CrankGenerator",
+		},
+	},
+	{ Group = "Vehicle", Actions = { "EnterVehicle", "ExitVehicle" } },
+	{ Group = "Survival", Actions = { "Consume", "TreatWound", "DropHeld" } },
+	{ Group = "Sense", Actions = { "Attune", "AttuneRelease" } },
 }
 
 -- Session shape (docs/00-VISION.md §8.1).
@@ -31,6 +82,13 @@ GameConfig.Session = {
 	IntermissionSeconds = 15,
 	CorpseLifetimeSeconds = 360, -- corpses keep emitting scent for the night
 	DiscardLifetimeSeconds = 360,
+	-- The clock multiplier a test harness uses (docs/00 §7): 60 makes a full night
+	-- pass in seconds. Production is 1, and it lives in config precisely so a shipped
+	-- build can be diffed for it.
+	SecondsPerRealSecond = 1,
+	RoundName = "Quarry", -- the log line's subject: a session is named, not numbered
+	DataStoreName = "vitriol-session",
+	PhaseLogLines = 8, -- how many phase-change lines the debug dump can reach
 }
 
 -- Tick cadences (docs/01-ARCHITECTURE.md §4). Nothing invents its own loop.
@@ -38,6 +96,9 @@ GameConfig.Ticks = {
 	ThinkHz = 6, -- per creature, staggered
 	SenseHz = 10, -- per creature, staggered
 	SlowHz = 1, -- survival / clock / GC
+	-- One Heartbeat-driven scheduler (Services/CadenceService) owns every cadence,
+	-- so there is exactly one place that decides how finely a 1 Hz job may drift.
+	CadenceSlopSeconds = 0.25, -- max lateness tolerated before a slot skips a beat
 	SkeletonStreamHzNear = 15,
 	SkeletonStreamHzMid = 8,
 	SkeletonStreamHzFar = 4,
@@ -51,6 +112,22 @@ GameConfig.Budgets = {
 	CreatureFrameMs = 1.2,
 	PerceptionMs = 1.0,
 	DestructionMs = 0.5,
+	-- The Slow row of docs/01 §4 is ONE 0.4 ms budget shared by everything on the
+	-- second cadence, so the split is data: a slot that exceeds its share is named in
+	-- the log, and Bootstrap checks that the shares still add up to the row.
+	SlowShares = {
+		TimePublish = 0.05,
+		Session = 0.05,
+		Threat = 0.05,
+		Health = 0.10,
+		Noise = 0.10,
+	},
+	FrameShares = {
+		-- The clock is a frame-cadence job (a 1 Hz sky visibly steps); this is its
+		-- slice of the 1.2 ms frame row, which is otherwise spent on IK and steering.
+		TimeClock = 0.02,
+		Health = 0.05,
+	},
 	SlowMs = 0.4,
 	ReplicationMs = 0.3,
 	WatchdogMultiplier = 2.0,
@@ -67,6 +144,21 @@ GameConfig.LOD = {
 	MidJoints = 8,
 	FarJoints = 4,
 	OffscreenJoints = 3,
+	-- The ladder itself, ordered cheapest-last. The watchdog walks these by index, so
+	-- the tiers are config rather than an if-chain in Diagnostics/Profiler.
+	Tiers = { "NEAR", "MID", "FAR", "OFFSCREEN" },
+}
+
+-- Diagnostics (WP4). Everything the boot path and the watchdog log.
+GameConfig.Diagnostics = {
+	Prefix = "vitriol", -- one prefix so a filtered console shows only this game; the
+	-- brackets are added by the logger, not stored in the value
+	LogPhaseChanges = true, -- the acceptance line: one per phase change
+	LogServiceLifecycle = true, -- init/start/stop of each service, for CI diffs
+	ProfilerReportSeconds = 10, -- how often the budget summary is printed
+	ProfilerDegradeLog = true, -- log the auto-degrade decision itself
+	LogNetRejections = false, -- one line per rejected client payload; noisy by design
+	DebugRemoteEnabled = true, -- binds RF_DebugQuery; flip false before shipping
 }
 
 -- Collision groups (docs/03-MONSTER-TECH.md §9). Registered once at boot.

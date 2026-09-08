@@ -2,7 +2,7 @@
 
 Iteration tracker. Status legend: ⬜ not started · 🟨 in progress · ✅ done.
 
-## Iteration 1 — **this one** ✅
+## Iteration 1 — foundations  ✅
 
 Brainstorming, deep research, architecture, and a verified pure-code foundation.
 
@@ -23,7 +23,7 @@ Brainstorming, deep research, architecture, and a verified pure-code foundation.
 | `Config/{Game,DayNight,Monster,Survival,Destruction,Vehicle,Gore}Config` | ✅ |
 | `tools/vitriol-smoke-test.js` + 78 runtime assertions | ✅ |
 
-## Iteration 2 — **this one** 🟨
+## Iteration 2 — pure layer, shared layer  ✅
 
 Building the verified foundation outward, one work package at a time. Every module
 below is *executed* by `tools/vitriol-smoke-test.js`, not merely parsed.
@@ -41,9 +41,44 @@ below is *executed* by `tools/vitriol-smoke-test.js`, not merely parsed.
 | WP3 `Shared/SkeletonCodec` — core-relative quantisation, DPCM feedback | ✅ |
 | WP3 `Shared/NoiseField` — 6-channel decaying impulse field | ✅ |
 | Harness: `require()` shim + multi-line `+=` support | ✅ |
-| 198 runtime assertions (was 78) | ✅ |
-| WP2 `Shared/Remotes`, `Shared/NetContract` | ⬜ |
-| WP4 `Services/*`, `Bootstrap` | ⬜ |
+| Runtime assertions at the end of iteration 2: 198 | ✅ |
+
+## Iteration 3 — the server exists  🟨 **this one**
+
+The shared layer closed (WP3) and the server started (WP4), with both harnesses
+executing real code. Everything below is *run*, not parsed.
+
+| Deliverable | Status |
+| --- | --- |
+| WP3 `Shared/Remotes` — the only place a remote is created; `WaitForChild` + timeout on the client; polices `Comms` for strays | ✅ |
+| WP3 `Shared/NetContract` — declarative schema per client→server message, token-bucket admission, monotonic-sequence replay guard; 400-payload fuzz | ✅ |
+| WP3 `Skeleton:reset()` + rest pose (and a default chain built straight, not knotted) | ✅ |
+| WP3 codec core orientation — 4×int8 quaternion, header 13 B, Braid snapshot 589 B; `docs/03` §7.1 corrected to agree | ✅ |
+| WP3 buffer adapters in `Creature/Replicator` (not the codec) + executed array⇄Buffer parity proof | ✅ |
+| WP3 `NoiseField` wind advection, weather masking, surface coupling — and `docs/02` §2 rewritten to match the ownership split | ✅ |
+| WP3 round-trip test over **200 random chains**, max error 0.00820 studs vs the 0.02 budget | ✅ |
+| WP4 `Services/CadenceService` — one Heartbeat-driven scheduler for all four cadences, staggered, slot-measured | ✅ |
+| WP4 `TimeService` — clock *derived* from the phase machine (`DayNightConfig.RateCurve` deleted: an integrated clock and a paced phase machine drift apart) | ✅ |
+| WP4 `SessionService` / `ThreatService` / `HealthService` + `Bootstrap` + `Main` | ✅ |
+| WP4 `Diagnostics/Profiler` — per-cadence budget watchdog, auto-degrade one LOD tier | ✅ |
+| WP4 `RemoteHandlers/{ClientIntentHandler,DebugHandler}` — validation applied; `RF_DebugQuery` is read-only by schema | ✅ |
+| New gate: `tools/vitriol-session-test.js` (fake DataModel + virtual clock), 78 assertions | ✅ |
+| 363 runtime assertions in the smoke test (was 198) | ✅ |
+| WP2 remainder — `find-dead-config` still reports blocks whose readers arrive in WP5–WP10 (`Genes`, `Memory`, `Prediction`, `CollisionGroups`, `Tags`, `AnimationIds`, …) | ⬜ |
+
+### Bugs found by writing the code (iteration 3, all fixed, all regression-tested)
+
+| Where | What was wrong |
+| --- | --- |
+| `TimeService` | `clockMinutes` was computed with `minutesToClock(phaseClock(...))` — hours in, hours out, divided by 60 twice. A 6.66 h dawn reported as 0.11. The attribute contract (docs/06 §6, `0..1440`) is minutes, so the conversion is `clockToMinutes`. Found only by executing the service. |
+| `TimeService` | called `noise:setWeather(kind, entry)` against a one-argument API; the entry landed in the wrong slot and the mask was indexed off a string. |
+| `TimeService` | read `DayNightConfig.PhaseHours[phase]`, but that table is keyed `DayStart`/`DuskStart`/… — every lookup was nil. Fixed by routing all phase↔hour naming through `TimeModel.phaseSpan`, which also now *refuses* an unknown phase instead of silently answering Night. |
+| `SessionService` | the injected logger field and the method were both called `log`, so the method resolved to the field and the field to the method: every log line became `[[vitriol]]` or a crash. The method is `emit` now, and the double-prefix bug it hid is gone. |
+| `HealthService` | `killRegistered()` on a *player* death would have made dying make the hunt harder; the dial counts creatures the group killed. |
+| `Bootstrap` | `stop()` left the noise-prune slot registered, so "stop cancels everything" was false. Asserted now (0 enabled slots after stop). |
+| `DayNightConfig` | `RateCurve`'s mean 2.5 min/s (576 s/day) contradicted `Pacing`'s 555–735 s cycle: the sky and `PhaseName` would have disagreed within a minute of start. The table is deleted and the pace is `Pacing.Ease` instead. |
+| `NoiseField` | advection sampled with a search window of wind × the channel's whole audibility lifetime — O(radius³) cells, and it hung the harness for 180 s (SCENT: 7 644 studs of span, 478³ cells). Now capped by `AdvectedMaxAge`, with the memory layer owning older evidence. |
+| harness | the transform wrapped `for x in string.gmatch(...)` in `pairs(...)`, and stripped `: Type` annotations across a *call* line so `conn:disconnect()` became `conn()`. Both fixed in `tools/lib/luau-transform.js`, which is now shared by the two harnesses so they cannot disagree about what legal Luau is. |
 
 ### Bugs found by writing the code (all fixed, all now regression-tested)
 
@@ -60,11 +95,15 @@ below is *executed* by `tools/vitriol-smoke-test.js`, not merely parsed.
 ### M0 — Foundations ✅ (this iteration)
 Design locked, pure math core executing under test, all tunables in Config.
 
-### M1 — Shared layer + services skeleton (WP1–WP4) ⬜
+### M1 — Shared layer + services skeleton (WP1–WP4) ✅ (iteration 3)
 `Skeleton`, `SkeletonCodec`, `NoiseField`, `Remotes`, `NetContract`;
-`SessionService`, `TimeService`, `ThreatService`, `HealthService`, `Bootstrap`,
-`Profiler`.
-**Exit:** an empty server runs the full Dawn→Night cycle and logs phase timings.
+`CadenceService`, `SessionService`, `TimeService`, `ThreatService`, `HealthService`,
+`Bootstrap`, `Profiler`, `ClientIntentHandler`, `DebugHandler`.
+**Exit — met, and executed:** `node tools/vitriol-session-test.js` boots the real
+`Bootstrap` on a fake DataModel with a virtual clock and asserts that a zero-player
+server runs a full cycle, logs exactly one line per phase change with the elapsed time,
+never touches `Lighting`, and registers exactly two `Heartbeat` connections (the
+cadence pump and the watchdog). 78 assertions, 0 failures.
 
 ### M2 — The body, no brain (WP5) ⬜
 `TendrilRig`, `Locomotion`, `CreatureCore`, part-mode renderer, `BulkMoveTo`
@@ -106,15 +145,21 @@ Tracked in `docs/02-MONSTER-DESIGN.md` §13:
 
 ## Known gaps in this iteration
 
-- No service, controller or creature code exists yet — everything under
-  `ServerStorage`, `ServerScriptService` and `StarterPlayerScripts` is still
-  design-only. `tools/call-graph.js` therefore reports every `Lib`/`Shared`
-  export as *unused*; that is expected until WP1–WP10 consume them.
-- `tools/find-dead-config.js` will report unread Config keys for the same reason.
-  WP2's job is to drive that to zero.
-- `tools/check-syntax.js` fails on `Lib/RNG.luau` only: luaparse is a **Lua 5.1**
-  parser and cannot read bitwise operators. The file is executed for real by
-  `tools/vitriol-smoke-test.js` under Lua 5.3, which is stronger evidence.
+- No creature or client code exists yet: `ServerStorage/Vitriol/Creature/*` is
+  `Replicator` only, and nothing under `StarterPlayerScripts` has been written.
+  `tools/call-graph.js` therefore still reports most `Lib`/`Shared` exports as
+  *unused*; that is expected until WP5–WP10 consume them.
+- `tools/find-dead-config.js --src code` will keep reporting Config blocks whose
+  readers arrive later (WP2's remainder). To check a config you just touched, pass
+  `--src code --file <that file>`, or it calls every top-level block dead. None of
+  iteration 3's new keys are unread.
+- `tools/check-syntax.js` fails on `Lib/RNG.luau` and `Lib/Noise.luau`: luaparse is a
+  **Lua 5.1** parser and cannot read bitwise operators. Both files are executed for
+  real by `tools/vitriol-smoke-test.js` under Lua 5.3, which is stronger evidence.
+- The session harness proves *logic* against a fake DataModel. It cannot prove
+  replication, attribute delivery timing, packet size, or that a client sees the sky
+  it should — those stay on the Studio checklist (docs/06 §9 items 1-3,
+  and the halves of 5-6 that need a real place).
 - `tools/validate-project.js` expects a Rojo `default.project.json`. This project
   is deliberately Explorer-first, so that one check reports a missing project file
   by design.

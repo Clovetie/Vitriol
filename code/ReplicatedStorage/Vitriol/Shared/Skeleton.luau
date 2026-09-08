@@ -28,6 +28,18 @@ local DEFAULTS = {
 	upX = 0,
 	upY = 1,
 	upZ = 0,
+	-- Rest pose: the origin, extending along +Z. Any direction works - what matters
+	-- is that a fresh chain is STRAIGHT. All-zero construction (the obvious choice)
+	-- produces a fully collapsed chain, and every consumer of it then reads
+	-- totalLength() from a pose that cannot exist: FABRIK's unreachable branch, the
+	-- codec's core-relative offsets and the reach checks in Locomotion all silently
+	-- operate on a knot. reset() returns to this pose for the same reason.
+	restX = 0,
+	restY = 0,
+	restZ = 0,
+	dirX = 0,
+	dirY = 0,
+	dirZ = 1,
 }
 
 -- Normalise in place; returns false if the vector is degenerate (caller keeps
@@ -73,10 +85,24 @@ function Skeleton.new(count: number, opts: any?)
 		end
 	end
 
+	-- The pose reset() returns to. Read as Vector3s when given (TendrilRig has one
+	-- on hand), as three numbers otherwise; both are plain data, so the module stays
+	-- free of any Instance or service reference.
+	local ro = o.restOrigin
+	local rd = o.restDirection
+	self.restX = ro and ro.X or DEFAULTS.restX
+	self.restY = ro and ro.Y or DEFAULTS.restY
+	self.restZ = ro and ro.Z or DEFAULTS.restZ
+	self.dirX = rd and rd.X or DEFAULTS.dirX
+	self.dirY = rd and rd.Y or DEFAULTS.dirY
+	self.dirZ = rd and rd.Z or DEFAULTS.dirZ
+
 	self:setTaper(o.rootRadius or DEFAULTS.rootRadius, o.tipRadius or DEFAULTS.tipRadius)
 	self.upX = o.upX or DEFAULTS.upX
 	self.upY = o.upY or DEFAULTS.upY
 	self.upZ = o.upZ or DEFAULTS.upZ
+	-- Lay the chain out along the rest direction instead of leaving it collapsed.
+	self:straighten(self.restX, self.restY, self.restZ, self.dirX, self.dirY, self.dirZ)
 	return self
 end
 
@@ -152,7 +178,7 @@ function Skeleton:setUp(x: number, y: number, z: number): boolean
 end
 
 -- straighten(skel, ox, oy, oz, dx, dy, dz) -> ()
--- Lays the chain out from `o` along `d`, fully extended. Used at spawn and when a
+-- Lays the chain out from 'o' along 'd', fully extended. Used at spawn and when a
 -- tendril is released, so the first frame is a clean line rather than a knot.
 function Skeleton:straighten(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number): ()
 	local m = math.sqrt(dx * dx + dy * dy + dz * dz)
@@ -171,6 +197,37 @@ function Skeleton:straighten(ox: number, oy: number, oz: number, dx: number, dy:
 		end
 	end
 	self.dirty = true
+end
+
+-- setRestPose(skel, ox, oy, oz, dx, dy, dz) -> ()
+-- Remembers the pose reset() returns to. TendrilRig calls this once when the rig is
+-- built (root attach point on the core + the hang direction the genome implies), so
+-- a released or wounded tendril returns to ITS pose and not to a generic one.
+function Skeleton:setRestPose(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number): ()
+	self.restX = ox
+	self.restY = oy
+	self.restZ = oz
+	self.dirX = dx
+	self.dirY = dy
+	self.dirZ = dz
+end
+
+-- restPose(skel) -> ox, oy, oz, dx, dy, dz
+function Skeleton:restPose(): number, number, number, number, number, number
+	return self.restX, self.restY, self.restZ, self.dirX, self.dirY, self.dirZ
+end
+
+-- reset(skel) -> ()
+-- Back to the rest pose. Used at spawn, when a tendril releases its anchor, when
+-- the creature dies, and by the pool when a Skeleton is recycled. It deliberately
+-- does NOT touch lengths, taper or the bend-plane reference: those are genome data
+-- replicated once at spawn, and a reset that silently re-authored them would let a
+-- client-side re-initialisation disagree with the server's rig.
+--
+-- It re-lays-out rather than zeroing, for the reason documented in DEFAULTS: a
+-- zeroed chain is a knot, and a knot is a legal-looking input to every consumer.
+function Skeleton:reset(): ()
+	self:straighten(self.restX, self.restY, self.restZ, self.dirX, self.dirY, self.dirZ)
 end
 
 -- setJoint(skel, i, x, y, z) -> ()
@@ -199,7 +256,7 @@ function Skeleton:jointDistance(i: number, x: number, y: number, z: number): num
 end
 
 -- tipX/tipY/tipZ(skel) -> number
--- Separate accessors rather than one multi-return `tip()`: the render path reads
+-- Separate accessors rather than one multi-return 'tip()': the render path reads
 -- them independently and this avoids constructing anything.
 function Skeleton:tipX(): number
 	return self.x[self.count]
@@ -233,11 +290,20 @@ function Skeleton:copyFrom(other: any): ()
 	self.upX = other.upX
 	self.upY = other.upY
 	self.upZ = other.upZ
+	-- The rest pose travels with the pose: copyFrom is also how a pooled Skeleton is
+	-- re-initialised, and a recycled chain whose reset() pointed at some previous
+	-- creature's attach point would snap to the wrong shoulder on release.
+	self.restX = other.restX
+	self.restY = other.restY
+	self.restZ = other.restZ
+	self.dirX = other.dirX
+	self.dirY = other.dirY
+	self.dirZ = other.dirZ
 	self.dirty = true
 end
 
 -- markDirty / isDirty / clearDirty
--- `dirty` lets the renderer skip work when a tendril has not moved (idle tendrils
+-- 'dirty' lets the renderer skip work when a tendril has not moved (idle tendrils
 -- that are simply hanging solve to the same pose every frame).
 function Skeleton:markDirty(): ()
 	self.dirty = true

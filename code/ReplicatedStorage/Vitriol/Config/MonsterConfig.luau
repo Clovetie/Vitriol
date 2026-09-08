@@ -67,8 +67,41 @@ MonsterConfig.Senses = {
 	VibrationCoupling = { Concrete = 1.6, Asphalt = 1.5, Wood = 1.2, Grass = 0.7, Sand = 0.5, Water = 0.1 },
 	-- How fast each channel's memory of an event decays (seconds, half-life).
 	DecayHalfLife = { VIBRATION = 1.2, AIR = 0.8, SCENT = 45, THERMAL = 3, EM = 0.5, PRESSURE = 0.3 },
+	-- How far downwind the field is actually searched for a drifting scent, in
+	-- seconds of drift (Shared/NoiseField). Older evidence is the memory layer's
+	-- job (docs/02 §3), not the local field's, and the cap is what keeps the
+	-- advected sample O(radius^3) in the CELL size rather than O(wind*half-life)^3.
+	AdvectionMaxAgeSeconds = 20,
+	-- The noise field's spatial cell, studs. Larger than Memory.CellSize because the
+	-- field queries by ear-shot radius (tens of studs) and memory queries by interest
+	-- cell: one cell size cannot serve both, and a too-small cell turns a sample into a
+	-- scan of dozens of buckets.
+	NoiseCellSize = 16,
 	MaxOcclusionRaysPerTick = 6,
 	MaxCandidatesPerTick = 12,
+}
+
+---------------------------------------------------------------------------
+-- Threat Level (docs/02 §12, docs/00 P5). The one dial every other system reads.
+---------------------------------------------------------------------------
+MonsterConfig.Threat = {
+	-- The difficulty curve as data: night index -> Threat, from docs/02 §12.
+	-- Nights past the last entry extrapolate by ThreatPerNightBeyond.
+	Curve = { 0.20, 0.35, 0.50, 0.70, 0.85 },
+	ThreatPerNightBeyond = 0.10,
+	-- A bigger group is a bigger meal: the dial moves with the table, not with one
+	-- player's skill. Scales are ADDED to the curve, then clamped.
+	PlayersAboveOne = 0.05,
+	PlayerCountFloor = 1, -- a 0-player (test) server runs like a solo player
+	PerKill = 0.04, -- a completed kill is the loudest signal there is (docs/04 §5)
+	PerSurvivedNightBonus = 0.02, -- the group got better too; it is not only the monster
+	Min = 0.0,
+	Max = 1.0,
+	-- How fast the published number is allowed to move, per second. Threat is a
+	-- director output, and a director that snaps is felt as a cheat (P4).
+	MaxChangePerSecond = 0.02,
+	-- Creatures per creature-count ladder, keyed by threat (docs/02 §13 open q 2).
+	CreatureCountAtThreat = { 0.0, 0.45, 0.70 }, -- < 0.45 -> 1, < 0.70 -> 2, else 3
 }
 
 ---------------------------------------------------------------------------
@@ -95,7 +128,7 @@ MonsterConfig.Prediction = {
 }
 
 ---------------------------------------------------------------------------
--- Actions (docs/02 §7). `requires` gates are checked against expressed stats.
+-- Actions (docs/02 §7). 'requires' gates are checked against expressed stats.
 ---------------------------------------------------------------------------
 MonsterConfig.Actions = {
 	SEARCH = {},
