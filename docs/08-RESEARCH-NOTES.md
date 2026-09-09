@@ -389,3 +389,15 @@ DataStore outage end a round.
   is **copied** (so `Replicator` may reuse its scratch buffer between sends), and one
   buffer object cannot be shared between parallel `Actor`s (so an actor must be given
   bytes, not the shared scratch).
+- ✅ **BloodEngine integration surface** (`https://rotntake.github.io/BloodEngine/`,
+  `https://github.com/rotntake/BloodEngine`, checked 2026-09-09): the supplied v1.1.3
+  source confirms `BloodEngine.new(settings)`; emission is `Engine:Emit(origin,
+  direction, optionalData)` or the explicit-count `Engine:EmitAmount(...)`. The
+  adapter uses `Emit` rather than `EmitAmount` so Vitriol never adds a gameplay
+  emission loop, and probes `ReplicatedStorage/VModules/BloodEngine` first. The
+  upstream MIT source and `Assets.rbxm` are checked in under that Explorer path;
+  Studio import and real droplet/pool visuals remain unverified.
+- ✅ **Part-chain presentation** (`https://create.roblox.com/docs/reference/engine/classes/WorldRoot#BulkMoveTo`,
+  checked 2026-09-09): `WorldRoot:BulkMoveTo(parts, cframes, eventMode)` accepts parallel
+  part/CFrame arrays. `CreatureCore` uses one guarded call per frame and falls back to
+  direct `CFrame` writes only for older/headless environments.

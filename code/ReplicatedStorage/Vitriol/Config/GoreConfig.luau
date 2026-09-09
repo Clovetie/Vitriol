@@ -1,15 +1,15 @@
 --!strict
 -- GoreConfig.luau
 -- Location: ReplicatedStorage > Vitriol > Config > GoreConfig  (ModuleScript)
--- Purpose:  Body regions, sever rules, the Gore module contract defaults and the
---           shipped intensity gate (docs/04-KILL-CHOREOGRAPHY.md).
+-- Purpose:  Body regions, sever rules, legacy body-integrity defaults and the
+--           shipped intensity gate consumed by BloodConfig (docs/04-KILL-CHOREOGRAPHY.md).
 -- Requires: (none)
--- Used by:  Services/GoreService, Shared/RegionIntegrity, Shared/GoreAdapter,
+-- Used by:  Services/HealthService, Shared/RegionIntegrity, Shared/BloodAdapter,
 --           Creature/Body/KillChoreography
 --
--- NOTE: the project owner's "provided gore module" is NOT present in this
--- repository yet. GoreAdapter degrades to the built-in fallback (§Fallback)
--- until it lands, so the whole kill system stays playable and balanceable.
+-- NOTE: the supplied BloodEngine/Blood source is vendored under
+-- ReplicatedStorage/VModules/BloodEngine, but BloodAdapter still degrades to the
+-- built-in fallback until Studio imports and verifies that Explorer hierarchy.
 
 local GoreConfig = {}
 
@@ -66,46 +66,15 @@ GoreConfig.Discard = {
 }
 
 ---------------------------------------------------------------------------
--- Gore module contract (docs/04 §3). GoreAdapter is the ONLY caller.
+-- Legacy body-effect budget copied by BloodConfig; BloodAdapter is the ONLY
+-- visual caller. There is no separate Gore module contract anymore.
 ---------------------------------------------------------------------------
-GoreConfig.Kinds = {
-	"blood_spray",
-	"blood_mist",
-	"blood_pool",
-	"chunk",
-	"severed",
-	"viscera",
-	"gib_burst",
-}
-
-GoreConfig.Contract = {
-	-- If the supplied module exposes a different entry point, change ONLY these.
-	ModuleName = "Gore",
-	ModuleLocations = {
-		"ServerStorage/Vitriol/Assets/GoreAssets/Gore",
-		"ReplicatedStorage/Vitriol/Shared/Gore",
-	},
-	EntryPoint = "emit", -- module.emit(kind, params)
-	WaitForModuleSeconds = 5,
-	LogMissingOnce = true,
-}
-
--- Budget: gore must never be why the server drops frames (docs/04 §3.2).
+-- Budget: blood must never be why the server drops frames (docs/04 §3.2).
 GoreConfig.Budget = {
 	MaxActiveEmitters = 24,
 	MaxDecals = 16,
 	DecalRaycastsPerSecond = 8,
 	MinDistanceToCamera = 3, -- never spawn inside the near plane
-}
-
-GoreConfig.Lifetimes = {
-	blood_spray = 6,
-	blood_mist = 4,
-	blood_pool = 180,
-	chunk = 60,
-	severed = 360,
-	viscera = 45,
-	gib_burst = 8,
 }
 
 -- Intensity is a SHIPPED setting, not a debug value (docs/04 §5).
@@ -119,17 +88,12 @@ GoreConfig.Intensity = {
 
 GoreConfig.BloodColor = { 96, 12, 16 } -- desaturated on purpose
 
--- Built-in fallback used when no gore module is present (docs/04 §3.3).
+-- Built-in fallback policy copied by BloodConfig when BloodEngine is absent (docs/04 §3.3).
 GoreConfig.Fallback = {
 	Enabled = true,
 	ChunkSize = { 0.25, 0.45 },
 	ChunkMaterial = "Slate",
 	ChunkLifetime = 8,
-	ChunkFadeSeconds = 2,
-	ParticleRate = 40,
-	ParticleSpeed = { 6, 14 },
-	ParticleLifetime = { 0.4, 1.0 },
-	DecalSize = { 2, 4 },
 }
 
 return GoreConfig

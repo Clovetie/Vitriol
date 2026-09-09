@@ -250,11 +250,33 @@ do
 	check(heard > 0, "a bleeding player is a scent source a nose can find at 24 studs (" .. string.format("%.4f", heard) .. ")")
 	local loud = noise:loudestChannel(root.Position.X, root.Position.Y, root.Position.Z, 24, Time.elapsedTotal)
 	check(loud == "SCENT", "and blood is the loudest thing about them (got " .. tostring(loud) .. ")")
+	check(runtime.Blood.IntensityName == "LOW", "the shipped blood presentation defaults to LOW intensity")
+	check(runtime.Blood.UsingFallback == true and runtime.Blood.fallbackCount <= runtime.Blood.maxFallback, "when the harness has no BloodEngine instance, presentation degrades to the bounded fallback")
 	humanoid.Health = 0
 	SIM.step(0.2)
 	check(state.dead == true, "a Humanoid at 0 hp is dead")
 	check(Session:snapshot().kills == 0, "a player death is NOT a session kill: the dial counts creatures the group killed")
 	check(Health:scentScale(player.UserId) >= 1, "the corpse still reports a scent scale for the memory layer")
+
+	-- A live player who reaches the one procedural creature enters the same
+	-- cadence-owned scene that the client VictimCamera watches. This is a real
+	-- server path test: no task.delay, no second Heartbeat, no Instance payload.
+	local scenePlayer = Players:addPlayer("SceneVictim")
+	local _, sceneHumanoid, sceneRoot = SIM.makeCharacter(scenePlayer)
+	SIM.setRoot(scenePlayer.Character, 1, 3, 0)
+	local liveCreature = runtime.Creature:creature(1)
+	liveCreature.X, liveCreature.Y, liveCreature.Z = 1, 3, 0
+	local creatureEvent = comms:FindFirstChild("RE_CreatureEvent")
+	local eventBefore = creatureEvent.allCount or 0
+	SIM.step(0.5)
+	local sceneState = Health.states[scenePlayer.UserId]
+	check(sceneState ~= nil and sceneState.kill ~= nil, "the woundable Braid starts a bounded victim scene at grab distance")
+	check((creatureEvent.allCount or 0) > eventBefore and creatureEvent.lastAll[1].Kind == "VICTIM_KILL_START", "the victim scene sends a first-person event by creature id")
+	SIM.step(7)
+	check(sceneHumanoid.Health <= 0 and sceneState.dead == true, "the bounded victim scene ends in an authoritative player death")
+	check(runtime.Creature:wound(1, 2.0) == true, "the server can wound the creature without opening a death path")
+	local woundedCreature = runtime.Creature:creature(1)
+	check(woundedCreature ~= nil and not woundedCreature:isThreatening(), "a fully wounded Braid stays rendered but is no longer a threat")
 
 	------------------------------------------------------------------------
 	-- THE CLIENT->SERVER SURFACE, GATED

@@ -44,13 +44,13 @@ game
 │  │  │  └─ TimeAnchor (ATT parented to a 0-size part) : holds replicated clock attrs
 │  │  ├─ Creatures (FL)                 ← one (MO) per live creature
 │  │  ├─ Debris (FL)                    ← pooled debris parts (CS tag "Vitriol_Debris")
-│  │  ├─ Gore (FL)                      ← gore module output lands here (CS "Vitriol_Gore")
+│  │  ├─ Gore (FL)                      ← bounded fallback / optional local effects (CS "Vitriol_Gore")
 │  │  ├─ Vehicles (FL)                  ← drivable vehicle assemblies
 │  │  ├─ Structures (FL)                ← destructible structures authored in the map
 │  │  ├─ NoiseMarkers (FL)              ← OPTIONAL debug-only visualisation (never in ship)
 │  │  └─ CorpseCache (FL)               ← persistent corpses / detached limbs
 │  ├─ Map (FL)                         ← HUMAN AUTHORED (see 10-HUMAN-AUTHORED.md)
-│  ├─ Terrain (SVC)
+│  ├─ Terrain (SVC)                     ← BloodEngine's `Vitriol_Blood` folder is created here
 │  └─ ... (streaming containers)
 │
 ├─ Lighting (SVC)                       ← client-side driven; see 06-DAY-NIGHT.md
@@ -65,6 +65,8 @@ game
 │  └─ (Technology/LightingStyle set manually in Studio — see 06 §7)
 │
 ├─ ReplicatedStorage (SVC)
+│  ├─ VModules (FL)                     ← supplied third-party modules
+│  │  └─ BloodEngine (MD or FL + init)  ← checked-in MIT v1.1.3 source + Assets.rbxm
 │  └─ Vitriol (FL)
 │     ├─ Types (MD)                     ← shared type aliases & enums (no side effects)
 │     ├─ Config (FL)
@@ -74,7 +76,8 @@ game
 │     │  ├─ SurvivalConfig (MD)         ← meters, drain curves, debuff definitions
 │     │  ├─ DestructionConfig (MD)      ← materials, joint HP, impulse thresholds
 │     │  ├─ VehicleConfig (MD)          ← chassis/wheel/drivetrain tuning
-│     │  └─ GoreConfig (MD)             ← region integrity, sever rules, contract defaults
+│     │  ├─ GoreConfig (MD)             ← region integrity, sever rules, legacy body defaults
+│     │  └─ BloodConfig (MD)             ← LOW BloodEngine settings + bounded fallback
 │     ├─ Lib (FL)                       ← PURE modules: no services, no instances, no yields
 │     │  ├─ RNG (MD)                    ← deterministic seeded RNG (PCG-ish / xorshift)
 │     │  ├─ Fabrik (MD)                 ← constrained FABRIK solver (the tendril spine)
@@ -94,7 +97,7 @@ game
 │     │  ├─ Skeleton (MD)               ← joint-chain data structure (server & client)
 │     │  ├─ SkeletonCodec (MD)          ← pack/unpack joint CFrames for replication
 │     │  ├─ RegionIntegrity (MD)        ← body-region damage model for kill choreography
-│     │  ├─ GoreAdapter (MD)            ← wraps the supplied Gore module (see 04 §6)
+│     │  ├─ BloodAdapter (MD)            ← wraps BloodEngine/Blood + bounded fallback (see 04 §3)
 │     │  └─ TimeModel (MD)              ← pure clock math shared by server & client
 │     ├─ Comms (FL)                     ← the ONLY remotes in the game
 │     │  ├─ RE_TimeSync (RE)            ← server→all: clock/threat snapshot (low rate)
@@ -123,10 +126,9 @@ game
 │     │  ├─ InventoryService (MD)       ← carried items, food/water/fuel
 │     │  ├─ DestructionService (MD)     ← joint graph, integrity BFS, debris pooling
 │     │  ├─ VehicleService (MD)         ← vehicle lifecycle, ownership, damage
-│     │  ├─ GoreService (MD)            ← server-side gore/dismemberment authority
 │     │  ├─ PersistenceService (MD)     ← DataStore + MemoryStore, retries, budgets
 │     │  ├─ TelemetryService (MD)       ← analytics + the RL episode log
-│     │  └─ HealthService (MD)          ← humanoid health, wounds, bleeding
+│     │  └─ HealthService (MD)          ← humanoid health, wounds, bleeding, kill scene
 │     ├─ Creature (FL)
 │     │  ├─ CreatureCore (MD)           ← the per-creature object (state + subsystems)
 │     │  ├─ Brain (FL)
@@ -231,7 +233,7 @@ game
 | Player meters | Server (`SurvivalService`) | `RE_SurvivalSync` to owner only |
 | Vehicle driving | Server physics, client prediction | normal physics replication + ownership auto-assign |
 | Joint breaks | Server (`DestructionService`) | `RE_Destruction` + actual part destruction |
-| Gore | Server (`GoreService`) | `GoreAdapter` calls; debris replicates normally |
+| Blood / optional dismemberment | Server (`HealthService`) | `BloodAdapter` calls; debris/parts replicate normally |
 | Lighting values | **Client** (`LightingDriver`) | not applicable — derived from replicated clock |
 
 ---
@@ -346,7 +348,7 @@ These are the rules that come from the actual engine behaviour, verified in
       │                 │   TendrilRig (Fabrik + secondary motion) ─► Skeleton    │
       │                 │        │                                    │           │
       │                 │        ▼                                    ▼           │
-      │                 │   KillChoreography ─► GoreService      Replicator       │
+      │                 │   KillChoreography ─► HealthService    Replicator       │
       │                 │        │            └► HealthService       │            │
       │                 └────────┼────────────────────────────────────┼───────────┘
                                  │                                    │

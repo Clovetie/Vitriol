@@ -1,14 +1,13 @@
-# VITRIOL — Kill Choreography, Body Integrity & Gore Contract
+# VITRIOL — Kill Choreography, Body Integrity & Blood Contract
 
 `00-VISION.md` P6: death is a scene, not a screen. This document specifies the
 procedural kill, the body-integrity model that drives it, and the **exact
-contract** the supplied Gore module must satisfy.
+contract** the supplied BloodEngine/Blood module must satisfy.
 
-> **Verified gap:** the project owner refers to a "provided gore module". This
-> repository contains **only** `tools/` and these documents — no gore module
-> exists here. Rather than block, this document specifies the interface
-> (`GoreConfig` + `GoreAdapter`) so the creature system can be built and tested
-> now, and the real module drops in later behind the same API.
+> **Verified gap:** the supplied BloodEngine/Blood v1.1.3 source and `Assets.rbxm`
+> are checked into `code/ReplicatedStorage/VModules/BloodEngine`, but Roblox Studio
+> import and real droplet/pool visuals are not verified here. `BloodConfig` and
+> `BloodAdapter` keep the server playable and accept the engine behind one seam.
 
 ---
 
@@ -99,7 +98,7 @@ each kill different depending on how the victim was held.
 ```
 if integrity[region] <= 0 then
     sever(region)
-    → GoreAdapter.spawnSevered(region, worldCF, velocity)
+    → BloodAdapter.spawnSevered(region, worldCF, velocity)
     → mark region absent; downstream regions detach too (Hand goes with Arm)
     → emit NoiseField SCENT burst (blood) ×6
     → victim takes integrity-proportional damage
@@ -110,25 +109,25 @@ place (`RegionIntegrity.sever`) so it can't drift.
 
 ---
 
-## 3. The Gore module contract
+## 3. The BloodEngine/Blood adapter contract
 
-`ReplicatedStorage/Vitriol/Shared/GoreAdapter` is the **only** caller. Whatever
-the supplied module looks like, we adapt to it here — no other module touches gore.
-
-### 3.1 Assumed API (to be confirmed against the real module)
+`ReplicatedStorage/Vitriol/Shared/BloodAdapter` is the **only** visual caller.
+The supplied upstream module is checked in at `ReplicatedStorage/VModules/BloodEngine`
+(with `init`, `Operator`, `Settings`, `Functions`, and `Assets.rbxm` in the source
+checkout). The adapter also accepts the folder-with-`init` form used by the source
+checkout. Its local surface is `BloodAdapter:emit(kind, params)`, while the BloodEngine
+surface verified from the public docs/source is:
 
 ```lua
-Gore.emit(kind: string, params: {
-    Position  : Vector3,
-    CFrame    : CFrame?,     -- orientation of the emission
-    Velocity  : Vector3?,    -- initial impulse
-    Scale     : number?,     -- 1 = human-sized
-    Intensity : number?,     -- 0..1, how much
-    Color     : Color3?,     -- override
-    LifeTime  : number?,     -- auto-cleanup seconds
-    Attachment: Instance?,   -- optional: parent to a part instead of world
-}) -> ()
+local engine = BloodEngine.new(settings)
+engine:Emit(origin, direction, optionalData)
+-- engine:EmitAmount(origin, direction, amount, optionalData) is intentionally
+-- not used: Vitriol keeps droplet pacing under CadenceService.
 ```
+
+Vitriol maps `kind`/`params.Position`/`params.Intensity` to that call and never lets
+the BloodEngine dependency own gameplay state. The exact settings table is in
+`Config/BloodConfig`.
 
 | `kind` | Used for |
 | --- | --- |
@@ -144,32 +143,28 @@ Gore.emit(kind: string, params: {
 
 1. **Server authority.** All gore is spawned on the server; clients get it through
    normal instance replication. No client may spawn gore.
-2. **Budget.** A hard cap (`GoreConfig.MaxActiveEmitters`, default 24) with
-   round-robin eviction. Gore must never be the reason the server drops frames.
-3. **Lifetime.** Everything gets `Debris`-style cleanup (`GoreConfig.Lifetimes`).
-4. **Graceful degradation.** If the supplied module is missing or its API differs,
-   `GoreAdapter` falls back to built-in placeholder parts/particles and logs
-   **once**. The creature system must never error because gore is absent.
-5. **Content gate.** `GoreConfig.Intensity` scales everything so the same code can
-   ship a low-gore build (Roblox community standards matter — see §5).
+2. **Budget.** A hard cap (`BloodConfig.Budget.MaxActiveEmitters`, default 24) with
+   bounded eviction. Blood must never be the reason the server drops frames.
+3. **Lifetime.** Everything gets `Debris`-style cleanup (`BloodConfig.Engine.PoolLifetimeSeconds`).
+4. **Graceful degradation.** If the external module is missing or its API differs,
+   `BloodAdapter` falls back to bounded placeholder parts and logs **once**. The
+   creature system must never error because BloodEngine is absent.
+5. **Content gate.** `BloodConfig.Intensity` scales everything; the prototype
+   defaults to LOW and sever visuals remain disabled at LOW.
 
 ### 3.3 Fallback (built-in, no assets required)
 
-If the real module is unavailable, the adapter uses:
-- `Part` spheres with `Material = Enum.Material.Slate`, dark red, small, unanchored,
-  `CanCollide = false`, `Transparency` ramped by a `TweenService` tween, destroyed
-  on lifetime.
-- A `ParticleEmitter` template with `Rate`, `Speed`, `Lifetime` from config.
-- A `Decal` on the nearest downward surface (one raycast, budgeted) for pools.
-
-This is intentionally ugly. It exists so the kill choreography can be **played and
-balanced** before the real gore module lands.
+If the real module is unavailable, the adapter uses a bounded set of dark-red
+`Part` spheres with `Material = Enum.Material.Slate`, `CanCollide = false`, and
+`Debris` cleanup. It intentionally performs no fallback ray fan, decal scan, or
+second particle scheduler. This is ugly but lets the kill choreography be **played
+and balanced** before the checked-in BloodEngine source is imported into Studio.
 
 ---
 
 ## 4. Discard behaviour (the "snatches pieces away" ask)
 
-After `CONSUME`, with probability `GoreConfig.DiscardChance` (default 0.65):
+After `CONSUME`, with probability `GoreConfig.Discard.Chance` (default 0.65):
 
 1. Choose a held severed piece (preferring the most recently severed).
 2. One tendril flicks it away with `ApplyImpulse` along a randomised vector biased
@@ -183,10 +178,10 @@ After `CONSUME`, with probability `GoreConfig.DiscardChance` (default 0.65):
 
 ## 5. Roblox community-standards guardrails (do not skip)
 
-- `GoreConfig.Intensity` is a **first-class shipped setting**, not a debug value.
+- `BloodConfig.Intensity` is a **first-class shipped setting**, not a debug value.
   Provide `LOW` (impact-only, no severance visuals) and `FULL`.
 - No dismemberment of *living* players outside the kill sequence.
-- Blood colour is desaturated (`GoreConfig.BloodColor`), and pools fade — this reads
+- Blood colour is desaturated (`BloodConfig.BloodColor`), and pools fade — this reads
   as stylised rather than gratuitous and keeps moderation risk low.
 - Never spawn gore inside another player's camera near-plane (a cheap distance
   check).
@@ -208,7 +203,7 @@ After `CONSUME`, with probability `GoreConfig.DiscardChance` (default 0.65):
 
 ## 7. Acceptance criteria for this subsystem
 
-1. A kill can complete with the gore module **absent** (fallback path) and with it
+1. A kill can complete with the BloodEngine/Blood module **absent** (fallback path) and with it
    present, with no code change.
 2. Two kills with different grab orientations produce **different** sever orders.
    (Testable headlessly: `RegionIntegrity` is a pure module — assert it in
@@ -216,5 +211,5 @@ After `CONSUME`, with probability `GoreConfig.DiscardChance` (default 0.65):
 3. A victim can escape at any point before `CONSUME`, and escaping at 90% shear
    leaves them visibly mangled (missing region persists for the rest of the night).
 4. Total server cost of a kill (excluding physics) stays under 0.3 ms/frame.
-5. `GoreConfig.Intensity = LOW` produces zero sever visuals and still completes the
-   kill.
+5. `BloodConfig.DefaultIntensity = LOW` produces zero sever visuals and still
+   completes the kill.

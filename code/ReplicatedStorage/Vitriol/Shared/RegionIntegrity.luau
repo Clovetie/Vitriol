@@ -7,7 +7,7 @@
 --           same (docs/04-KILL-CHOREOGRAPHY.md §2).
 --           Pure: no services, no Instances, no yields.
 -- Requires: (none)
--- Used by:  Creature/Body/KillChoreography, Services/GoreService, tests
+-- Used by:  Creature/Body/KillChoreography, Services/HealthService, tests
 
 local RegionIntegrity = {}
 RegionIntegrity.__index = RegionIntegrity

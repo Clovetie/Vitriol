@@ -314,17 +314,25 @@ ReplicatedStorage/Vitriol/Assets/Animations (FL)   (or ServerStorage — animato
 
 ---
 
-## 8. The Gore module (the outstanding dependency)
+## 8. The BloodEngine/Blood module (the outstanding dependency)
 
-The project owner referenced a "provided gore module" which is **not present in
-this repository**. Two options:
+The supplied BloodEngine v1.1.3 source is checked into
+`code/ReplicatedStorage/VModules/BloodEngine` with its MIT notice and `Assets.rbxm`.
+For the Roblox place, import it so the Explorer path is
+`ReplicatedStorage > VModules > BloodEngine`. The source checkout may appear as a
+Folder whose `init` child is the ModuleScript; a root ModuleScript named
+`BloodEngine` is also accepted by `BloodAdapter`.
 
-1. **Provide it** — drop it into `ServerStorage/Vitriol/Assets/GoreAssets` (or
-   `ReplicatedStorage/Vitriol/Shared`) and tell the next iteration its real API.
-   `GoreAdapter` will be pointed at it.
-2. **Let the fallback run** — `docs/04` §3.3 specifies a placeholder emitter so the
-   kill choreography is fully playable and balanceable without it.
+Human Studio work still required:
 
-Either way, the contract in `docs/04` §3.1 is what the creature code will call. If
-the real module's signature differs, **only `GoreAdapter` changes** — that is the
-point of the adapter.
+1. Import the four ModuleScripts and `Assets.rbxm` without renaming `Operator`,
+   `Settings`, `Functions`, or `Assets`.
+2. Confirm the server can require the module and that `BloodAdapter` can construct
+   it with the LOW settings; verify `Vitriol_Blood` is the intended replicated
+   effect folder.
+3. Check real droplet/pool visuals, collision filtering, cleanup, and the optional
+   limb-presentation gate. Do not enable FULL or limb dismemberment by default.
+
+If the real module's signature differs in the place, **only `BloodAdapter` changes**;
+that is the point of the adapter. If Studio import is deferred, the bounded fallback
+in `docs/04` §3.3 keeps the kill choreography playable.

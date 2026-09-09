@@ -78,7 +78,10 @@ GameConfig.Intents = {
 GameConfig.Session = {
 	MinPlayers = 1,
 	MaxPlayers = 4,
-	MaxCreatures = 3,
+	-- MVP decision: threat never increases the number of monsters. One
+	-- woundable creature is the readable prototype; a later, explicit design
+	-- change can raise this without changing CreatureService's lifecycle code.
+	MaxCreatures = 1,
 	IntermissionSeconds = 15,
 	CorpseLifetimeSeconds = 360, -- corpses keep emitting scent for the night
 	DiscardLifetimeSeconds = 360,

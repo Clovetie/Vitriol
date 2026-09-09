@@ -47,7 +47,9 @@ local ZERO = 0
 local NEGLIGIBLE_HEALTH = 1e-4 -- a health diff smaller than this is float dust, not damage
 
 -- init(svc, services) -> ()
--- services = { Players, Cadence, Noise, Time, Config, Survival, Logger }
+-- services = { Players, Cadence, Noise, Blood, BloodConfig, KillChoreography,
+--             KillConfig, GoreConfig, Time, Config, Survival, OnVictimKillStart,
+--             OnDeath, Logger }
 function HealthService.init(svc: any, services: any): ()
 	svc.Config = services.Config or gameConfig()
 	svc.Survival = services.Survival or survivalConfig()
@@ -56,7 +58,14 @@ function HealthService.init(svc: any, services: any): ()
 	svc.Players = services.Players
 	svc.Cadence = services.Cadence
 	svc.Noise = services.Noise
+	svc.Blood = services.Blood
+	svc.BloodConfig = services.BloodConfig or {}
+	svc.KillChoreography = services.KillChoreography
+	svc.KillConfig = services.KillConfig or {}
+	svc.GoreConfig = services.GoreConfig or {}
+	svc.OnVictimKillStart = services.OnVictimKillStart
 	svc.Time = services.Time
+	svc.OnDeath = services.OnDeath
 	svc.log = services.Logger
 
 	svc.states = {}
@@ -118,6 +127,7 @@ function HealthService:observe(player: any): any
 		state = {
 			UserId = player.UserId,
 			Name = player.Name,
+			player = player,
 			wounds = {},
 			woundCount = 0,
 			health = 0,
@@ -129,6 +139,7 @@ function HealthService:observe(player: any): any
 			metersAllowRegen = false,
 			incapacitated = false,
 			dead = false,
+			kill = nil,
 			humanoid = nil,
 		}
 		self.states[player.UserId] = state
@@ -226,6 +237,7 @@ end
 -- trackDamage(svc, dt) -> ()
 -- Frame slot: diff each player's health against the last read.
 function HealthService:trackDamage(dt: number): ()
+	self:tickCreatureKills(dt)
 	for _, state in pairs(self.states) do
 		local humanoid = state.humanoid
 		if humanoid ~= nil then
@@ -289,6 +301,161 @@ function HealthService:addWoundByUserId(userId: number, kind: string, multiplier
 		At = now,
 	}
 	self:recomputeBleed(state)
+end
+
+-- beginCreatureKill(svc, player, creatureId) -> boolean
+-- The creature is allowed to start one bounded scene. HealthService remains the
+-- authority: KillChoreography only advances phase time and invokes these callbacks.
+function HealthService:beginCreatureKill(player: any, creatureId: number): boolean
+	if player == nil or self.KillChoreography == nil then
+		return false
+	end
+	local state = self.states[player.UserId]
+	if state == nil or state.dead or state.kill ~= nil or state.humanoid == nil then
+		return false
+	end
+	local killConfig = self.KillConfig
+	local blood = self.BloodConfig.Dismemberment or {}
+	local ok, scene = pcall(self.KillChoreography.new, {
+		VictimUserId = player.UserId,
+		CreatureId = creatureId,
+		Timings = self.GoreConfig.Timings,
+		Duration = killConfig.DurationSeconds or 5.8,
+		Dismemberment = killConfig.DismemberAtTenderize == true and blood.Enabled == true,
+		OnPhase = function(phase: string, choreography: any)
+			self:onKillPhase(state, phase, choreography)
+		end,
+		OnSever = function(region: string, choreography: any)
+			self:onKillSever(state, region, choreography)
+		end,
+		OnComplete = function(choreography: any)
+			self:completeCreatureKill(state, choreography)
+		end,
+	})
+	if not ok then
+		self:emit("could not start victim scene: " .. tostring(scene))
+		return false
+	end
+	state.kill = scene
+	return true
+end
+
+function HealthService:_combatDamage(state: any, amount: number): ()
+	local humanoid = state.humanoid
+	if humanoid == nil or state.dead or amount <= 0 then
+		return
+	end
+	local actual = math.min(amount, math.max(humanoid.Health - 1, 0))
+	if actual <= 0 then
+		return
+	end
+	humanoid.Health = humanoid.Health - actual
+	state.applied = state.applied + actual
+end
+
+function HealthService:onKillPhase(state: any, phase: string, choreography: any): ()
+	local humanoid = state.humanoid
+	if humanoid == nil or state.dead then
+		return
+	end
+	if phase == "GRAB" then
+		-- A player watches the scene from their own head; this callback is the
+		-- only server-to-client presentation edge, and it sends ids rather than
+		-- Instance references.
+		if self.OnVictimKillStart then
+			pcall(self.OnVictimKillStart, state.player, {
+				CreatureId = choreography.CreatureId,
+				Duration = self.KillConfig.DurationSeconds or 5.8,
+			})
+		end
+		humanoid.WalkSpeed = 0
+		humanoid.AutoRotate = false
+	elseif phase == "LIFT" then
+		self:_combatDamage(state, self.KillConfig.DamageAtLift or 8)
+	elseif phase == "TENDERIZE" then
+		self:_combatDamage(state, self.KillConfig.DamageAtTenderize or 12)
+		local root = state.root
+		if self.Blood and root then
+			self.Blood:emit("blood_spray", { Position = root.Position, Intensity = 0.45 })
+		end
+	end
+end
+
+function HealthService:onKillSever(state: any, region: string, _choreography: any): ()
+	local dismemberment = self.BloodConfig.Dismemberment or {}
+	if not dismemberment.Enabled or state.dead then
+		return
+	end
+	local allowed = false
+	for i = 1, #(dismemberment.AllowedRegions or {}) do
+		if dismemberment.AllowedRegions[i] == region then
+			allowed = true
+			break
+		end
+	end
+	if not allowed then
+		return
+	end
+	self:addWoundByUserId(state.UserId, "Laceration", 1.2)
+	self:limbSevered(state.UserId, region)
+	local names = {
+		LeftArm = { "LeftUpperArm", "Left Arm" },
+		RightArm = { "RightUpperArm", "Right Arm" },
+		LeftLeg = { "LeftUpperLeg", "Left Leg" },
+		RightLeg = { "RightUpperLeg", "Right Leg" },
+		LeftHand = { "LeftHand" },
+		RightHand = { "RightHand" },
+	}
+	local character = state.character
+	local candidates = names[region] or {}
+	for i = 1, #candidates do
+		local part = character and character:FindFirstChild(candidates[i])
+		if part then
+			part.Transparency = 1
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part:SetAttribute("VitriolDismembered", true)
+			break
+		end
+	end
+	local root = state.root
+	if self.Blood and root then
+		self.Blood:emit("severed", { Position = root.Position, Intensity = 0.65 })
+	end
+end
+
+function HealthService:completeCreatureKill(state: any, _choreography: any): ()
+	if state.dead then
+		return
+	end
+	state.kill = nil
+	local humanoid = state.humanoid
+	if humanoid == nil then
+		return
+	end
+	local remaining = math.max(humanoid.Health, 0)
+	state.applied = state.applied + remaining
+	humanoid.Health = 0
+	state.health = 0
+	self:onDeath(state)
+end
+
+function HealthService:tickCreatureKills(dt: number): ()
+	for _, state in pairs(self.states) do
+		local scene = state.kill
+		if scene ~= nil and not state.dead then
+			local ok, err = pcall(function()
+				scene:step(dt)
+			end)
+			if not ok then
+				state.kill = nil
+				if self.log then
+					self.log("warn", "victim scene interrupted: " .. tostring(err))
+				end
+			end
+		end
+	end
 end
 
 -- limbSevered(svc, userId, regionName) -> ()
@@ -377,6 +544,13 @@ function HealthService:emitBlood(state: any, dt: number): ()
 	noise:emit("SCENT", x, y, z, state.bleedRate * self.Emission.BloodScentPerRate, now, {
 		EmitterId = -state.UserId,
 	})
+	if self.Blood then
+		self.Blood:emit("blood_spray", {
+			Position = root.Position,
+			Intensity = math.min(state.bleedRate * dt * 2, 1),
+			LifeTime = self.Health.BleedCueSeconds * 2,
+		})
+	end
 	if state.dripLeft <= 0 then
 		-- docs/05 §3.1's "drip audio": re-cued on a timer rather than emitted every
 		-- tick, because the field decays by elapsed time and an impulse per frame
@@ -403,6 +577,7 @@ end
 -- corpse's wound list can still be read by the butchery/carrying paths.
 function HealthService:onDeath(state: any): ()
 	state.dead = true
+	state.kill = nil
 	state.bleedRate = 0
 	local noise = self.Noise
 	local root = state.root
@@ -411,6 +586,18 @@ function HealthService:onDeath(state: any): ()
 			EmitterId = -state.UserId,
 			Halflife = self.Emission.CorpseScentDecaySeconds,
 		})
+		if self.Blood then
+			self.Blood:emit("blood_pool", {
+				Position = root.Position,
+				Intensity = 0.7,
+			})
+		end
+	end
+	if self.OnDeath then
+		local ok, err = pcall(self.OnDeath, state)
+		if not ok then
+			self:emit("victim presentation failed: " .. tostring(err))
+		end
 	end
 	-- NOT a session kill: the threat dial counts creatures the group has killed
 	-- (docs/02 §12), so a player dying must never make the hunt harder.
