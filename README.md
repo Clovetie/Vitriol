@@ -3,9 +3,11 @@
 A Roblox night-survival horror game about an **IK-controlled, blind, tendril
 creature** that hunts by vibration, scent and memory — and **learns your habits**.
 
-> **This repository is at Iteration 2: the design bible from iteration 1, plus a
-> growing core of Luau that is executed under test.** `docs/` is the design; the
-> modules under `code/` are the parts that already run.
+> **This repository is at the playable procedural-creature slice:** the Braid,
+> single-scheduler server wiring, woundable-only creature rules, first-person victim
+> scene, and BloodEngine adapter are executed by the headless harnesses. `docs/` is
+> the design; the modules under `code/` mirror the Explorer tree and are the source
+> of truth.
 
 ---
 
@@ -17,7 +19,7 @@ creature** that hunts by vibration, scent and memory — and **learns your habit
 | 2 | [`docs/01-ARCHITECTURE.md`](docs/01-ARCHITECTURE.md) | **Studio Explorer hierarchy**, ownership, tick budgets, replication rules |
 | 3 | [`docs/02-MONSTER-DESIGN.md`](docs/02-MONSTER-DESIGN.md) | Senses, memory, prediction, genetics, the RL specification |
 | 4 | [`docs/03-MONSTER-TECH.md`](docs/03-MONSTER-TECH.md) | FABRIK math, rig, anchor-and-haul movement, replication |
-| 5 | [`docs/04-KILL-CHOREOGRAPHY.md`](docs/04-KILL-CHOREOGRAPHY.md) | The procedural kill, body integrity, gore module contract |
+| 5 | [`docs/04-KILL-CHOREOGRAPHY.md`](docs/04-KILL-CHOREOGRAPHY.md) | The procedural kill, body integrity, BloodEngine adapter |
 | 6 | [`docs/05-SURVIVAL.md`](docs/05-SURVIVAL.md) | Hunger/thirst coupling; `Parched`, `Starved`, `Collapse` |
 | 7 | [`docs/06-DAY-NIGHT.md`](docs/06-DAY-NIGHT.md) | Seamless cycle, keyframe table, client-authoritative lighting |
 | 8 | [`docs/07-DESTRUCTION-VEHICLES.md`](docs/07-DESTRUCTION-VEHICLES.md) | Breakable joint graph, integrity collapse, cars |
@@ -75,40 +77,54 @@ specified as a Studio Explorer tree (`docs/01-ARCHITECTURE.md` §2).
 ```bash
 npm --prefix tools install        # once
 
-node tools/vitriol-smoke-test.js  # EXECUTES the pure Luau modules (198 assertions)
-node tools/check-syntax.js $(find code -name '*.luau')
+# One strict, dependency-light evidence gate:
+node tools/vitriol-quality-gate.js --src code
+
+# Or run an individual report:
+node tools/vitriol-smoke-test.js
+node tools/vitriol-session-test.js
+node tools/check-syntax.js code
 node tools/metrics.js --src code
 node tools/hot-loop-scan.js --src code
 node tools/call-graph.js --src code
 node tools/find-dead-config.js --src code
+node tools/evaluate-models.js \
+  --models tools/models.example.json \
+  --suite tools/evaluation-suite.example.json
 ```
 
 `tools/vitriol-smoke-test.js` loads the **real** modules from `code/` into a
 Lua 5.3 VM (fengari) and asserts their behaviour — convergence, bone-length
-preservation, cone limits, determinism, genome budget projection, and that two
-different coil geometries produce different sever orders. It is not a
-reimplementation, so a regression in `Lib/` fails the suite.
+preservation, cone limits, determinism, genome budget projection, kill choreography,
+and that two different coil geometries produce different sever orders. The session
+harness boots the server with a virtual DataModel and exercises creature spawning,
+first-person victim events, player-only death, and scheduler invariants. These are
+not reimplementations, so regressions in the source modules fail the suites.
 
 ### Verified state
 
-Re-run every time; these are the numbers the tools actually printed.
+Re-run every time; these are the latest recorded outputs:
 
 | Check | Result |
 | --- | --- |
-| `vitriol-smoke-test.js` | **198 passed, 0 failed** |
-| `check-syntax.js` | 20/22 OK. `Lib/RNG.luau` and `Lib/Noise.luau` fail only because luaparse is a **Lua 5.1** parser and cannot read bitwise operators; both execute under Lua 5.3 in the smoke test |
-| `metrics.js` | 22 files, 4,598 LOC, 152 exports, comment ratio 19.5%. Highest complexity: `QLearning` (85), `Genetics` (72), `Fabrik` (68) |
-| `hot-loop-scan.js` | 7 flags, all `table.insert` in one-shot setup or per-sever paths — **none in a frame path** |
-| `call-graph.js` | 152 exports, 2 used (`NoiseField` → `SpatialHash`, `Tables`), 150 orphaned — expected; consumers arrive with WP2–WP10 |
-| `validate-project.js` | expects a Rojo project file; this project is Explorer-first by design |
+| `vitriol-smoke-test.js` | **366 passed, 0 failed** |
+| `vitriol-session-test.js` | **87 passed, 0 failed** |
+| `check-syntax.js code` | **43 OK, 2 known failures** — `Lib/RNG.luau` and `Lib/Noise.luau` use Luau bitwise syntax rejected by the Lua 5.1 parser |
+| `metrics.js --src code` | **45 files; LOC 10993; code 8001; comments 2125; exports 381; requires 35** |
+| `hot-loop-scan.js --src code` | **31 priced calls; 8 inside loops; 0 in a RunService file** |
+| `call-graph.js --src code` | **45 modules; 381 exports; 35 require edges** |
+| `find-dead-config.js --src code` | all eight Vitriol configs; planned future-WP keys are reported for review |
+| model evaluation | **ADMIT 100.0% / REJECT 0.0%** |
+| `vitriol-quality-gate.js --src code` | **9/9 checks passed** |
 
 ---
 
-## Outstanding dependency
+## BloodEngine / Studio verification
 
-The project owner referenced a **"provided gore module"** which is **not present
-in this repository** (the tree contained only `tools/` at the start of this
-iteration). Rather than block, `docs/04-KILL-CHOREOGRAPHY.md` §3 specifies the
-exact contract that module must satisfy and `Config/GoreConfig.luau` defines a
-built-in fallback, so the kill system can be built and balanced before it lands.
-Only `Shared/GoreAdapter` changes when the real module arrives.
+The supplied BloodEngine v1.1.3 source and `Assets.rbxm` are checked in at
+`code/ReplicatedStorage/VModules/BloodEngine` under the MIT notice. Import it into
+Studio as `ReplicatedStorage > VModules > BloodEngine`; `Shared/BloodAdapter` accepts
+either a root ModuleScript or a Folder containing `init`. Until that human import and
+visual pass happens, the bounded LOW fallback keeps the server path playable. Real
+BloodEngine droplets/pools, Buffer replication, wall/ceiling traversal, and camera
+feel remain Studio acceptance work and are not claimed by the headless harnesses.

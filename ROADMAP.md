@@ -202,14 +202,19 @@ authority or scope.
 - Full `Grapple`, region-integrity sever ordering, predator AI (`Senses`/`Memory`/
   `Steering`), survival, destruction, vehicles, and human-authored UI/audio remain
   later roadmap work. The current kill scene is intentionally a minimal playable seam.
-- `tools/find-dead-config.js --src code` still uses its legacy default file list and
-  reports those two absent Gerstner paths. Per-config audits were run with explicit
-  `--file` arguments; future WP readers are expected to make several planned keys live.
+- `tools/find-dead-config.js --src code` now audits all eight Vitriol config modules.
+  It reports planned future-WP tables such as `MonsterConfig.Memory`/
+  `Prediction`, `GameConfig.AnimationIds`/`Tags`, and destruction/vehicle/survival
+  tables as dead until their readers land; verify before removing them.
 - `tools/check-syntax.js` fails on `Lib/RNG.luau` and `Lib/Noise.luau`: luaparse is a
   **Lua 5.1** parser and cannot read bitwise operators. Both files, plus the new
-  choreography, are executed for real by the smoke/session harnesses.
-- The project remains Explorer-first. `tools/validate-project.js` expects a Rojo
-  `default.project.json`; no such project is to be created merely for tooling.
+  choreography, are executed for real by the smoke/session harnesses. The new
+  quality gate allowlists exactly those two paths and fails on any new one.
+- `tools/vitriol-quality-gate.js` is the strict future-agent command; it runs the
+  smoke/session tests, all requested reports, model evaluation, and `git diff --check`.
+- The project remains Explorer-first. `tools/validate-project.js` is retained for
+  legacy Rojo checkouts but `tools/audit.sh` skips it when no `default.project.json`
+  exists; no Rojo project is to be created merely for tooling.
 
 ## Latest validation snapshot — 2026-09-09 UTC
 
@@ -225,10 +230,12 @@ authority or scope.
   a RunService file 0**; the extra loop flag is the kill-only limb lookup.
 - `node tools/call-graph.js --src code`: **45 modules | 381 exports | 35 require
   edges**; includes the BloodAdapter/CreatureService/kill/camera edges.
-- `node tools/find-dead-config.js --src code`: the legacy default reports the two
-  absent Gerstner paths; explicit Vitriol config audits retain documented future-WP
-  keys (`MonsterConfig` AI, `GoreConfig` body-integrity, `GameConfig` animation/tag
-  settings) rather than deleting planned readers.
+- `node tools/find-dead-config.js --src code`: audits all eight Vitriol config modules;
+  reports planned future-WP keys such as `MonsterConfig` AI/memory/prediction,
+  `GoreConfig` body-integrity, `GameConfig` animation/tag settings, and
+  destruction/vehicle/survival tables as verify-before-removing candidates.
+- `node tools/vitriol-quality-gate.js --src code`: **9/9 checks passed**, including
+  both harnesses, all static reports, model evaluation, and `git diff --check`.
 - `node tools/evaluate-models.js --models tools/models.example.json --suite
   tools/evaluation-suite.example.json`: `fixture-known-good: ADMIT 100.0%`,
   `candidate-local: REJECT 0.0%`.

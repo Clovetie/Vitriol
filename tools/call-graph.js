@@ -24,11 +24,12 @@
 const fs = require('fs');
 const path = require('path');
 const luau = require('./lib/luau');
+const { defaultSourceRoot } = require('./lib/paths');
 
 function die(msg) { console.error(`call-graph: ${msg}`); process.exit(2); }
 
 function parseArgs(argv) {
-	const out = { src: path.resolve(__dirname, '..', 'src'), json: null, noInternal: false };
+	const out = { src: defaultSourceRoot(), json: null, noInternal: false };
 	for (let i = 2; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === '--src') out.src = path.resolve(process.cwd(), argv[++i]);

@@ -45,6 +45,7 @@ Before saying done, run and report the real output of:
   node tools/find-dead-config.js --src code
   node tools/evaluate-models.js --models tools/models.example.json \
        --suite tools/evaluation-suite.example.json
+  node tools/vitriol-quality-gate.js --src code
 The evaluator must print fixture-known-good: ADMIT 100.0% and
 candidate-local: REJECT 0.0%. The known syntax exception is Lua 5.1 luaparse
 rejecting bitwise `&` in Lib/RNG.luau and Lib/Noise.luau. Do not claim Studio,
@@ -113,8 +114,9 @@ are included in the current continuation commit; Studio verification remains ope
 | `metrics.js --src code` | `45 files; LOC 10993; code 8001; comments 2125; exports 381; requires 35` |
 | `hot-loop-scan.js --src code` | `Priced calls: 31 \| inside-a-loop: 8 \| in a RunService file: 0` |
 | `call-graph.js --src code` | current graph includes `Bootstrap -> BloodAdapter/CreatureService`, `CreatureService -> CreatureCore/TendrilRig/Locomotion`, `HealthService -> KillChoreography`, and `ClientMain -> VictimCamera/Remotes` |
-| `find-dead-config.js --src code` | legacy default reports two absent Gerstner paths; explicit Vitriol audits report only documented future-WP keys |
+| `find-dead-config.js --src code` | audits all eight Vitriol configs; planned future-WP keys are reported for review |
 | `evaluate-models.js` | `fixture-known-good: ADMIT 100.0%` / `candidate-local: REJECT 0.0%` |
+| `vitriol-quality-gate.js --src code` | `9/9 checks passed` including both harnesses and `git diff --check` |
 
 Latest validation run for this continuation (2026-09-09 UTC): smoke **366 passed,
 0 failed**; session **87 passed, 0 failed**. `check-syntax.js code` reports 43
@@ -128,10 +130,11 @@ The 8 loop flags are the seven existing `table.insert` sites in `Genetics` and
 `RegionIntegrity` plus the one kill-only `FindFirstChild` limb lookup in
 `HealthService`; none is in a frame-bound RunService file. The call graph reports
 45 modules, 381 exports and 35 require edges, including the Bootstrap/BloodAdapter/
-CreatureService and client VictimCamera edges. The default dead-config command still
-reports the two absent legacy Gerstner paths; explicit Vitriol config audits retain
-future-WP keys (AI/body-integrity/animation settings) and are recorded as known
-planned readers, not silently removed.
+CreatureService and client VictimCamera edges. The dead-config audit now scans all eight Vitriol config modules; its reported
+future-WP keys (AI/body-integrity/animation, destruction, vehicle and survival
+settings) are recorded as verify-before-removing candidates, not silently removed.
+`vitriol-quality-gate.js --src code` is the preferred single future-agent command
+and most recently passed 9/9 checks.
 
 ---
 
@@ -210,8 +213,8 @@ iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSl
 - `vitriol-smoke-test.js` + `vitriol/tests.luau` — pure modules, 366 assertions.
 - `vitriol-session-test.js` + `vitriol/session.luau` — the server, 87 assertions.
 - `lib/luau-transform.js` — the shared Luau→Lua transform (both harnesses; also where the forbidden constructs are enforced).
-- `lib/luau.js` (`stripCommentsAndStrings`), the `check-syntax`/`metrics`/`hot-loop-scan`/`call-graph`/`find-dead-config`/`evaluate-models` gates.
-- `smoke-test.js`, `validate-project.js`, `audit.sh` are unrelated legacy — do not edit or reorganise `code/` for them.
+- `lib/paths.js` (Explorer-first `code/` resolver), `lib/luau.js` (`stripCommentsAndStrings`), the `vitriol-quality-gate`, `check-syntax`, `metrics`, `hot-loop-scan`, `call-graph`, `find-dead-config`, and `evaluate-models` gates.
+- `audit.sh` is the broad report runner; `validate-project.js` remains optional legacy Rojo validation and is skipped for this Explorer-first checkout.
 
 ---
 

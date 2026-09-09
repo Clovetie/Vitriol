@@ -401,3 +401,18 @@ DataStore outage end a round.
   checked 2026-09-09): `WorldRoot:BulkMoveTo(parts, cframes, eventMode)` accepts parallel
   part/CFrame arrays. `CreatureCore` uses one guarded call per frame and falls back to
   direct `CFrame` writes only for older/headless environments.
+- ✅ **Luau type checking** (`https://create.roblox.com/docs/luau/type-checking`, checked
+  2026-09-09): Roblox documents `--!strict`, `--!nonstrict`, and `--!nocheck`; strict
+  and nonstrict modes surface type mismatches through Script Analysis. The future
+  toolchain should run the real Luau analyzer when Studio/Rokit tooling is available,
+  while the dependency-light Node gate remains the offline baseline. StyLua's current
+  release page (`https://github.com/JohnnyMorganz/StyLua`) describes a deterministic
+  formatter for Luau, Selene (`https://github.com/Kampfkarren/selene`) provides a
+  fast linter, and Rokit (`https://github.com/rojo-rbx/rokit`) pins tool versions.
+- ✅ **Future-agent quality gate** (`tools/vitriol-quality-gate.js`, checked
+  2026-09-09): a single Node command now runs both Vitriol harnesses, all required
+  static reports, model evaluation, and whitespace validation. It stores bounded
+  command evidence in ignored `tools/reports/quality-gate.json`, allowlists exactly
+  the two known Lua 5.1 bitwise parser exceptions, and fails on a new exception or
+  any priced call in a frame path. This is safer than the legacy audit script's
+  independent, always-zero aggregate exit behavior.
