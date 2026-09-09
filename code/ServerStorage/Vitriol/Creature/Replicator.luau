@@ -103,7 +103,7 @@ end
 -- checkParity(bytesA, bytesB, count) -> ok, firstMismatch?
 -- A tiny helper so the harness (and a debug assert in a dev build) can compare a
 -- buffer round trip against the array the codec produced without a third copy.
-function Replicator.checkParity(a: any, b: any, count: number): boolean, number?
+function Replicator.checkParity(a: any, b: any, count: number): (boolean, number?)
 	for i = 1, count do
 		if a[i] ~= b[i] then
 			return false, i
@@ -231,7 +231,7 @@ end
 
 -- snapshot(replicator, skels, coreX, coreY, coreZ, qX?, qY?, qZ?, qW?) -> buffer, count
 -- encode + convert. Returns the Buffer that goes on the wire.
-function Replicator:snapshot(skels: any, coreX: number, coreY: number, coreZ: number, qX: number?, qY: number?, qZ: number?, qW: number?): any, number
+function Replicator:snapshot(skels: any, coreX: number, coreY: number, coreZ: number, qX: number?, qY: number?, qZ: number?, qW: number?): (any, number)
 	local count = self:encode(skels, coreX, coreY, coreZ, qX, qY, qZ, qW)
 	return Replicator.toBuffer(self.bytes, count), count
 end
@@ -243,7 +243,7 @@ end
 -- (inside GameConfig.LOD.StreamRadius) - a nil list means FireAllClients, and an
 -- empty table means "nobody is close enough", which is a real saving: nobody
 -- on-screen pays for the stream.
-function Replicator:publish(dt: number, recipients: any, skels: any, coreX: number, coreY: number, coreZ: number, qX: number?, qY: number?, qZ: number?, qW: number?): boolean, number
+function Replicator:publish(dt: number, recipients: any, skels: any, coreX: number, coreY: number, coreZ: number, qX: number?, qY: number?, qZ: number?, qW: number?): (boolean, number)
 	self.acc = self.acc + dt
 	if self.acc < self.secPerSnapshot then
 		self.throttled = self.throttled + 1

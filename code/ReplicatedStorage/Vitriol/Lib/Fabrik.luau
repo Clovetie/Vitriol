@@ -272,7 +272,7 @@ local function rotateAround(
 	ax: number, ay: number, az: number,
 	kx: number, ky: number, kz: number,
 	angle: number
-): number, number, number
+): (number, number, number)
 	local c = math.cos(angle)
 	local s = math.sin(angle)
 	local dot = kx * ax + ky * ay + kz * az

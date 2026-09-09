@@ -1711,4 +1711,159 @@ check(fullMoon > newMoon, "a full moon adds more light than a new one (" .. stri
 check(approx(fullMoon, DayNightConfig.Moon.BrightnessDelta, 1e-9), "and the peak is exactly the configured delta")
 
 end
+do
+print("=== WP6A CreatureMemory / Senses / Steering (blind instinct) ===")
+
+local CreatureMemory = VitriolRequire("CreatureMemory")
+local Senses = VitriolRequire("Senses")
+local Steering = VitriolRequire("Steering")
+
+check(CreatureMemory.hasSight() == false, "CreatureMemory has no sight channel")
+check(Senses.hasSight() == false, "Senses has no sight channel")
+check(GameConfig.Features.CreatureLearning == false, "CreatureLearning stays off for WP6A")
+check(MonsterConfig.Senses.ObserverChannels[1] == "VIBRATION", "observer channels start at vibration, not sight")
+local sightListed = false
+for i = 1, #MonsterConfig.Senses.ObserverChannels do
+	if MonsterConfig.Senses.ObserverChannels[i] == "SIGHT" then
+		sightListed = true
+	end
+end
+check(sightListed == false, "SIGHT is not an observer channel")
+
+local memory = CreatureMemory.new(MonsterConfig)
+check(memory:observe("SIGHT", 1, 2, 3, 1, 0) == false, "observe refuses a sight event")
+check(memory:observe("VISION", 1, 2, 3, 1, 0) == false, "and refuses VISION as an alias")
+check(memory:observe("VIBRATION", 40, 0, 0, 0.9, 0, 2.0) == true, "vibration evidence is stored")
+check(memory:best().channel == "VIBRATION" and approx(memory:best().x, 40, 1e-9), "best evidence is the vibration position, not a player")
+memory:decay(MonsterConfig.Memory.EvidenceHalfLife)
+check(approx(memory:best().confidence, 0.45, 1e-6), "confidence halves after one evidence half-life (got " .. string.format("%.4f", memory:best().confidence) .. ")")
+memory:decay(16)
+check(memory:best() == nil, "stale evidence drops below the confidence floor")
+check(memory:hasLastKnown(16) == true, "last-known survives after working memory expires")
+check(memory.lastKnown.exact == false, "but it is no longer an exact chase point")
+check(memory:hasLastKnown(MonsterConfig.Memory.LastKnownMaxAgeSeconds + 1) == false, "and it expires after LastKnownMaxAgeSeconds")
+
+local field = NoiseField.new({
+	Halflife = { VIBRATION = 1000, SCENT = 1000, AIR = 1000 },
+	Coupling = MonsterConfig.Senses.VibrationCoupling,
+})
+-- Silent nearby scent vs a farther loud footstep. Positions are injected numbers.
+field:emitAt("SCENT", 6, 0, 0, 0.20, 0)
+field:emitAt("VIBRATION", 40, 0, 0, 2.0, 0)
+local iNear = field:bestImpulse("SCENT", 0, 0, 0, 80, 0)
+local iFar, fx = field:bestImpulse("VIBRATION", 0, 0, 0, 80, 0)
+check(iFar > iNear, "the field's loudest vibration outranks nearby base scent")
+check(approx(fx, 40, 1e-9), "bestImpulse returns the loud source position, not the nearest")
+
+local senses = Senses.new({
+	Field = field,
+	Config = MonsterConfig,
+	Stats = {
+		SenseRange = { VIBRATION = 80, AIR = 70, SCENT = 50 },
+		SenseAcuity = { VIBRATION = 0.9, AIR = 0.5, SCENT = 0.5 },
+	},
+})
+check(senses:hasChannel("SIGHT") == false, "Senses:hasChannel refuses sight")
+local observations, n = senses:sample(0, 0, 0, 0)
+check(n >= 1, "the observer hears at least one channel")
+local loudest = senses:loudest(0, 0, 0, 0)
+check(loudest ~= nil and loudest.channel == "VIBRATION", "far loud vibration beats silent nearby scent (got " .. tostring(loudest and loudest.channel) .. ")")
+check(loudest.x > 20, "and the estimated position is the far source, not the nearby silent one (x=" .. string.format("%.1f", loudest.x) .. ")")
+
+local wetField = NoiseField.new({ Halflife = { VIBRATION = 1000 }, Coupling = MonsterConfig.Senses.VibrationCoupling })
+wetField:emitAt("VIBRATION", 0, 0, 0, 1, 0, nil, "Concrete")
+local dry = wetField:sample("VIBRATION", 0, 0, 0, 20, 0)
+wetField:setWeather(DayNightConfig.Weather.Rain)
+local rained = wetField:sample("VIBRATION", 0, 0, 0, 20, 0)
+check(rained < dry, "rain masking stays on NoiseField, not reimplemented in Senses")
+local waterField = NoiseField.new({ Halflife = { VIBRATION = 1000 }, Coupling = MonsterConfig.Senses.VibrationCoupling })
+waterField:emitAt("VIBRATION", 0, 0, 0, 1, 0, nil, "Water")
+waterField:emitAt("VIBRATION", 30, 0, 0, 1, 0, nil, "Concrete")
+local wI, wx = waterField:bestImpulse("VIBRATION", 0, 0, 0, 80, 0)
+check(wx == 30, "surface coupling makes concrete louder than water, so bestImpulse prefers it")
+check(wI > 1, "and the coupled intensity is amplified")
+
+local windField = NoiseField.new({
+	Halflife = { SCENT = 1000 },
+	AdvectedMaxAge = MonsterConfig.Senses.AdvectionMaxAgeSeconds,
+})
+windField:setWind(1, 0, 0)
+windField:emit("SCENT", 0, 0, 0, 1, 0)
+local plume, px = windField:bestImpulse("SCENT", 5, 0, 0, 2, 5)
+check(plume > 0.9 and approx(px, 5, 1e-9), "bestImpulse follows the advected plume, not the emit origin")
+
+local mem2 = CreatureMemory.new(MonsterConfig)
+for _ = 1, 20 do
+	mem2:observeTagged("Garage", "Idle")
+	mem2:observeTagged("House", "Idle")
+end
+local garage = mem2:stateIndex("Garage", "Idle")
+check(mem2.predictor.observations >= MonsterConfig.Prediction.MinObservations, "tagged location/posture sequences fill the Markov table")
+check(mem2:predictability(garage) > MonsterConfig.Prediction.PredictabilityLow, "a repeating Garage habit is predictable without Q-learning")
+local ranked = mem2:predict(garage, 1)
+check(ranked[1] ~= nil and ranked[1].state == mem2:stateIndex("House", "Idle"), "the predictor's next state is House, still without Q")
+
+local utility = UtilityAI.new()
+local genome = { Cunning = 0.5, Speed = 0.5, Strength = 0.5, Softness = 0.2, Adhesion = 0.2 }
+local stats = {
+	Genome = genome,
+	Temperament = { STALK = 0.7, CHARGE = 0.3, RETREAT = 0.1, SEARCH = 0.2 },
+}
+local steering = Steering.new({
+	Config = MonsterConfig,
+	Stats = stats,
+	Utility = utility,
+	Features = GameConfig.Features,
+})
+local chase = steering:decide({
+	x = 0, y = 0, z = 0, now = 1,
+	evidence = { channel = "VIBRATION", x = 70, y = 0, z = 0, confidence = 0.9, age = 0.2, time = 1 },
+	threatening = true,
+	wound = 0,
+	spawnX = 0, spawnY = 0, spawnZ = 0,
+})
+check(chase.action == "STALK" or chase.action == "INVESTIGATE", "live evidence steers investigate/stalk, not a nearest-player query (got " .. tostring(chase.action) .. ")")
+check(approx(chase.x, 70, 1e-9), "the target request is the evidence position")
+check(chase.channel == "VIBRATION", "and names the channel, never a player")
+
+local expired = steering:decide({
+	x = 0, y = 0, z = 0, now = 12,
+	evidence = nil,
+	lastKnown = { channel = "VIBRATION", x = 70, y = 0, z = 0, confidence = 0.4, time = 1, exact = false },
+	threatening = true,
+	wound = 0,
+	spawnX = 0, spawnY = 0, spawnZ = 0,
+})
+check(expired.action == "SEARCH", "expired evidence becomes a bounded search, not a stale chase")
+local wander = math.sqrt((expired.x - 70) ^ 2 + (expired.z - 0) ^ 2)
+check(wander > 0.01 and wander <= MonsterConfig.Memory.SearchWanderRadius + 1e-6, "search wanders the last-known area instead of the exact point (wander=" .. string.format("%.2f", wander) .. ")")
+
+local wounded = steering:decide({
+	x = 0, y = 0, z = 0, now = 20,
+	evidence = { channel = "VIBRATION", x = 8, y = 0, z = 0, confidence = 1, age = 0, time = 20 },
+	threatening = false,
+	wound = 1,
+	spawnX = 0, spawnY = 0, spawnZ = 0,
+})
+check(wounded.action == "RETREAT", "a wounded non-threatening creature retreats")
+check(wounded.x == nil, "and emits no pursuit target")
+
+local learningOff = Steering.new({
+	Config = MonsterConfig,
+	Stats = stats,
+	Utility = UtilityAI.new(),
+	Features = { CreatureLearning = true },
+})
+-- Even with the flag forced, WP6A's decide path must not call QLearning.
+local qPick = learningOff:decide({
+	x = 0, y = 0, z = 0, now = 30,
+	evidence = { channel = "SCENT", x = 12, y = 0, z = 0, confidence = 0.6, age = 0, time = 30 },
+	threatening = true,
+	wound = 0,
+	spawnX = 0, spawnY = 0, spawnZ = 0,
+	rng = RNG.new(3),
+})
+check(qPick.action ~= nil and qPick.action ~= "SIGHT", "softmax-with-flag still returns an instinct action, never sight")
+
+end
 return TESTS

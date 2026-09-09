@@ -23,7 +23,7 @@ local function clamp(value: number, low: number, high: number): number
 	return value
 end
 
-local function unit(x: number, y: number, z: number): number, number, number
+local function unit(x: number, y: number, z: number): (number, number, number)
 	local length = math.sqrt(x * x + y * y + z * z)
 	if length < EPS then
 		return 0, 1, 0
@@ -218,7 +218,7 @@ function TendrilRig:simulationSkeletons(): any
 	return self.Chains
 end
 
-function TendrilRig:tip(index: number): number, number, number
+function TendrilRig:tip(index: number): (number, number, number)
 	local chain = self.Display[index]
 	if chain == nil then
 		return self.CoreX, self.CoreY, self.CoreZ

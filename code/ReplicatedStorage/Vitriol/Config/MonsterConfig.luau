@@ -60,6 +60,11 @@ MonsterConfig.Evolution = {
 ---------------------------------------------------------------------------
 MonsterConfig.Senses = {
 	Channels = { "VIBRATION", "AIR", "SCENT", "THERMAL", "EM", "PRESSURE" },
+	-- WP6A observer: the Braid is eyeless. These are the only channels Senses
+	-- samples; THERMAL/EM/PRESSURE remain in the field for later WPs.
+	ObserverChannels = { "VIBRATION", "AIR", "SCENT" },
+	-- Base ranges in studs (docs/02 §2). Expressed stats may override per gene.
+	Range = { VIBRATION = 80, AIR = 70, SCENT = 50, THERMAL = 14, EM = 80, PRESSURE = 6 },
 	-- Localisation error in studs at acuity 0, scaled by distance.
 	ErrorScale = { VIBRATION = 0.35, AIR = 0.20, SCENT = 0.60, THERMAL = 0.10, EM = 0.45, PRESSURE = 0.05 },
 	Threshold = { VIBRATION = 0.10, AIR = 0.08, SCENT = 0.06, THERMAL = 0.15, EM = 0.05, PRESSURE = 0.20 },
@@ -79,6 +84,17 @@ MonsterConfig.Senses = {
 	NoiseCellSize = 16,
 	MaxOcclusionRaysPerTick = 6,
 	MaxCandidatesPerTick = 12,
+	-- GetPartBoundsInRadius is a bounding-box broad phase (docs/08 §3.1), not exact
+	-- geometry. Cached OverlapParams.MaxParts is MaxCandidatesPerTick.
+	BroadPhaseRadius = 80,
+	-- Observer-only terms (docs/02 §2). Rain/wind/coupling stay on NoiseField.
+	DownwindSniffBoost = 1.5,
+	WaterImmersionMask = { SCENT = 0.05, VIBRATION = 0.15, AIR = 0.45 },
+	AirOcclusionFactor = 0.25,
+	-- Stimulus-bridge movement gates, studs/s. Below Still the player is silent on
+	-- VIBRATION; at/above Sprint they use SurvivalConfig.Emission.FootstepVibration.Sprinting.
+	StillSpeedStuds = 0.35,
+	SprintSpeedStuds = 16,
 }
 
 ---------------------------------------------------------------------------
@@ -116,6 +132,13 @@ MonsterConfig.Memory = {
 	Interest = { Kill = 1.0, Grab = 0.6, PreyPerceived = 0.25, LoudNoise = 0.15 },
 	InterestDecayHalfLife = 90,
 	TimeHeatmapBuckets = 6, -- sixths of a night
+	-- Working-evidence confidence half-life. Field decay stays on NoiseField;
+	-- this is the observer's memory of a perception (docs/02 §3.1).
+	EvidenceHalfLife = 4.5,
+	LastKnownMaxAgeSeconds = 22,
+	SearchWanderRadius = 16,
+	PatrolRadius = 22,
+	ConfidenceFloor = 0.08,
 }
 
 ---------------------------------------------------------------------------
@@ -135,6 +158,7 @@ MonsterConfig.Prediction = {
 ---------------------------------------------------------------------------
 MonsterConfig.Actions = {
 	SEARCH = {},
+	INVESTIGATE = {},
 	STALK = {},
 	AMBUSH = { requires = { Cunning = 0.25 } },
 	CHARGE = {},
@@ -155,6 +179,7 @@ MonsterConfig.Commitment = {
 	MaxChargeSeconds = 8.0,
 	PreemptScoreDelta = 0.25,
 	RefractorySeconds = 0.4,
+	CommitRange = 16, -- studs; inside this, CHARGE can beat STALK
 }
 
 ---------------------------------------------------------------------------

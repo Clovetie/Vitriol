@@ -254,7 +254,7 @@ function CreatureCore:isThreatening(): boolean
 	return not self.Disabled and not self.Destroyed
 end
 
-function CreatureCore:position(): number, number, number
+function CreatureCore:position(): (number, number, number)
 	return self.X, self.Y, self.Z
 end
 
@@ -267,6 +267,9 @@ function CreatureCore:snapshot(): any
 		wound = self.WoundLevel,
 		threatening = self:isThreatening(),
 		anchors = self.Locomotion:anchors(),
+		targetX = self.TargetX,
+		targetY = self.TargetY,
+		targetZ = self.TargetZ,
 	}
 end
 

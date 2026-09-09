@@ -274,9 +274,74 @@ do
 	check((creatureEvent.allCount or 0) > eventBefore and creatureEvent.lastAll[1].Kind == "VICTIM_KILL_START", "the victim scene sends a first-person event by creature id")
 	SIM.step(7)
 	check(sceneHumanoid.Health <= 0 and sceneState.dead == true, "the bounded victim scene ends in an authoritative player death")
+
+	------------------------------------------------------------------------
+	-- WP6A: blind observer. Stimulus may iterate players; targeting must not
+	-- pick the nearest silent body over a farther loud source.
+	check(Config.Features.CreatureLearning == false, "CreatureLearning stays false: WP6A is instinct-only")
+	local slotNames = runtime.Cadence:slotNames()
+	local hasSense, hasThink, hasFrame = false, false, false
+	for i = 1, #slotNames do
+		if slotNames[i] == "Creature:Sense" then
+			hasSense = true
+		elseif slotNames[i] == "Creature:Think" then
+			hasThink = true
+		elseif slotNames[i] == "Creature:Frame" then
+			hasFrame = true
+		end
+	end
+	check(hasSense and hasThink and hasFrame, "perception is one CadenceService Sense slot beside Think and Frame, not a second Heartbeat")
+	check(COUNTERS.heartbeatConnections == 2, "adding Creature:Sense did not add a Heartbeat connection")
+
+	local hunter = runtime.Creature:creature(1)
+	-- Dead players still bleed into the field. Park the corpses far away so the
+	-- observer is choosing between a silent body and a loud footstep, not a
+	-- leftover blood trail at the origin.
+	local everyone = Players:GetPlayers()
+	for i = 1, #everyone do
+		local p = everyone[i]
+		local st = Health.states[p.UserId]
+		if st and st.dead and p.Character then
+			SIM.setRoot(p.Character, 4000, 0, 0)
+		end
+	end
+	noise:clear()
+	hunter.Memory = runtime.Creature.CreatureMemory.new(Monster)
+	hunter.Senses.RNG = nil
+	hunter.X, hunter.Y, hunter.Z = 0, 6, 0
+	hunter.SpawnX, hunter.SpawnY, hunter.SpawnZ = 0, 6, 0
+	local silent = Players:addPlayer("SilentNear")
+	local _, _, silentRoot = SIM.makeCharacter(silent)
+	SIM.setRoot(silent.Character, 6, 6, 0)
+	silentRoot.AssemblyLinearVelocity = { X = 0, Y = 0, Z = 0, Magnitude = 0 }
+	local loud = Players:addPlayer("LoudFar")
+	local _, _, loudRoot = SIM.makeCharacter(loud)
+	SIM.setRoot(loud.Character, 40, 6, 0)
+	loudRoot.AssemblyLinearVelocity = { X = 20, Y = 0, Z = 0, Magnitude = 20 }
+	loudRoot.FloorMaterial = { Name = "Concrete" }
+	SIM.step(0.7)
+	local decision = hunter.LastDecision
+	check(decision ~= nil and decision.channel ~= "SIGHT", "the observer names a sensory channel, never sight (got " .. tostring(decision and decision.channel) .. ")")
+	local tx = hunter.TargetX or (decision and decision.x)
+	check(tx ~= nil, "the creature requested a numeric target, not a player Instance")
+	check(tx ~= nil and math.abs(tx - 40) < math.abs(tx - 6), "the requested X is closer to the loud far source than to the silent nearby player (tx=" .. tostring(tx) .. ")")
+	check(hunter:isThreatening() == true, "one creature at Threat 1 is still the only threat")
+	check(runtime.Creature:snapshot().count == 1, "and MaxCreatures still caps the session at one Braid")
+
 	check(runtime.Creature:wound(1, 2.0) == true, "the server can wound the creature without opening a death path")
 	local woundedCreature = runtime.Creature:creature(1)
 	check(woundedCreature ~= nil and not woundedCreature:isThreatening(), "a fully wounded Braid stays rendered but is no longer a threat")
+	SIM.step(0.4)
+	local woundedDecision = woundedCreature.LastDecision
+	check(woundedDecision ~= nil and woundedDecision.action == "RETREAT", "a wounded non-threatening creature emits RETREAT, not pursuit")
+	check(woundedCreature.TargetX == nil, "and Locomotion is given no chase target")
+	local bait = Players:addPlayer("Bait")
+	SIM.makeCharacter(bait)
+	SIM.setRoot(bait.Character, woundedCreature.X, woundedCreature.Y, woundedCreature.Z)
+	local baitHealth = Health.states[bait.UserId]
+	SIM.step(0.6)
+	check(baitHealth == nil or baitHealth.kill == nil, "a wounded creature does not start a player kill")
+	check(baitHealth == nil or baitHealth.dead ~= true, "so the bait player is still alive")
 
 	------------------------------------------------------------------------
 	-- THE CLIENT->SERVER SURFACE, GATED

@@ -14,7 +14,7 @@ Locomotion.__index = Locomotion
 
 local EPS = 1e-6
 
-local function unit(x: number, y: number, z: number): number, number, number, number
+local function unit(x: number, y: number, z: number): (number, number, number, number)
 	local length = math.sqrt(x * x + y * y + z * z)
 	if length < EPS then
 		return 0, 0, 0, 0
@@ -138,7 +138,7 @@ function Locomotion:_tryAnchor(index: number, x: number, y: number, z: number, r
 	return true
 end
 
-function Locomotion:step(dt: number, x: number, y: number, z: number): number, number, number, number, number, number
+function Locomotion:step(dt: number, x: number, y: number, z: number): (number, number, number, number, number, number)
 	self:_clearAnchors()
 	self:_buildDirections(x, y, z)
 	local reach = (self.Stats.TendrilReach or 14) * (self.Movement.ProbeReachMultiplier or 1.15)
@@ -190,7 +190,7 @@ function Locomotion:step(dt: number, x: number, y: number, z: number): number, n
 	return moveX, moveY, moveZ, upX, upY, upZ
 end
 
-function Locomotion:hold(): number, number, number, number, number, number
+function Locomotion:hold(): (number, number, number, number, number, number)
 	-- A disabled/wounded creature remains rendered but no longer spends raycasts
 	-- finding purchase every frame. Its last support normal keeps the silhouette
 	-- stable until a future wound treatment re-enables threat.

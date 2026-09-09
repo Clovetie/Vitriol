@@ -95,7 +95,7 @@ end
 -- Avoids a sqrt when the vector is already short enough (common case).
 function MathExt.clampMagnitude(
 	x: number, y: number, z: number, maxLen: number
-): number, number, number
+): (number, number, number)
 	local sq = x * x + y * y + z * z
 	local maxSq = maxLen * maxLen
 	if sq <= maxSq or sq < 1e-12 then

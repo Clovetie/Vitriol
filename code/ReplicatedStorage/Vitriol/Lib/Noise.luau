@@ -224,7 +224,7 @@ end
 -- v3(noise, seedOffset, t) -> x, y, z in [-1, 1]
 -- The per-tendril idle offset. Three decorrelated 1D samples at slightly
 -- different rates and seed bytes so the motion does not read as one oscillator.
-function Noise:v3(seedOffset: number, t: number): number, number, number
+function Noise:v3(seedOffset: number, t: number): (number, number, number)
 	local p = self.perm
 	local a = sample1(p, self.sbA, t + seedOffset)
 	local b = sample1(p, self.sbB, t * 1.13 + seedOffset + 131.7)

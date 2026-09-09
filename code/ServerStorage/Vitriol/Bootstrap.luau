@@ -234,6 +234,7 @@ function Bootstrap.ensure(): any
 		Remotes = runtime.Remotes,
 		Workspace = Workspace,
 		Monster = MonsterConfig,
+		Survival = SurvivalConfig,
 		Config = GameConfig,
 		Logger = log,
 	})

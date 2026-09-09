@@ -210,6 +210,71 @@ function NoiseField.new(cfg: any?)
 	self._driftX = 0
 	self._driftY = 0
 	self._driftZ = 0
+	self._bestI = 0
+	self._bestX = 0
+	self._bestY = 0
+	self._bestZ = 0
+	self._bestAge = 0
+	self._bestId = nil
+	self._bestMask = 1
+	self._bestVisit = function(id, e)
+		local intensity = e.intensity
+		if intensity and intensity > 0 then
+			local age = 0
+			if e.time then
+				age = self._now - e.time
+				if age < 0 then
+					age = 0
+				end
+			end
+			local factor = 1
+			if e.time and e.halflife and e.halflife > 0 then
+				factor = 0.5 ^ (age / e.halflife)
+			end
+			local value = intensity * factor * self._bestMask
+			if value > self._bestI then
+				self._bestI = value
+				self._bestX = e.x
+				self._bestY = e.y
+				self._bestZ = e.z
+				self._bestAge = age
+				self._bestId = id
+			end
+		end
+	end
+	self._bestVisitAdvected = function(id, e)
+		local intensity = e.intensity
+		if intensity and intensity > 0 then
+			local age = self._now - e.time
+			if age < 0 then
+				age = 0
+			end
+			if age <= self._ageWindow then
+				local halfLife = e.halflife
+				local factor = 1
+				if halfLife and halfLife > 0 then
+					factor = 0.5 ^ (age / halfLife)
+				end
+				local gx = e.x + self._driftX * age
+				local gy = e.y + self._driftY * age
+				local gz = e.z + self._driftZ * age
+				local dx = gx - self._sx
+				local dy = gy - self._sy
+				local dz = gz - self._sz
+				if dx * dx + dy * dy + dz * dz <= self._rSq then
+					local value = intensity * factor * self._bestMask
+					if value > self._bestI then
+						self._bestI = value
+						self._bestX = gx
+						self._bestY = gy
+						self._bestZ = gz
+						self._bestAge = age
+						self._bestId = id
+					end
+				end
+			end
+		end
+	end
 
 	local w = c.Wind
 	if w then
@@ -276,7 +341,7 @@ function NoiseField:advectionWindow(channel: any): number
 end
 
 -- wind(field) -> x, y, z   (multi-return: the debug visualiser reads this per frame)
-function NoiseField:wind(): number, number, number
+function NoiseField:wind(): (number, number, number)
 	return self.windX, self.windY, self.windZ
 end
 
@@ -461,10 +526,48 @@ function NoiseField:sampleAll(x: number, y: number, z: number, radius: number, n
 	return o
 end
 
+-- bestImpulse(field, channel, x, y, z, radius, now) -> intensity, ix, iy, iz, age, id
+-- The observer's "where is the loudest remaining source on this channel?" query.
+-- Decay, wind advection, weather mask and surface coupling are the FIELD's
+-- (already applied at emit/sample); this does not invent a second decay.
+-- Returns intensity 0 (and nil position) when nothing is audible.
+function NoiseField:bestImpulse(channel: any, x: number, y: number, z: number, radius: number, now: number): (number, number?, number?, number?, number?, any)
+	local hash = self.hashes[channel]
+	if hash == nil then
+		return 0, nil, nil, nil, nil, nil
+	end
+	self._sx = x
+	self._sy = y
+	self._sz = z
+	self._now = now
+	self._rSq = radius * radius
+	self._bestI = 0
+	self._bestX = 0
+	self._bestY = 0
+	self._bestZ = 0
+	self._bestAge = 0
+	self._bestId = nil
+	self._bestMask = self.mask[channel] or 1
+	local adv = self.advect[channel]
+	if adv ~= nil and self.windMag2 > 0 then
+		self._ageWindow = self.ageWindow[channel] or self.maxAge[channel]
+		self._driftX = self.windX * adv
+		self._driftY = self.windY * adv
+		self._driftZ = self.windZ * adv
+		hash:query(x, y, z, radius + self.driftSpan[channel], self._bestVisitAdvected)
+	else
+		hash:query(x, y, z, radius, self._bestVisit)
+	end
+	if self._bestI <= 0 then
+		return 0, nil, nil, nil, nil, nil
+	end
+	return self._bestI, self._bestX, self._bestY, self._bestZ, self._bestAge, self._bestId
+end
+
 -- loudestChannel(field, x, y, z, radius, now) -> channel?, intensity
 -- Cheap "which sense should wake up?" probe used by the sense scheduler so a
 -- creature does not run all six sense bodies when nothing is happening.
-function NoiseField:loudestChannel(x: number, y: number, z: number, radius: number, now: number): any, number
+function NoiseField:loudestChannel(x: number, y: number, z: number, radius: number, now: number): (any, number)
 	local bestChannel = nil
 	local bestValue = 0
 	for i = 1, #self.channels do

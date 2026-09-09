@@ -416,3 +416,41 @@ DataStore outage end a round.
   the two known Lua 5.1 bitwise parser exceptions, and fails on a new exception or
   any priced call in a frame path. This is safer than the legacy audit script's
   independent, always-zero aggregate exit behavior.
+
+---
+
+## 11. Verified engine facts added by WP6A (2026-09-09)
+
+- ✅ **`WorldRoot:GetPartBoundsInRadius(position, radius, overlapParams?)`**
+  Source: `https://create.roblox.com/docs/reference/engine/classes/WorldRoot.md`
+  (fetched 2026-09-09, chunk 1). Signature confirmed: `position: Vector3`,
+  `radius: float`, optional `OverlapParams` defaulting to
+  `{MaxParts=0, Tolerance=0, BruteForceAllSlow=false, RespectCanCollide=false,
+  CollisionGroup=Default, FilterDescendantsInstances={}}`. Returns parts whose
+  **bounding boxes** overlap the sphere, not occupied volume. Thread safety:
+  **Safe**, Simulation Access true. `Brain/Senses` caches one `OverlapParams` and
+  treats the result as a broad phase only; exact geometry is not assumed.
+- ✅ **`WorldRoot:Raycast`** remains the occlusion primitive. Cached `RaycastParams`
+  (not allocated per Sense tick). WP6A caps occlusion rays with
+  `MonsterConfig.Senses.MaxOcclusionRaysPerTick`.
+- ✅ **`PathfindingService` is not a sense.** `CreatePath` + yielding
+  `ComputeAsync`/`FindPathAsync` cannot substitute for vibration/scent/air.
+  Locomotion still owns movement via `setTarget`; WP6A does not call
+  PathfindingService.
+- ✅ **`Actor` modules are not shared.** Required ModuleScripts are copied per
+  Actor VM; `SendMessage` is async pass-by-copy
+  (`https://create.roblox.com/docs/reference/engine/classes/Actor.md`). WP6A does
+  **not** introduce Actors. Future multi-creature perception must own message
+  traffic, not shared module tables.
+- ✅ **`CollectionService` tags replicate as a set.** `GetTagged` is a snapshot.
+  The Brain must not query the DataModel for zone/posture classes; CreatureService
+  injects `ResolveZone` when a later WP needs live tags. WP6A defaults zone to
+  `"Open"` without touching CollectionService.
+- ✅ **Luau multi-return types must be parenthesized.** Studio (2026-09-09) parse
+  error on `Remotes.bindAll(...): boolean, any`:
+  *Expected a statement, got ','; did you forget to wrap the list of return types
+  in parentheses?* Source: `https://create.roblox.com/docs/luau/type-checking`
+  (function types). A function that returns more than one value is written
+  `): (T1, T2)`, not `): T1, T2`. A single table type `{state: number, calls: number}`
+  is not a tuple and must not be wrapped. The fengari harness does not enforce this;
+  Roblox's parser does, so it is a boot-blocker, not a test-only issue.

@@ -65,9 +65,9 @@ executing real code. Everything below is *run*, not parsed.
 | WP4 `SessionService` / `ThreatService` / `HealthService` + `Bootstrap` + `Main` | ✅ |
 | WP4 `Diagnostics/Profiler` — per-cadence budget watchdog, auto-degrade one LOD tier | ✅ |
 | WP4 `RemoteHandlers/{ClientIntentHandler,DebugHandler}` — validation applied; `RF_DebugQuery` is read-only by schema | ✅ |
-| New gate: `tools/vitriol-session-test.js` (fake DataModel + virtual clock), 87 assertions | ✅ |
-| 366 runtime assertions in the smoke test (was 198) | ✅ |
-| WP2 remainder — `find-dead-config` still reports blocks whose readers arrive in WP5–WP10 (`Genes`, `Memory`, `Prediction`, `CollisionGroups`, `Tags`, `AnimationIds`, …) | ⬜ |
+| New gate: `tools/vitriol-session-test.js` (fake DataModel + virtual clock), 99 assertions | ✅ |
+| 401 runtime assertions in the smoke test (was 366) | ✅ |
+| WP2 remainder — `find-dead-config` still reports blocks whose readers arrive in WP7–WP10 (`Learning`, `Archetypes`, `CollisionGroups`, `Tags`, `AnimationIds`, …). `Memory`/`Prediction` now have WP6A readers | 🟨 |
 
 ### Bugs found by writing the code (iteration 3, all fixed, all regression-tested)
 
@@ -106,7 +106,11 @@ owned by `CadenceService`.
 | `Creature/Body/TendrilRig` — numeric chains + constrained FABRIK + rest/noise pose | ✅ |
 | `Creature/Body/Locomotion` — bounded ray fan, anchors, wall/ceiling up vector, open-ground glide | ✅ |
 | `Creature/CreatureCore` — generated Braid Model/Parts, wound state, guarded `BulkMoveTo` | ✅ |
-| `Services/CreatureService` — one-creature lifecycle, genome expression, cadence registration, target bridge | ✅ |
+| `Services/CreatureService` — one-creature lifecycle, genome expression, cadence registration, stimulus/observer split | ✅ |
+| `Shared/CreatureMemory` — bounded evidence, last-known, Markov location×posture | ✅ |
+| `Creature/Brain/Senses` — vibration/scent/air observer; no sight, no GetPlayers | ✅ |
+| `Creature/Brain/Steering` — INVESTIGATE/STALK/SEARCH/RETREAT/CHARGE from evidence | ✅ |
+| `NoiseField:bestImpulse` — loudest remaining source; decay/advection stay in the field | ✅ |
 | `Creature/Body/KillChoreography` — cadence-stepped bounded victim scene | ✅ |
 | `HealthService` — creature grab, player-only kill, optional dismemberment hook, Blood emission | ✅ |
 | `Shared/BloodAdapter` + `BloodConfig` — BloodEngine probe, LOW gate, bounded fallback | ✅ |
@@ -153,11 +157,14 @@ The code-generated one-creature body and server wiring are present; the two-crea
 keyboard-pilot Studio exit is intentionally not claimed. See the continuation table
 above for the verified headless scope.
 
-### M3 — Instinct-only creature (WP6) ⬜
-`Senses`, `Memory`, `Predictor`, `Steering`, `BehaviorTree`, `Tactics`, `Policy`
-(UtilityAI + instinct prior, **Q disabled**).
-**Exit:** make a noise → it investigates. Walk to the same Garage four times →
-on the fourth it goes there *first*, and `AIDebugDump` shows why.
+### M3 — Instinct-only creature (WP6) 🟨
+WP6A is in: `Shared/CreatureMemory`, `Creature/Brain/Senses`, `Creature/Brain/Steering`,
+`NoiseField:bestImpulse`, CreatureService stimulus-bridge vs observer. Q stays off.
+`BehaviorTree` / `Tactics` / full `Policy` remain later WP6B.
+**WP6A exit — met under the harness:** far loud vibration/scent beats a silent nearby
+player; expired evidence searches last-known then patrols; a wounded Braid retreats
+and does not kill. Garage-habit intercept as a *first move* and a live `AIDebugDump`
+are still WP6B/Studio.
 
 ### M4 — Learning on (WP7) ⬜
 `QLearning` wired in, episode serialization, species priors, A/B measurement.
@@ -199,12 +206,12 @@ authority or scope.
   probes `ReplicatedStorage/VModules/BloodEngine` first and accepts either a root
   ModuleScript or a Folder containing `init`; Studio import/layout and real visuals
   remain unverified.
-- Full `Grapple`, region-integrity sever ordering, predator AI (`Senses`/`Memory`/
-  `Steering`), survival, destruction, vehicles, and human-authored UI/audio remain
-  later roadmap work. The current kill scene is intentionally a minimal playable seam.
+- Full `Grapple`, region-integrity sever ordering, WP6B BehaviourTree/Tactics/Policy,
+  survival, destruction, vehicles, and human-authored UI/audio remain later roadmap
+  work. WP6A replaced the nearest-player think bridge with blind field observation.
 - `tools/find-dead-config.js --src code` now audits all eight Vitriol config modules.
-  It reports planned future-WP tables such as `MonsterConfig.Memory`/
-  `Prediction`, `GameConfig.AnimationIds`/`Tags`, and destruction/vehicle/survival
+  It reports planned future-WP tables such as `MonsterConfig.Learning`/
+  `Archetypes`, `GameConfig.AnimationIds`/`Tags`, and destruction/vehicle/survival
   tables as dead until their readers land; verify before removing them.
 - `tools/check-syntax.js` fails on `Lib/RNG.luau` and `Lib/Noise.luau`: luaparse is a
   **Lua 5.1** parser and cannot read bitwise operators. Both files, plus the new
@@ -218,24 +225,28 @@ authority or scope.
 
 ## Latest validation snapshot — 2026-09-09 UTC
 
-- `node tools/vitriol-smoke-test.js`: **366 passed, 0 failed**.
-- `node tools/vitriol-session-test.js`: **87 passed, 0 failed**; includes creature
+- `node tools/vitriol-smoke-test.js`: **401 passed, 0 failed**.
+- `node tools/vitriol-session-test.js`: **99 passed, 0 failed**; includes creature
   spawn, bounded victim scene, first-person event payload, player-only death, wound-only
-  creature disablement, and no extra scheduler.
-- `node tools/check-syntax.js code`: **43 files parse**; the two known Lua 5.1 parser
+  creature disablement, Creature:Sense slot, far-loud vs silent-nearby targeting,
+  wounded RETREAT, and no extra scheduler.
+- `node tools/check-syntax.js code`: **46 files parse**; the two known Lua 5.1 parser
   exceptions remain `Lib/RNG.luau` and `Lib/Noise.luau` (bitwise `&`).
-- `node tools/metrics.js --src code`: **45 files; LOC 10993 | code 8001 | comments
-  2125 | exports 381 | requires 35**.
-- `node tools/hot-loop-scan.js --src code`: **Priced calls 31 | inside-a-loop 8 | in
+- `node tools/metrics.js --src code`: **48 files; LOC 12181 | code 9031 | comments
+  2212 | exports 421 | requires 40**.
+- `node tools/hot-loop-scan.js --src code`: **Priced calls 34 | inside-a-loop 8 | in
   a RunService file 0**; the extra loop flag is the kill-only limb lookup.
-- `node tools/call-graph.js --src code`: **45 modules | 381 exports | 35 require
-  edges**; includes the BloodAdapter/CreatureService/kill/camera edges.
+- `node tools/call-graph.js --src code`: **48 modules | 421 exports | 40 require
+  edges**; includes CreatureService to Senses/Steering and CreatureMemory to MarkovPredictor.
 - `node tools/find-dead-config.js --src code`: audits all eight Vitriol config modules;
-  reports planned future-WP keys such as `MonsterConfig` AI/memory/prediction,
-  `GoreConfig` body-integrity, `GameConfig` animation/tag settings, and
-  destruction/vehicle/survival tables as verify-before-removing candidates.
+  Memory/Prediction/Actions/Commitment now have readers. Remaining planned future-WP
+  keys: Learning, Archetypes, GoreConfig body-integrity, GameConfig animation/tag
+  settings, and destruction/vehicle/survival tables.
 - `node tools/vitriol-quality-gate.js --src code`: **9/9 checks passed**, including
   both harnesses, all static reports, model evaluation, and `git diff --check`.
 - `node tools/evaluate-models.js --models tools/models.example.json --suite
   tools/evaluation-suite.example.json`: `fixture-known-good: ADMIT 100.0%`,
   `candidate-local: REJECT 0.0%`.
+- Studio parse: 33 multi-return heads in 19 modules wrapped as `): (T1, T2)`
+  after `Remotes.bindAll` failed with *Expected a statement, got ','*. Table
+  types were left unwrapped. **Studio visual acceptance is still not claimed.**

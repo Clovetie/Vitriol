@@ -169,7 +169,7 @@ function RNG:gaussianClamped(mean: number, sd: number, lo: number, hi: number): 
 end
 
 -- Three independent gaussians (for positional error). Returns 3 values.
-function RNG:gaussian3(): number, number, number
+function RNG:gaussian3(): (number, number, number)
 	return self:gaussian(), self:gaussian(), self:gaussian()
 end
 

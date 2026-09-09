@@ -10,7 +10,7 @@ the code did Y, and the test found out" are recorded in §4 for exactly that rea
 
 ```
 Continue the Vitriol Roblox prototype on the fixed branch
-arena/01a0847b-vitriol. The repository is Explorer-first: do not create a Rojo
+arena/01a084d7-vitriol. The repository is Explorer-first: do not create a Rojo
 project or switch branches.
 
 Read first:
@@ -21,19 +21,21 @@ Read first:
   docs/08-RESEARCH-NOTES.md  verified Roblox/BloodEngine facts
   ROADMAP.md                 current decisions and validation snapshot
 
-The playable continuation is already implemented: the Braid is code-generated,
-Threat 1 has one creature, creatures are woundable-only and never killable, the
-server owns the victim kill, the victim receives a first-person camera event, and
-BloodAdapter integrates the supplied BloodEngine hierarchy at
-ReplicatedStorage > VModules > BloodEngine with a bounded LOW fallback. The
-upstream MIT source and Assets.rbxm are checked in under
-code/ReplicatedStorage/VModules/BloodEngine; Studio import/layout still needs
-human verification.
+WP6A is in: think() no longer picks the nearest live player. Stimulus may iterate
+players to emit vibration/scent; the observer samples NoiseField through Senses
+into CreatureMemory and Steering returns a numeric target request. No sight,
+no Q-learning (Features.CreatureLearning stays false), one woundable Braid.
 
-Do not add a second scheduler, client health authority, creature death path, or
-cross-server evolution. Keep gameplay on CadenceService. If adding a config key,
-wire a real reader or document why it is a future WP key. Any human-only map/UI/
-audio/Studio action belongs in docs/10-HUMAN-AUTHORED.md and ROADMAP.md.
+Do not add a second scheduler, client health authority, creature death path,
+Actors, or cross-server evolution. Keep gameplay on CadenceService. If adding a
+config key, wire a real reader or document why it is a future WP key. Any
+human-only map/UI/audio/Studio action belongs in docs/10-HUMAN-AUTHORED.md and
+ROADMAP.md.
+
+Studio (2026-09-09) rejected unparenthesized multi-return types at
+Remotes.bindAll (`): boolean, any`). All 33 heads across 19 modules are now
+`): (T1, T2)`. Table returns like RNG:serialize(): {state: number, calls: number}
+must stay unwrapped. This is a parser fix, not Studio visual acceptance.
 
 Before saying done, run and report the real output of:
   node tools/vitriol-smoke-test.js
@@ -58,7 +60,26 @@ the next handoff rather than claiming completion.
 
 ---
 
-## 0.1 Current continuation — creature slice
+## 0.1 Current continuation — WP6A blind instinct
+
+WP6A replaced `CreatureService:think()`'s nearest-player target with:
+
+- **Stimulus bridge** (`emitStimuli`): the only think-path player iteration besides
+  kill/grab. Footstep vibration from `SurvivalConfig.Emission.FootstepVibration` and
+  body `BaseScent`. Does not re-emit Health bleed SCENT/AIR.
+- **Observer** (`Creature:Sense` + `Senses:sample` → `CreatureMemory:observe/decay`
+  → `Steering:decide`): never calls `Players:GetPlayers`, never inspects a character
+  root to choose a target, never has a SIGHT channel.
+- **`NoiseField:bestImpulse`**: loudest remaining source after the field's own decay,
+  wind advection, weather mask and surface coupling. Senses must not poke hashes.
+- **Memory** lives at `ReplicatedStorage/Vitriol/Shared/CreatureMemory` (pure; the
+  docs/01 Brain/Memory tree slot is documented in the file header, not duplicated).
+- **Wounded / non-threatening** → RETREAT, `clearTarget`, no grab.
+
+Still later: BehaviourTree, Tactics, Policy+Q (WP7), PathfindingService as locomotion
+helper (not a sense). Studio visual acceptance is **not** claimed.
+
+## 0.2 Creature-slice product decisions (still in force)
 
 Resolved scope decisions:
 
@@ -81,18 +102,20 @@ Resolved scope decisions:
 - Optional limb hiding is behind `BloodConfig.Dismemberment.Enabled` (false by
   default); `KillChoreography` exposes one sever callback during TENDERIZE.
 
-New runtime files:
+New runtime files (WP6A plus the creature slice):
 
+- `code/ReplicatedStorage/Vitriol/Shared/CreatureMemory.luau`
+- `code/ServerStorage/Vitriol/Creature/Brain/{Senses,Steering}.luau`
 - `code/ServerStorage/Vitriol/Creature/Body/{TendrilRig,Locomotion,KillChoreography}.luau`
 - `code/ServerStorage/Vitriol/Creature/CreatureCore.luau`
 - `code/ServerStorage/Vitriol/Services/CreatureService.luau`
 - `code/ReplicatedStorage/Vitriol/{Config/BloodConfig,Shared/BloodAdapter}.luau`
 - `code/StarterPlayer/StarterPlayerScripts/Vitriol/{ClientMain,Controllers/VictimCamera}.luau`
 
-Bootstrap now creates BloodAdapter, Health kill callbacks, CreatureService, one frame
-slot, and one think slot. No gameplay code adds a RunService connection or task yield.
-The session harness exercises spawn, close-range scene start, remote event payload,
-player-only death, and the existing scheduler/Lighting invariants.
+Bootstrap injects SurvivalConfig into CreatureService. Cadence slots: Creature:Frame,
+Creature:Think, Creature:Sense. No gameplay code adds a RunService connection or
+task yield. The session harness exercises spawn, grab kill, far-loud vs silent-nearby,
+wounded RETREAT, and the existing scheduler/Lighting invariants.
 
 Unverified Studio work remains explicit: actual Roblox Part/CFrame/BulkMoveTo display,
 wall/ceiling purchase, real Buffer replication, client camera feel, audio/post-process,
@@ -101,36 +124,35 @@ shape. Do not claim these as headless-proven.
 
 ## 1. Verified state at handoff
 
-The current working branch is `arena/01a0847b-vitriol`. Iteration 3's server
-foundation is retained; this continuation adds the generated Braid, spawn/runtime
-wiring, Blood adapter, bounded victim scene, and first-person victim camera. Changes
-are included in the current continuation commit; Studio verification remains open.
+The current working branch is `arena/01a084d7-vitriol`. Iteration 3's server
+foundation and the generated Braid/kill slice are retained; WP6A adds blind
+perception and instinct steering. Studio verification remains open.
 
 | Check | Output |
 | --- | --- |
-| `vitriol-smoke-test.js` | `VITRIOL smoke test: 366 passed, 0 failed` |
-| `vitriol-session-test.js` | `VITRIOL session test: 87 passed, 0 failed` |
-| `check-syntax.js code` | 43 OK / `2 file(s) failed` — `Lib/RNG.luau`, `Lib/Noise.luau` (§3) |
-| `metrics.js --src code` | `45 files; LOC 10993; code 8001; comments 2125; exports 381; requires 35` |
-| `hot-loop-scan.js --src code` | `Priced calls: 31 \| inside-a-loop: 8 \| in a RunService file: 0` |
+| `vitriol-smoke-test.js` | `VITRIOL smoke test: 401 passed, 0 failed` |
+| `vitriol-session-test.js` | `VITRIOL session test: 99 passed, 0 failed` |
+| `check-syntax.js code` | 46 OK / `2 file(s) failed` — `Lib/RNG.luau`, `Lib/Noise.luau` (§3) |
+| `metrics.js --src code` | `48 files; LOC 12181; code 9031; comments 2212; exports 421; requires 40` |
+| `hot-loop-scan.js --src code` | `Priced calls: 34 \| inside-a-loop: 8 \| in a RunService file: 0` |
 | `call-graph.js --src code` | current graph includes `Bootstrap -> BloodAdapter/CreatureService`, `CreatureService -> CreatureCore/TendrilRig/Locomotion`, `HealthService -> KillChoreography`, and `ClientMain -> VictimCamera/Remotes` |
 | `find-dead-config.js --src code` | audits all eight Vitriol configs; planned future-WP keys are reported for review |
 | `evaluate-models.js` | `fixture-known-good: ADMIT 100.0%` / `candidate-local: REJECT 0.0%` |
 | `vitriol-quality-gate.js --src code` | `9/9 checks passed` including both harnesses and `git diff --check` |
 
-Latest validation run for this continuation (2026-09-09 UTC): smoke **366 passed,
-0 failed**; session **87 passed, 0 failed**. `check-syntax.js code` reports 43
+Latest validation run for this continuation (2026-09-09 UTC): smoke **401 passed,
+0 failed**; session **99 passed, 0 failed**. `check-syntax.js code` reports 46
 parseable files plus the two known bitwise exceptions (`Lib/RNG.luau`, `Lib/Noise.luau`).
-Metrics report 45 files, 10,993 LOC, 8,001 code lines, 2,125 comment lines, 381
-exports and 35 require edges. Hot-loop reports 31 priced calls, 8 inside loops, and
+Metrics report 48 files, 12,181 LOC, 9,031 code lines, 2,212 comment lines, 421
+exports and 40 require edges. Hot-loop reports 34 priced calls, 8 inside loops, and
 0 in a RunService file. The evaluator prints `fixture-known-good: ADMIT 100.0%` and
 `candidate-local: REJECT 0.0%`.
 
 The 8 loop flags are the seven existing `table.insert` sites in `Genetics` and
 `RegionIntegrity` plus the one kill-only `FindFirstChild` limb lookup in
 `HealthService`; none is in a frame-bound RunService file. The call graph reports
-45 modules, 381 exports and 35 require edges, including the Bootstrap/BloodAdapter/
-CreatureService and client VictimCamera edges. The dead-config audit now scans all eight Vitriol config modules; its reported
+48 modules, 421 exports and 40 require edges, including CreatureService → Senses/Steering
+and CreatureMemory → MarkovPredictor. The dead-config audit now scans all eight Vitriol config modules; its reported
 future-WP keys (AI/body-integrity/animation, destruction, vehicle and survival
 settings) are recorded as verify-before-removing candidates, not silently removed.
 `vitriol-quality-gate.js --src code` is the preferred single future-agent command
@@ -166,9 +188,9 @@ iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSl
 `SpatialHash:sampleDecay` and `:prune(now, maxAge, onRemove)` now have a consumer
 (`NoiseField`), which is what their signatures were shaped for.
 
-**Shared/** (7): `RegionIntegrity`, `Skeleton` (+rest pose/`:reset()`),
-`SkeletonCodec`, `NoiseField` (+ advection/masks/coupling), `Remotes`, `NetContract`,
-`TimeModel`.
+**Shared/** (8): `RegionIntegrity`, `Skeleton` (+rest pose/`:reset()`),
+`SkeletonCodec`, `NoiseField` (+ advection/masks/coupling/`bestImpulse`), `Remotes`,
+`NetContract`, `TimeModel`, `CreatureMemory`.
 
 | Module | Surface |
 | --- | --- |
@@ -176,7 +198,8 @@ iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSl
 | `NetContract` | `.Reject`, `.Schemas.{ClientIntent,DebugQuery}`, `.Actions`, `.ActionNames`, `.DebugCommands`, `validate(schema,payload)`, `newGate()`, `limits(schema)`, `allow(gate,key,schema,now)`, `checkSequence(...)`, `admit(gate,key,schema,payload,now) -> ok,code,extra`, `forget`, `stats` |
 | `TimeModel` | `PHASES`, `PHASE_HOURS`, `HOURS_PER_DAY`, `MAX_EASE`, `clamp01`, `warp`, `minutesToClock`, `clockToMinutes`, `phaseSpan`, `phaseClock`, `phaseProgress`, `phaseOf`, `phaseWeight`, `nextPhase`, `phaseSeconds`, `cycleSeconds`, `skyKey`, `sunElevation`, `isDaylight`, `nextMoonPhase`, `moonBrightnessDelta` |
 | `SkeletonCodec` | `encode(out, skels, core, ref, seq, id, quat) -> count, reconCore`, `decode(bytes, skels, ref) -> core, seq, quat`, `creatureId`, `byteCount`, `normaliseQuat`, `coreDisplacement`; `HEADER_BYTES 13`, `JOINT_BYTES 6`, `JOINT_STEP .01`, `CORE_STEP .02`, `MAX_JOINT_ERROR .00866`, `MAX_CORE_ERROR .01732`, `MAX_ANGLE_ERROR .015873 rad` |
-| `NoiseField` | `new(cfg)`, `:emit(channel,x,y,z,i,now,opts?)`, `:emitAt`, `:sample`, `:sampleAll`, `:loudestChannel`, `:setWind(x,y,z)`, `:setWeather(entry)`, `:setChannelMask`, `:setAdvectionWindow`, `:advectionWindow`, `:remove`, `:prune(now)`, `:count`, `:clear` |
+| `NoiseField` | `new(cfg)`, `:emit`, `:emitAt`, `:sample`, `:sampleAll`, `:bestImpulse`, `:loudestChannel`, `:setWind`, `:setWeather`, `:setChannelMask`, `:setAdvectionWindow`, `:advectionWindow`, `:remove`, `:prune`, `:count`, `:clear` |
+| `CreatureMemory` | `new(monster)`, `:observe`, `:decay`, `:best`, `:lastKnownRecord`, `:hasLastKnown`, `:observeTagged`, `:predict`, `:predictability`, `:canIntercept` (no SIGHT) |
 
 `code/ServerStorage/Vitriol/`
 - `Creature/Replicator` — `new(count, opts)`, `:encode`, `:snapshot`, `:publish(dt, recipients, ...)`, `:setRate`, `:stats`, `:reset`, and the `toBuffer/toBytes/checkParity` adapters.
@@ -188,7 +211,9 @@ iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSl
 - `Creature/Body/Locomotion` — bounded ray fan, material-aware anchors, haul/glide movement.
 - `Creature/Body/KillChoreography` — deterministic GRAB→LIFT→COIL→TENDERIZE→CONSUME→DISCARD scene with optional sever callback.
 - `Creature/CreatureCore` — generated Braid Model/Parts, one guarded `BulkMoveTo`, wound-only state and snapshot.
-- `Services/CreatureService` — one-creature reconciliation/spawn, target bridge, wound API, victim event, cadence slots.
+- `Creature/Brain/Senses` — observer-only field sampling (VIBRATION/AIR/SCENT).
+- `Creature/Brain/Steering` — instinct UtilityAI; returns action+xyz, never a player.
+- `Services/CreatureService` — one-creature lifecycle, stimulus bridge, Sense+Think slots, wound API, victim event.
 - `Services/HealthService` — `init`, `start`, `observe`, `attach`, `forget`, `addWound`, `addWoundByUserId`, `beginCreatureKill`, `tickCreatureKills`, `limbSevered`, `trackDamage`, `tickBleed`, `metersAllowRegen`, `scentScale`, `snapshot`, `stop`.
 - `Shared/BloodAdapter` — BloodEngine probe/constructor/Emit adapter, LOW/FULL gate, bounded fallback.
 - `StarterPlayerScripts/Vitriol/Controllers/VictimCamera` — victim-only first-person camera bound to `RE_CreatureEvent`.
@@ -210,8 +235,8 @@ iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSl
   `Profiler.tier()`, `:degrade()`, `:reset()` for the debug handler and tests.
 
 `tools/`
-- `vitriol-smoke-test.js` + `vitriol/tests.luau` — pure modules, 366 assertions.
-- `vitriol-session-test.js` + `vitriol/session.luau` — the server, 87 assertions.
+- `vitriol-smoke-test.js` + `vitriol/tests.luau` — pure modules, 401 assertions.
+- `vitriol-session-test.js` + `vitriol/session.luau` — the server, 99 assertions.
 - `lib/luau-transform.js` — the shared Luau→Lua transform (both harnesses; also where the forbidden constructs are enforced).
 - `lib/paths.js` (Explorer-first `code/` resolver), `lib/luau.js` (`stripCommentsAndStrings`), the `vitriol-quality-gate`, `check-syntax`, `metrics`, `hot-loop-scan`, `call-graph`, `find-dead-config`, and `evaluate-models` gates.
 - `audit.sh` is the broad report runner; `validate-project.js` remains optional legacy Rojo validation and is skipped for this Explorer-first checkout.
@@ -230,6 +255,9 @@ throws rather than mangling**, so tested code must avoid:
   line for `check-syntax.js`'s sake.
 - Multiplicative hash mixers (`z * 0x85EBCA6B` overflows 2^53 in fengari) and
   `+ 2^32` normalisers; normalise in the float domain.
+- Studio (not fengari) requires multi-return types in parentheses:
+  `function f(): (boolean, any)`, never `function f(): boolean, any`. Do not wrap
+  a single table type `{k: v, ...}`.
 
 Module resolution differs between the two, on purpose:
 - `vitriol-smoke-test.js` uses a hand-kept `MODULES` map — **add new modules to it**,
@@ -306,7 +334,11 @@ core-relative vs parent-relative quantisation). Iteration 3 added:
    cubic (SCENT: 7 644 studs ⇒ 478³ cells ⇒ a 180 s harness timeout). `AdvectedMaxAge`
    / `MonsterConfig.Senses.AdvectionMaxAgeSeconds = 20` caps it, with the rationale
    that evidence older than the window is the memory layer's job (docs/02 §2/§3).
-9. **Two harness-transform bugs** (documented so nobody re-breaks them): it wrapped
+9. **Studio rejected unparenthesized multi-return types.** `Remotes.bindAll(...): boolean, any`
+   failed at boot (*Expected a statement, got ','*). Fengari does not enforce this.
+   33 heads in 19 modules are now `): (T1, T2)`; table types like
+   `{state: number, calls: number}` stay unwrapped. Not Studio visual acceptance.
+10. **Two harness-transform bugs** (documented so nobody re-breaks them): it wrapped
    `for x in string.gmatch(...)` in `pairs(...)` (an iterator became a table), and it
    stripped `: Type` annotations across the *body* of a multi-line call, turning
    `conn:disconnect()` into `conn()`. Both are in `tools/lib/luau-transform.js` with

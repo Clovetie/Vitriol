@@ -196,7 +196,7 @@ end
 -- Normalising on BOTH sides is what makes the round trip idempotent: encoding a
 -- decoded quaternion reproduces the same four bytes, so a client that re-reports a
 -- core pose cannot drift.
-function SkeletonCodec.normaliseQuat(x: number?, y: number?, z: number?, w: number?): number, number, number, number
+function SkeletonCodec.normaliseQuat(x: number?, y: number?, z: number?, w: number?): (number, number, number, number)
 	local nx = x or 0
 	local ny = y or 0
 	local nz = z or 0
@@ -245,7 +245,7 @@ function SkeletonCodec.encode(
 	qy: number?,
 	qz: number?,
 	qw: number?
-): number, number, number, number
+): (number, number, number, number)
 	local n = 1
 	out[n] = (creatureId or 0) % 256
 	n += 1
@@ -305,7 +305,7 @@ end
 -- Fills each skeleton's x/y/z in place. The skeletons must already have the right
 -- joint counts; 'len' and 'radius' are static per genome and are replicated once
 -- at spawn, never per snapshot.
-function SkeletonCodec.decode(bytes: any, skels: any, refX: number, refY: number, refZ: number): number, number, number, number, number, number, number, number
+function SkeletonCodec.decode(bytes: any, skels: any, refX: number, refY: number, refZ: number): (number, number, number, number, number, number, number, number)
 	local seq = readU16(bytes, 2)
 	local coreX = refX + readI16(bytes, 4) * CORE_STEP
 	local coreY = refY + readI16(bytes, 6) * CORE_STEP

@@ -130,6 +130,7 @@ GameConfig.Budgets = {
 		-- slice of the 1.2 ms frame row, which is otherwise spent on IK and steering.
 		TimeClock = 0.02,
 		Health = 0.05,
+		Think = 0.15, -- instinct steering on the Think cadence (WP6A)
 	},
 	SlowMs = 0.4,
 	ReplicationMs = 0.3,
@@ -161,6 +162,7 @@ GameConfig.Diagnostics = {
 	ProfilerReportSeconds = 10, -- how often the budget summary is printed
 	ProfilerDegradeLog = true, -- log the auto-degrade decision itself
 	LogNetRejections = false, -- one line per rejected client payload; noisy by design
+	LogDecisionDump = false, -- WP6A observer dump: action/channel/age/conf, no player ids
 	DebugRemoteEnabled = true, -- binds RF_DebugQuery; flip false before shipping
 }
 

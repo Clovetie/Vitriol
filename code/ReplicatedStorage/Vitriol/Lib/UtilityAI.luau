@@ -60,7 +60,7 @@ end
 -- best(utility) -> name?, score?
 -- Deterministic argmax. Ties resolve to the lowest index, so identical inputs
 -- always produce the same action (important for replaying a decision dump).
-function UtilityAI:best(): any, number?
+function UtilityAI:best(): (any, number?)
 	local bestEntry = nil
 	for i = 1, self.count do
 		local entry = self.options[i]

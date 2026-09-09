@@ -276,7 +276,7 @@ end
 -- bindAll(timeoutSeconds?) -> ok, missingNames
 -- Client boot path: bind the whole contract once, and report what is absent so the
 -- caller can decide whether a feature is worth disabling. Called from ClientMain.
-function Remotes.bindAll(timeoutSeconds: number?): boolean, any
+function Remotes.bindAll(timeoutSeconds: number?): (boolean, any)
 	local absent = {}
 	local n = 0
 	for i = 1, #Remotes.Definition do
