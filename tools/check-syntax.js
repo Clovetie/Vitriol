@@ -6,17 +6,10 @@
 // This catches typos, missing `end`, and other structural mistakes without
 // requiring the full Luau toolchain.
 //
-// By default it checks the folders used by the new scripts:
-//   src/ReplicatedStorage/HandHolding
-//   src/ReplicatedStorage/IslandGeneration
-//   src/ReplicatedStorage/FloatingObjectGeneration
-//   src/ReplicatedStorage/Gerstner/Helper.luau
-//   src/ReplicatedStorage/Gerstner/Serial/ZoneManager
-//   src/ServerScriptService
-//   src/StarterPlayerScripts
-//
-// Pass explicit paths to check selected files instead:
-//   node tools/check-syntax.js src/Path/To/Script.luau
+// By default it checks the Explorer-first `code/` tree when present. In the
+// older BRINE checkout it falls back to the historical `src/` roots. Pass
+// explicit paths to check selected files instead:
+//   node tools/check-syntax.js code/Path/To/Script.luau
 //
 // Run with:
 //   npm --prefix tools install        (once)
@@ -25,16 +18,15 @@
 const fs = require("fs");
 const path = require("path");
 const luaparse = require("luaparse");
+const { defaultSourceRoot } = require("./lib/paths");
 
-const root = path.resolve(__dirname, "..", "src");
-// Scope note: luaparse understands Lua 5.1, not Luau-only syntax (generics,
-// `{}?` optional types, `if-then` expressions, interpolated strings, long
-// comments). BRINE's deep Gerstner/Octree files use those, so this checker is
-// intentionally scoped to the conservatively-typed scripts it was built for.
-// For whole-repo analysis use tools/call-graph.js, metrics.js, validate-project.js
-// and hot-loop-scan.js (all Luau-aware custom parsers). Pass explicit paths to
-// check specific files instead.
-const DEFAULT_ROOTS = [
+const root = defaultSourceRoot();
+// Scope note: luaparse understands Lua 5.1, not every Luau-only construct.
+// The checker strips common annotations, but bitwise operators and some newer
+// syntax remain honest exceptions. The Vitriol quality gate allowlists only the
+// two known bitwise files; any new failure must be fixed or explicitly reviewed.
+// For whole-repo analysis use the quality gate plus the Luau-aware custom tools.
+const LEGACY_ROOTS = [
 	path.join(root, "ReplicatedStorage", "HandHolding"),
 	path.join(root, "ReplicatedStorage", "IslandGeneration"),
 	path.join(root, "ReplicatedStorage", "FloatingObjectGeneration"),
@@ -43,6 +35,7 @@ const DEFAULT_ROOTS = [
 	path.join(root, "ServerScriptService"),
 	path.join(root, "StarterPlayerScripts"),
 ];
+const DEFAULT_ROOTS = path.basename(root) === "code" ? [root] : LEGACY_ROOTS;
 
 function collectLuauFiles(dir) {
 	const out = [];

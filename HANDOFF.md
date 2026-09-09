@@ -1,4 +1,4 @@
-# Handoff — Vitriol, end of iteration 3
+# Handoff — Vitriol, playable creature slice (2026-09-09 UTC)
 
 Everything in this file was produced by running a command in this repository, not
 recalled. Where a claim is unverified it says so. Two iterations of "the doc said X,
@@ -9,126 +9,147 @@ the code did Y, and the test found out" are recorded in §4 for exactly that rea
 ## 0. Prompt for the next agent
 
 ```
-You are continuing work on VITRIOL, a Roblox night-survival horror game about an
-IK-controlled, blind, tendril-based creature that hunts by vibration, scent and
-memory and LEARNS the player's habits. The repository is Explorer-first: there is
-NO Rojo project and you must not create one. Work on the branch you were given;
-never create or switch branches.
+Continue the Vitriol Roblox prototype on the fixed branch
+arena/01a0847b-vitriol. The repository is Explorer-first: do not create a Rojo
+project or switch branches.
 
-Read first, in this order:
-  docs/00-VISION.md          the 7 design pillars; these override everything
-  docs/01-ARCHITECTURE.md    Explorer hierarchy, ownership, cadence budgets, and
-                             §13 = the list of known tool exceptions
-  docs/03-MONSTER-TECH.md    FABRIK, rig, movement, replication (§7.1 is now the
-                             real byte layout: header 13 B, 589 B per Braid snapshot)
-  docs/08-RESEARCH-NOTES.md  verified engine facts. Do not re-litigate these.
-  docs/09-HANDOFF-PROMPTS.md the WP1-WP10 breakdown and the shared preamble
-  HANDOFF.md §2/§3/§4        what exists, what the harnesses forbid, what was wrong
+Read first:
+  docs/00-VISION.md          design pillars and scope
+  docs/01-ARCHITECTURE.md    Explorer hierarchy, authority, cadence and budgets
+  docs/03-MONSTER-TECH.md    FABRIK, procedural rig, locomotion and replication
+  docs/04-KILL-CHOREOGRAPHY.md kill scene and BloodEngine adapter contract
+  docs/08-RESEARCH-NOTES.md  verified Roblox/BloodEngine facts
+  ROADMAP.md                 current decisions and validation snapshot
 
-Roblox docs are available as Markdown: append .md to any create.roblox.com/docs URL
-(classes live at /docs/reference/engine/classes/<Name>.md; libraries at
-/docs/reference/engine/libraries/<name>.md), or fetch
-https://create.roblox.com/docs/reference/engine/llms.txt for the index. Prefer that
-over searching - and record what you verify in docs/08 with the URL and a date.
+The playable continuation is already implemented: the Braid is code-generated,
+Threat 1 has one creature, creatures are woundable-only and never killable, the
+server owns the victim kill, the victim receives a first-person camera event, and
+BloodAdapter integrates the supplied BloodEngine hierarchy at
+ReplicatedStorage > VModules > BloodEngine with a bounded LOW fallback. The
+upstream MIT source and Assets.rbxm are checked in under
+code/ReplicatedStorage/VModules/BloodEngine; Studio import/layout still needs
+human verification.
 
-YOUR TASK THIS ITERATION: WP5 - the creature body, no AI yet (see docs/09).
-  ServerStorage/Vitriol/Creature/Body/{TendrilRig, Locomotion}, CreatureCore, the
-  part-mode renderer path, and a keyboard pilot behind GameConfig.Features.DebugPilot.
-  Acceptance: the creature climbs a wall, hangs from a ceiling and crosses open
-  ground with a trailing rest pose, at 60 Hz with 2 creatures, Profiler under 1.2 ms.
+Do not add a second scheduler, client health authority, creature death path, or
+cross-server evolution. Keep gameplay on CadenceService. If adding a config key,
+wire a real reader or document why it is a future WP key. Any human-only map/UI/
+audio/Studio action belongs in docs/10-HUMAN-AUTHORED.md and ROADMAP.md.
 
-  What already exists for you, tested and ready (do not rewrite it):
-    Shared/Skeleton        flat joint-chain data; :reset() + rest pose; built STRAIGHT
-    Lib/Fabrik             the solver, cone limits, dampChain, blendToRest
-    Shared/SkeletonCodec   encode/decode over arrays, 4-byte core quaternion included
-    Creature/Replicator    the buffer adapters, rate tiers, publish loop; register it
-                           with CadenceService, do not write your own loop
-    Shared/NoiseField      decay + wind advection + weather mask + surface coupling.
-                           Footfalls go in at EMIT time with the material multiplier
-                           already applied (MonsterConfig.Senses.VibrationCoupling)
-    Services/CadenceService  ONE scheduler. Register {Name, PeriodSeconds, BudgetMs,
-                           Run}. Bootstrap already binds Heartbeat; a service that
-                           calls task.spawn/task.wait fails the session harness.
-    Config/MonsterConfig   Rig/Locomotion/Archetypes blocks are already written with
-                           the numbers docs/03 cites; read them before inventing any.
-  Rules that bite here specifically:
-    - One Workspace:BulkMoveTo per creature per frame; zero table allocations in the
-      frame path; never .Touched (impulse from AssemblyLinearVelocity deltas).
-    - Anchor search is budgeted: MaxCandidatesPerTick / MaxOcclusionRaysPerTick.
-    - Ceiling and wall movement must need no special-casing: the core's "up" comes
-      from the anchor centroid normal (docs/03 §5.1), which is why the codec ships a
-      core orientation at all.
-    - New cadence slots need a budget share in GameConfig.Budgets (SlowShares /
-      FrameShares); Bootstrap checks that a row's shares still fit the row.
-
-HARD RULES (docs/09 preamble; these are load-bearing):
-  1. Every source file starts with a header comment giving its Explorer location
-     and instance class.
-  2. Nothing in Lib/ may call game:GetService, touch an Instance, or yield.
-  3. No magic numbers - every tunable goes in a Config module, with a comment giving
-     its unit and the doc section that justifies it.
-  4. Never use .Touched.
-  5. Frame-path code allocates zero tables (Lib/Tables has the pool).
-  6. Lighting is written by clients only.
-  7. Bone.Transform / Motor6D.Transform do not replicate - bones are presentation.
-  8. Run the checks below and paste their real output before you say "done".
-  9. If a human would do it better (meshes, map, UI, audio, animations) do NOT
-     generate it - extend docs/10-HUMAN-AUTHORED.md with a precise spec instead.
- 10. Update the ROOT ROADMAP.md when you finish a WP.
-
-BEFORE YOU SAY DONE, run all of these and report the actual output:
-  node tools/vitriol-smoke-test.js                 (363 passed, 0 failed)
-  node tools/vitriol-session-test.js               (80 passed, 0 failed)
-  node tools/check-syntax.js code                  (2 failures: Lib/RNG, Lib/Noise)
+Before saying done, run and report the real output of:
+  node tools/vitriol-smoke-test.js
+  node tools/vitriol-session-test.js
+  node tools/check-syntax.js code
   node tools/metrics.js --src code
-  node tools/hot-loop-scan.js --src code           (inside-a-loop 7, in-a-RunService-file 0)
+  node tools/hot-loop-scan.js --src code
   node tools/call-graph.js --src code
-  node tools/find-dead-config.js --src code        (only the two Gerstner lines)
+  node tools/find-dead-config.js --src code
   node tools/evaluate-models.js --models tools/models.example.json \
        --suite tools/evaluation-suite.example.json
-The last one must print:
-  fixture-known-good: ADMIT 100.0%
-  candidate-local: REJECT 0.0%
+  node tools/vitriol-quality-gate.js --src code
+The evaluator must print fixture-known-good: ADMIT 100.0% and
+candidate-local: REJECT 0.0%. The known syntax exception is Lua 5.1 luaparse
+rejecting bitwise `&` in Lib/RNG.luau and Lib/Noise.luau. Do not claim Studio,
+real Buffer replication, camera feel, or BloodEngine visual acceptance without
+running Roblox Studio.
 
-If you are running low on budget, stop cleanly: update ROADMAP.md, commit, and
-write the next handoff. A partial iteration that is committed and honest is worth
-more than an unfinished one that is not.
+If budget is low, update ROADMAP.md, commit the honest partial result, and write
+the next handoff rather than claiming completion.
 ```
 
 ---
 
+## 0.1 Current continuation — creature slice
+
+Resolved scope decisions:
+
+- The Braid is generated entirely from code; no mesh, rig, or Studio asset is needed
+  for the MVP creature body.
+- Monsters are never killable. `CreatureCore:wound()` only lowers locomotion and
+  active-tendril capacity; at `MonsterConfig.Wounds.DisableThreatAt` it becomes
+  non-threatening but remains alive and visible.
+- `GameConfig.Session.MaxCreatures = 1` and `MonsterConfig.Threat.CreatureCountAtThreat
+  = {}` keep one readable creature at Threat 1. There is no cross-server evolution.
+- A player reaching `MonsterConfig.Kill.GrabDistance` starts the cadence-stepped
+  `Creature/Body/KillChoreography`; `HealthService` alone writes player health.
+  The server sends `RE_CreatureEvent` with numeric `CreatureId`/`VictimUserId`, and
+  `StarterPlayerScripts/.../VictimCamera` holds the victim's own camera at the head
+  in first person. Spectators ignore the event and remain third person.
+- `BloodConfig`/`BloodAdapter` is the only visual blood caller. It probes the supplied
+  `ReplicatedStorage/VModules/BloodEngine` hierarchy first, uses
+  `BloodEngine.new(settings):Emit(...)` when installed, defaults the prototype to LOW
+  intensity, gates sever visuals, and keeps a bounded stylised fallback.
+- Optional limb hiding is behind `BloodConfig.Dismemberment.Enabled` (false by
+  default); `KillChoreography` exposes one sever callback during TENDERIZE.
+
+New runtime files:
+
+- `code/ServerStorage/Vitriol/Creature/Body/{TendrilRig,Locomotion,KillChoreography}.luau`
+- `code/ServerStorage/Vitriol/Creature/CreatureCore.luau`
+- `code/ServerStorage/Vitriol/Services/CreatureService.luau`
+- `code/ReplicatedStorage/Vitriol/{Config/BloodConfig,Shared/BloodAdapter}.luau`
+- `code/StarterPlayer/StarterPlayerScripts/Vitriol/{ClientMain,Controllers/VictimCamera}.luau`
+
+Bootstrap now creates BloodAdapter, Health kill callbacks, CreatureService, one frame
+slot, and one think slot. No gameplay code adds a RunService connection or task yield.
+The session harness exercises spawn, close-range scene start, remote event payload,
+player-only death, and the existing scheduler/Lighting invariants.
+
+Unverified Studio work remains explicit: actual Roblox Part/CFrame/BulkMoveTo display,
+wall/ceiling purchase, real Buffer replication, client camera feel, audio/post-process,
+and importing the checked-in BloodEngine source/Assets.rbxm into the exact Explorer
+shape. Do not claim these as headless-proven.
+
 ## 1. Verified state at handoff
 
-Iteration 3's work is committed on `arena/01a08196-vitriol` (WP3 close-out + WP4).
+The current working branch is `arena/01a0847b-vitriol`. Iteration 3's server
+foundation is retained; this continuation adds the generated Braid, spawn/runtime
+wiring, Blood adapter, bounded victim scene, and first-person victim camera. Changes
+are included in the current continuation commit; Studio verification remains open.
 
 | Check | Output |
 | --- | --- |
-| `vitriol-smoke-test.js` | `VITRIOL smoke test: 363 passed, 0 failed` |
-| `vitriol-session-test.js` | `VITRIOL session test: 80 passed, 0 failed` |
-| `check-syntax.js code` | 34 OK / `2 file(s) failed` — `Lib/RNG.luau`, `Lib/Noise.luau` (§3) |
-| `metrics.js --src code` | `LOC 8945 \| code 6240 \| comments 1978 \| exports 305 \| requires 24` (36 files) |
-| `hot-loop-scan.js --src code` | `Priced calls: 16 \| inside-a-loop: 7 \| in a RunService file: 0` |
-| `call-graph.js --src code` | `Exports: 305 (used 11, orphaned 294)` — the graph has real edges now: `Bootstrap -> NoiseField/CadenceService/Remotes`, `ClientIntentHandler -> NetContract.stats`, `DebugHandler -> Time/Threat/Health/Cadence snapshots` |
-| `find-dead-config.js --src code` | only the two hard-coded `src/...Gerstner...: not found` lines |
+| `vitriol-smoke-test.js` | `VITRIOL smoke test: 366 passed, 0 failed` |
+| `vitriol-session-test.js` | `VITRIOL session test: 87 passed, 0 failed` |
+| `check-syntax.js code` | 43 OK / `2 file(s) failed` — `Lib/RNG.luau`, `Lib/Noise.luau` (§3) |
+| `metrics.js --src code` | `45 files; LOC 10993; code 8001; comments 2125; exports 381; requires 35` |
+| `hot-loop-scan.js --src code` | `Priced calls: 31 \| inside-a-loop: 8 \| in a RunService file: 0` |
+| `call-graph.js --src code` | current graph includes `Bootstrap -> BloodAdapter/CreatureService`, `CreatureService -> CreatureCore/TendrilRig/Locomotion`, `HealthService -> KillChoreography`, and `ClientMain -> VictimCamera/Remotes` |
+| `find-dead-config.js --src code` | audits all eight Vitriol configs; planned future-WP keys are reported for review |
 | `evaluate-models.js` | `fixture-known-good: ADMIT 100.0%` / `candidate-local: REJECT 0.0%` |
+| `vitriol-quality-gate.js --src code` | `9/9 checks passed` including both harnesses and `git diff --check` |
 
-The 7 inside-a-loop flags are unchanged from iteration 2 (`table.insert` in
-`Genetics` 181/220 and `RegionIntegrity` 46/105/106/108/160). The other 9 priced
-calls, all outside loops: `:FindFirstChild` 3× in `Remotes` (client bind path) and
-3× in `TimeService:acquireAnchor` (memoised on `self.anchor`, so once per server);
-`os.clock()` twice in `CadenceService:_runSlot`, which is once per slot *dispatch*
-rather than once per frame by design; and `table.sort` in `DebugHandler`'s `phases`
-answer. None is in a file that binds `RunService` — `Bootstrap` and `Profiler` touch
-it and contain zero priced calls, which is a deliberate constraint (§6.8).
+Latest validation run for this continuation (2026-09-09 UTC): smoke **366 passed,
+0 failed**; session **87 passed, 0 failed**. `check-syntax.js code` reports 43
+parseable files plus the two known bitwise exceptions (`Lib/RNG.luau`, `Lib/Noise.luau`).
+Metrics report 45 files, 10,993 LOC, 8,001 code lines, 2,125 comment lines, 381
+exports and 35 require edges. Hot-loop reports 31 priced calls, 8 inside loops, and
+0 in a RunService file. The evaluator prints `fixture-known-good: ADMIT 100.0%` and
+`candidate-local: REJECT 0.0%`.
+
+The 8 loop flags are the seven existing `table.insert` sites in `Genetics` and
+`RegionIntegrity` plus the one kill-only `FindFirstChild` limb lookup in
+`HealthService`; none is in a frame-bound RunService file. The call graph reports
+45 modules, 381 exports and 35 require edges, including the Bootstrap/BloodAdapter/
+CreatureService and client VictimCamera edges. The dead-config audit now scans all eight Vitriol config modules; its reported
+future-WP keys (AI/body-integrity/animation, destruction, vehicle and survival
+settings) are recorded as verify-before-removing candidates, not silently removed.
+`vitriol-quality-gate.js --src code` is the preferred single future-agent command
+and most recently passed 9/9 checks.
 
 ---
 
 ## 2. What exists
 
+`code/ReplicatedStorage/VModules/BloodEngine/` mirrors the supplied upstream
+BloodEngine v1.1.3 ModuleScript family (`init`, `Operator`, `Settings`, `Functions`)
+and its `Assets.rbxm`, with the upstream MIT notice. In Studio, make the root
+ModuleScript addressable as `ReplicatedStorage.VModules.BloodEngine`; the adapter
+also accepts a `BloodEngine` Folder containing an `init` child.
+
 `code/ReplicatedStorage/Vitriol/`
 
-**Config/** (7, parse clean): `GameConfig`, `SurvivalConfig`, `DayNightConfig`,
-`MonsterConfig`, `DestructionConfig`, `GoreConfig`, `VehicleConfig`. New since
+**Config/** (8, parse clean): `GameConfig`, `SurvivalConfig`, `DayNightConfig`,
+`MonsterConfig`, `DestructionConfig`, `GoreConfig`, `BloodConfig`, `VehicleConfig`. New since
 iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSlopSeconds`,
 `GameConfig.Budgets.{SlowShares,FrameShares}`, `GameConfig.LOD.Tiers`,
 `GameConfig.Session.{SecondsPerRealSecond,RoundName,DataStoreName,PhaseLogLines}`,
@@ -163,7 +184,14 @@ iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSl
 - `Services/TimeService` — `init(services)`, `start`, `advance(dt)`, `publish`, `setThreat`, `setWeather`, `seekTo`, `seekToPhase`, `setTimeScale`, `onPlayerAdded`, `snapshot`, `stop`; owns `Workspace.Vitriol.World.TimeAnchor`.
 - `Services/SessionService` — `init`, `start`, `tick`, `beginRound`, `endRound`, `phaseChanged`, `nightEnded`, `killRegistered`, `loadRecord`, `saveRecord`, `snapshot`, `stop`.
 - `Services/ThreatService` — `init`, `start`, `recompute`, `tick`, `creatureCount`, `nightsSurvived`, `killRegistered`, `playerChanged`, `setOverride`, `snapshot`, `stop`.
-- `Services/HealthService` — `init`, `start`, `observe`, `attach`, `forget`, `addWound`, `addWoundByUserId`, `limbSevered`, `trackDamage`, `tickBleed`, `metersAllowRegen`, `scentScale`, `snapshot`, `stop`.
+- `Creature/Body/TendrilRig` — numeric generated chains, constrained FABRIK/rest blending, anchors, damped display skeletons.
+- `Creature/Body/Locomotion` — bounded ray fan, material-aware anchors, haul/glide movement.
+- `Creature/Body/KillChoreography` — deterministic GRAB→LIFT→COIL→TENDERIZE→CONSUME→DISCARD scene with optional sever callback.
+- `Creature/CreatureCore` — generated Braid Model/Parts, one guarded `BulkMoveTo`, wound-only state and snapshot.
+- `Services/CreatureService` — one-creature reconciliation/spawn, target bridge, wound API, victim event, cadence slots.
+- `Services/HealthService` — `init`, `start`, `observe`, `attach`, `forget`, `addWound`, `addWoundByUserId`, `beginCreatureKill`, `tickCreatureKills`, `limbSevered`, `trackDamage`, `tickBleed`, `metersAllowRegen`, `scentScale`, `snapshot`, `stop`.
+- `Shared/BloodAdapter` — BloodEngine probe/constructor/Emit adapter, LOW/FULL gate, bounded fallback.
+- `StarterPlayerScripts/Vitriol/Controllers/VictimCamera` — victim-only first-person camera bound to `RE_CreatureEvent`.
 - `Bootstrap` (ModuleScript) — `ensure()` (idempotent), `stop()`, `runtime()`.
 
 `code/ServerScriptService/Vitriol/`
@@ -182,11 +210,11 @@ iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSl
   `Profiler.tier()`, `:degrade()`, `:reset()` for the debug handler and tests.
 
 `tools/`
-- `vitriol-smoke-test.js` + `vitriol/tests.luau` — pure modules, 363 assertions.
-- `vitriol-session-test.js` + `vitriol/session.luau` — the server, 80 assertions.
+- `vitriol-smoke-test.js` + `vitriol/tests.luau` — pure modules, 366 assertions.
+- `vitriol-session-test.js` + `vitriol/session.luau` — the server, 87 assertions.
 - `lib/luau-transform.js` — the shared Luau→Lua transform (both harnesses; also where the forbidden constructs are enforced).
-- `lib/luau.js` (`stripCommentsAndStrings`), the `check-syntax`/`metrics`/`hot-loop-scan`/`call-graph`/`find-dead-config`/`evaluate-models` gates.
-- `smoke-test.js`, `validate-project.js`, `audit.sh` are unrelated legacy — do not edit or reorganise `code/` for them.
+- `lib/paths.js` (Explorer-first `code/` resolver), `lib/luau.js` (`stripCommentsAndStrings`), the `vitriol-quality-gate`, `check-syntax`, `metrics`, `hot-loop-scan`, `call-graph`, `find-dead-config`, and `evaluate-models` gates.
+- `audit.sh` is the broad report runner; `validate-project.js` remains optional legacy Rojo validation and is skipped for this Explorer-first checkout.
 
 ---
 
@@ -295,11 +323,12 @@ core-relative vs parent-relative quantisation). Iteration 3 added:
 - Script Explorer locations are stated in every file's header comment.
 - Anything a human would do better (map, meshes, UI, audio, animation) gets a precise
   spec in `docs/10-HUMAN-AUTHORED.md`, never generated assets.
-- **There is no gore module in this repository.** The user referred to "the provided
-  gore module"; it does not exist. Stop looking. Its interface is specified in
-  `docs/04` §3.3 and `docs/10`, with `GoreConfig.Contract`/`GoreConfig.Fallback`
-  (asset-free). Keep it an external dependency with a working fallback and keep
-  flagging the gap.
+- **BloodEngine source is checked in under `code/ReplicatedStorage/VModules/BloodEngine`.**
+  It mirrors the supplied upstream MIT v1.1.3 scripts and `Assets.rbxm`; the adapter
+  is still the only visual-blood caller, probes `ReplicatedStorage/VModules/BloodEngine`
+  first, uses `new(settings)`/`:Emit(...)`, defaults to LOW, and keeps a bounded
+  fallback. Do not claim the checked-in engine has been Studio-verified until the
+  Explorer import and real visuals are tested.
 - `tools/validate-project.js` and `tools/audit.sh` are Rojo-specific; do not
   reorganise `code/` to satisfy them. `tools/smoke-test.js` is unrelated legacy.
 - The `evaluate-models.js` gate must be run and must pass.
@@ -331,9 +360,10 @@ core-relative vs parent-relative quantisation). Iteration 3 added:
    features, Boltzmann, replacing traces) → Utility AI → Behaviour Tree → Steering →
    IK. Cross-night: GA over genomes (DataStore) + aggregated priors (MemoryStore,
    max expiry 45 days).
-7. The kill is region-integrity damage from
-   `|tendril velocity| × grip × region vulnerability`; zero integrity severs, then
-   hands off via `GoreAdapter`.
+7. The minimum kill is a bounded cadence scene owned by HealthService; optional
+   region/limb presentation is gated by `BloodConfig.Dismemberment` and hands visual
+   blood to `BloodAdapter`, never to gameplay code directly. Full region-integrity
+   Grapple remains a later M5 completion item.
 8. **One scheduler.** `CadenceService` is driven by Bootstrap's single
    `RunService.Heartbeat` binding and every piece of *gameplay* work is a registered
    slot on it. The only other binding is the Profiler's read-only watchdog, deliberately

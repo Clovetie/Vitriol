@@ -16,7 +16,26 @@ bash tools/audit.sh
 bash tools/audit.sh --json    # also writes JSON reports into tools/reports/
 ```
 
-`tools/audit.sh` runs **all** the tools below and prints a combined report.
+`tools/audit.sh` runs **all** the analysis tools below and prints a combined report.
+It automatically selects the Explorer-first `code/` tree when present and skips the
+legacy Rojo project validator when this repository has no `default.project.json`.
+
+### `vitriol-quality-gate.js` — strict evidence gate
+
+This is the command future agents should run before committing. It runs the smoke
+and session harnesses, the syntax checker, metrics, hot-loop scan, call graph,
+dead-config audit, model evaluation, and `git diff --check`. It treats only the two
+known Lua 5.1 parser failures (`Lib/Noise.luau` and `Lib/RNG.luau`) as allowlisted;
+a new syntax failure or any priced call in a RunService file fails the gate.
+
+```bash
+node tools/vitriol-quality-gate.js --src code
+node tools/vitriol-quality-gate.js --src code --report tools/reports/quality-gate.json
+```
+
+The report is ignored under `tools/reports/` and keeps bounded stdout/stderr for
+post-handoff inspection. A green run ends with `Vitriol quality gate: 9/9 checks
+passed`. It is an evidence aggregator, not a substitute for Studio verification.
 
 ---
 
@@ -140,6 +159,10 @@ node tools/workbench.js seed       # re-copy working files from the example temp
 
 ## Shared library
 
+`lib/paths.js` resolves the Explorer-first `code/` root and falls back to the
+legacy `src/` layout without creating a Rojo project. This keeps bare tool commands
+and npm scripts useful for future generations.
+
 `lib/luau.js` is the shared, zero-dependency analysis engine used by the tools
 above. It provides:
 
@@ -174,9 +197,17 @@ rokit add JohnnyMorganz/StyLua
 rokit install
 ```
 
-**Recommendations from ecosystem research** (see the `tools/` docs for the full
-rationale): `luau-lsp` for in-editor type checking, `TestEZ` for Luau unit
-tests, `Wally` for packages, and `Lune` for Luau CI scripts.
+**Recommendations from ecosystem research** (checked 2026-09-09): Roblox's
+[Luau type-checking documentation](https://create.roblox.com/docs/luau/type-checking)
+confirms that `--!strict`/`--!nonstrict` feed Studio Script Analysis; use the real
+Luau analyzer when Studio or an official toolchain is available. [StyLua
+2.5.2](https://github.com/JohnnyMorganz/StyLua) provides deterministic Luau
+formatting, [Selene](https://github.com/Kampfkarren/selene) provides a fast Lua/Luau
+linter, and [Rokit](https://github.com/rojo-rbx/rokit) pins external tool versions.
+`luau-lsp` is useful for editor diagnostics, `TestEZ` for Roblox-native tests,
+`Wally` for packages, and `Lune` for Luau CI scripts. These remain optional: the
+Explorer-first repository must keep its dependency-free Node gate green even when
+network access or Roblox Studio is unavailable.
 
 ---
 

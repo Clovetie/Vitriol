@@ -41,15 +41,20 @@ local GameConfig = require(shared.Config.GameConfig)
 local DayNightConfig = require(shared.Config.DayNightConfig)
 local MonsterConfig = require(shared.Config.MonsterConfig)
 local SurvivalConfig = require(shared.Config.SurvivalConfig)
+local GoreConfig = require(shared.Config.GoreConfig)
+local BloodConfig = require(shared.Config.BloodConfig)
 local Remotes = require(shared.Shared.Remotes)
 local NetContract = require(shared.Shared.NetContract)
 local NoiseField = require(shared.Shared.NoiseField)
+local BloodAdapter = require(shared.Shared.BloodAdapter)
 
 local CadenceService = require(vitriol.Services.CadenceService)
 local TimeService = require(vitriol.Services.TimeService)
 local ThreatService = require(vitriol.Services.ThreatService)
 local SessionService = require(vitriol.Services.SessionService)
 local HealthService = require(vitriol.Services.HealthService)
+local KillChoreography = require(vitriol.Creature.Body.KillChoreography)
+local CreatureService = require(vitriol.Services.CreatureService)
 
 local instance: any = nil
 
@@ -114,6 +119,8 @@ function Bootstrap.ensure(): any
 		DayNight = DayNightConfig,
 		Monster = MonsterConfig,
 		Survival = SurvivalConfig,
+		GoreConfig = GoreConfig,
+		BloodConfig = BloodConfig,
 		Workspace = Workspace,
 		Players = Players,
 		Logger = log,
@@ -150,6 +157,13 @@ function Bootstrap.ensure(): any
 	})
 
 	runtime.Noise = buildNoiseField()
+	runtime.Blood = BloodAdapter.new({
+		Config = BloodConfig,
+		Workspace = Workspace,
+		ServerStorage = ServerStorage,
+		ReplicatedStorage = ReplicatedStorage,
+		Logger = log,
+	})
 
 	-- One instance per service, so no service can be constructed twice and no module
 	-- table is ever mutated by two owners.
@@ -157,6 +171,7 @@ function Bootstrap.ensure(): any
 	runtime.Threat = setmetatable({}, ThreatService)
 	runtime.Session = setmetatable({}, SessionService)
 	runtime.Health = setmetatable({}, HealthService)
+	runtime.Creature = setmetatable({}, CreatureService)
 
 	runtime.Time:init({
 		Workspace = Workspace,
@@ -189,9 +204,37 @@ function Bootstrap.ensure(): any
 		Players = Players,
 		Cadence = runtime.Cadence,
 		Noise = runtime.Noise,
+		Blood = runtime.Blood,
+		BloodConfig = BloodConfig,
+		KillChoreography = KillChoreography,
+		KillConfig = MonsterConfig.Kill,
+		GoreConfig = GoreConfig,
 		Time = runtime.Time,
 		Config = GameConfig,
 		Survival = SurvivalConfig,
+		OnVictimKillStart = function(player: any, scene: any)
+			if runtime.Creature then
+				runtime.Creature:presentVictimKill(player, scene)
+			end
+		end,
+		OnDeath = function(state: any)
+			if runtime.Creature then
+				runtime.Creature:presentVictimKill(state.player, state)
+			end
+		end,
+		Logger = log,
+	})
+	runtime.Creature:init({
+		Players = Players,
+		Cadence = runtime.Cadence,
+		Noise = runtime.Noise,
+		Time = runtime.Time,
+		Threat = runtime.Threat,
+		Health = runtime.Health,
+		Remotes = runtime.Remotes,
+		Workspace = Workspace,
+		Monster = MonsterConfig,
+		Config = GameConfig,
 		Logger = log,
 	})
 
@@ -217,10 +260,11 @@ function Bootstrap.ensure(): any
 	runtime.Threat:start()
 	runtime.Session:start()
 	runtime.Health:start()
+	runtime.Creature:start()
 	runtime.Cadence:start()
 
 	if GameConfig.Diagnostics.LogServiceLifecycle then
-		log("info", "runtime up: " .. table.concat({ "cadence", "time", "threat", "session", "health" }, ", "))
+		log("info", "runtime up: " .. table.concat({ "cadence", "time", "threat", "session", "health", "creature", "blood" }, ", "))
 	end
 	return runtime
 end
@@ -238,8 +282,12 @@ function Bootstrap.stop(): ()
 	if runtime == nil then
 		return
 	end
+	runtime.Creature:stop()
 	runtime.Health:stop()
 	runtime.Session:stop()
+	if runtime.Blood then
+		runtime.Blood:destroy()
+	end
 	if runtime.NoiseSlot then
 		runtime.Cadence:unregister(runtime.NoiseSlot)
 		runtime.NoiseSlot = nil

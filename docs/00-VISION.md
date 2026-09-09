@@ -288,15 +288,15 @@ result, do **not** generate it with code — specify it precisely instead.
 | Survival meters, debuffs, item effects | **UI** (menus, HUD, Field Notes) |
 | Destruction joint-graph, debris pooling, debris physics tuning | **Debris/prop meshes**, plank & furniture models |
 | Vehicle controller, impulse/damage model | **Car meshes** and their wheel/suspension setups |
-| Gore/kill orchestration, region integrity | **Gore meshes/particles** (and the supplied Gore module itself) |
+| Kill orchestration, region integrity | **BloodEngine/Blood visuals and optional limb presentation** (supplied module) |
 | Replication, remotes, session flow, persistence | **All audio** (creature voices, ambience, foley) |
 | Config, tuning, tooling, tests | **Player animations** (crawl, carry, bandage) |
 
-> **Open dependency:** the project owner references a "provided gore module". No
-> such module exists in this repository yet (verified: the tree contains only
-> `tools/` plus these docs). `04-KILL-CHOREOGRAPHY.md` §6 therefore specifies the
-> **exact contract** that module must satisfy, and the code ships a
-> `GoreAdapter` that degrades gracefully when it is absent.
+> **Integration dependency:** the supplied BloodEngine/Blood v1.1.3 source and
+> `Assets.rbxm` are checked into `code/ReplicatedStorage/VModules/BloodEngine` under
+> its MIT license. `04-KILL-CHOREOGRAPHY.md` §3 records the adapter contract, and
+> `BloodAdapter` still degrades gracefully until the source is imported into the
+> matching Studio Explorer hierarchy and its real visuals are verified.
 
 ---
 

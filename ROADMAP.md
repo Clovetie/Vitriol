@@ -43,7 +43,10 @@ below is *executed* by `tools/vitriol-smoke-test.js`, not merely parsed.
 | Harness: `require()` shim + multi-line `+=` support | ✅ |
 | Runtime assertions at the end of iteration 2: 198 | ✅ |
 
-## Iteration 3 — the server exists  🟨 **this one**
+## Iteration 3 — the server exists  ✅
+
+The server foundation is complete and remains covered by the session harness. The
+creature slice below is the current continuation.
 
 The shared layer closed (WP3) and the server started (WP4), with both harnesses
 executing real code. Everything below is *run*, not parsed.
@@ -62,8 +65,8 @@ executing real code. Everything below is *run*, not parsed.
 | WP4 `SessionService` / `ThreatService` / `HealthService` + `Bootstrap` + `Main` | ✅ |
 | WP4 `Diagnostics/Profiler` — per-cadence budget watchdog, auto-degrade one LOD tier | ✅ |
 | WP4 `RemoteHandlers/{ClientIntentHandler,DebugHandler}` — validation applied; `RF_DebugQuery` is read-only by schema | ✅ |
-| New gate: `tools/vitriol-session-test.js` (fake DataModel + virtual clock), 80 assertions | ✅ |
-| 363 runtime assertions in the smoke test (was 198) | ✅ |
+| New gate: `tools/vitriol-session-test.js` (fake DataModel + virtual clock), 87 assertions | ✅ |
+| 366 runtime assertions in the smoke test (was 198) | ✅ |
 | WP2 remainder — `find-dead-config` still reports blocks whose readers arrive in WP5–WP10 (`Genes`, `Memory`, `Prediction`, `CollisionGroups`, `Tags`, `AnimationIds`, …) | ⬜ |
 
 ### Bugs found by writing the code (iteration 3, all fixed, all regression-tested)
@@ -90,6 +93,46 @@ executing real code. Everything below is *run*, not parsed.
 | `Lib/QLearning` | trace decay skipped the taken action, so stale eligibilities stayed pinned at 1.0 and credit flowed back at full strength forever. |
 | `Shared/SkeletonCodec` | parent-relative quantisation (as originally specified in `docs/03` §7.1) costs 0.02748 studs at the tip vs a 0.00866 budget; switched to core-relative and corrected the doc. |
 
+## Current continuation — playable procedural creature slice  🟨
+
+This slice resolves the product decisions that were previously open: the Braid is
+**woundable-only**, Threat 1 owns **one** creature, there is no cross-server species
+evolution, and a victim watches the authoritative kill scene from their own head in
+first person. The server remains single-authority and all gameplay cadence is still
+owned by `CadenceService`.
+
+| Deliverable | Status |
+| --- | --- |
+| `Creature/Body/TendrilRig` — numeric chains + constrained FABRIK + rest/noise pose | ✅ |
+| `Creature/Body/Locomotion` — bounded ray fan, anchors, wall/ceiling up vector, open-ground glide | ✅ |
+| `Creature/CreatureCore` — generated Braid Model/Parts, wound state, guarded `BulkMoveTo` | ✅ |
+| `Services/CreatureService` — one-creature lifecycle, genome expression, cadence registration, target bridge | ✅ |
+| `Creature/Body/KillChoreography` — cadence-stepped bounded victim scene | ✅ |
+| `HealthService` — creature grab, player-only kill, optional dismemberment hook, Blood emission | ✅ |
+| `Shared/BloodAdapter` + `BloodConfig` — BloodEngine probe, LOW gate, bounded fallback | ✅ |
+| `StarterPlayerScripts/.../VictimCamera` — local first-person victim presentation | ✅ |
+| Replicator stream wiring / generated parts | 🟨 — real `buffer`/Studio verification remains |
+| Studio climb/ceiling proof, camera/audio/post-process polish | ⬜ — human verification required |
+| Keyboard debug pilot | ⬜ — not needed for the one-player playable slice yet |
+
+The Braid is generated entirely by code. No mesh or Studio-authored creature asset is
+required for this slice. The supplied BloodEngine v1.1.3 source and `Assets.rbxm` are
+checked in under `code/ReplicatedStorage/VModules/BloodEngine`; the adapter searches
+that path first, accepts the source folder-with-`init` shape, and degrades to a bounded
+stylised drop if Studio has not imported it. Optional limb hiding is disabled by
+default and remains behind `BloodConfig.Dismemberment.Enabled`.
+
+### M2 — The body, no brain  🟨
+`TendrilRig`, `Locomotion`, `CreatureCore`, part-mode renderer, and server spawn are
+implemented. Studio acceptance is still open: a human must verify wall/ceiling
+purchase, visual readability, and the 1.2 ms frame budget in a real place.
+
+### M5 — The kill  🟨
+The minimum server/client path now exists: a creature reaching `GrabDistance` starts
+`KillChoreography`, `HealthService` owns player damage/death, BloodAdapter emits LOW/FULL
+visuals, and `VictimCamera` is local-only. Full region-integrity choreography,
+Grapple interactions, audio/post-process, and a real BloodEngine/Studio pass remain.
+
 ## Milestones
 
 ### M0 — Foundations ✅ (this iteration)
@@ -103,13 +146,12 @@ Design locked, pure math core executing under test, all tunables in Config.
 `Bootstrap` on a fake DataModel with a virtual clock and asserts that a zero-player
 server runs a full cycle, logs exactly one line per phase change with the elapsed time,
 never touches `Lighting`, and registers exactly two `Heartbeat` connections (the
-cadence pump and the watchdog). 80 assertions, 0 failures.
+cadence pump and the watchdog). 87 assertions, 0 failures.
 
-### M2 — The body, no brain (WP5) ⬜
-`TendrilRig`, `Locomotion`, `CreatureCore`, part-mode renderer, `BulkMoveTo`
-writes, Studio keyboard pilot.
-**Exit:** a human can drive the creature up a wall and across a ceiling at 60 Hz
-with two creatures, `Profiler` < 1.2 ms.
+### M2 — The body, no brain (WP5) 🟨
+The code-generated one-creature body and server wiring are present; the two-creature
+keyboard-pilot Studio exit is intentionally not claimed. See the continuation table
+above for the verified headless scope.
 
 ### M3 — Instinct-only creature (WP6) ⬜
 `Senses`, `Memory`, `Predictor`, `Steering`, `BehaviorTree`, `Tactics`, `Policy`
@@ -122,44 +164,78 @@ on the fourth it goes there *first*, and `AIDebugDump` shows why.
 **Exit:** capture rate over 20 simulated nights is measurably higher with learning
 ON, and still below 1.0.
 
-### M5 — The kill (WP8) ⬜
-`Grapple`, `KillChoreography`, `GoreService`, `GoreAdapter`, `VictimCamera`.
-**Exit:** all five criteria in `docs/04` §7, including running with **no** gore
-assets present.
+### M5 — The kill (WP8) 🟨
+A minimum `KillChoreography`/`HealthService`/`BloodAdapter`/`VictimCamera` path is
+implemented. Full Grapple, region-integrity choreography and Studio presentation are
+still open; see the continuation table above.
 
 ### M6 — World interaction (WP9–WP10) ⬜
 `DestructionService`, `VehicleService`, `InventoryService`, `InteractionController`,
 `SurvivalService`, `LightingDriver`, `CreatureAudio`, `VibrationFx`.
 **Exit:** all criteria in `docs/05` §7, `docs/06` §9 and `docs/07` §6.
 
-## Open decisions for the project owner
+## Resolved product decisions
 
-Tracked in `docs/02-MONSTER-DESIGN.md` §13:
+1. Monsters are **never killable**; they are woundable until `Threatening=false`.
+2. Threat 1 owns **one** creature for the readable MVP.
+3. Cross-server species evolution is **not** implemented.
+4. A victim watches their own kill in **first person**; spectators retain third-person.
+5. BloodEngine/Blood is the integration seam. The v1.1.3 source is checked in, but
+   runtime still tolerates a Studio place that has not imported it; LOW stylised
+   fallback remains bounded.
+6. Limb dismemberment is optional and disabled by default through
+   `BloodConfig.Dismemberment.Enabled`.
 
-1. Killable or only woundable? (recommendation: woundable for MVP)
-2. Creature count at Threat 1.0? (recommendation: 1 → 2 by night 4)
-3. Cross-server species evolution in the first playable? (recommendation: no)
-4. Does the victim watch their own kill in first person? (recommendation: yes)
-5. **The gore module** — supply it, or run on the built-in fallback?
-   (`docs/04` §3 / `docs/10` §8)
+The only remaining decision is the human Studio/content pass, not the gameplay
+authority or scope.
 
 ## Known gaps in this iteration
 
-- No creature or client code exists yet: `ServerStorage/Vitriol/Creature/*` is
-  `Replicator` only, and nothing under `StarterPlayerScripts` has been written.
-  `tools/call-graph.js` therefore still reports most `Lib`/`Shared` exports as
-  *unused*; that is expected until WP5–WP10 consume them.
-- `tools/find-dead-config.js --src code` will keep reporting Config blocks whose
-  readers arrive later (WP2's remainder). To check a config you just touched, pass
-  `--src code --file <that file>`, or it calls every top-level block dead. None of
-  iteration 3's new keys are unread.
+- The headless server path is live, but Roblox Studio has not been run here. A human
+  must verify actual Part rendering, wall/ceiling raycasts, `BulkMoveTo`, real Buffer
+  replication, the client camera, and audio/post-process presentation.
+- BloodEngine v1.1.3 source and `Assets.rbxm` are now checked in under
+  `code/ReplicatedStorage/VModules/BloodEngine` with its MIT notice. `BloodAdapter`
+  probes `ReplicatedStorage/VModules/BloodEngine` first and accepts either a root
+  ModuleScript or a Folder containing `init`; Studio import/layout and real visuals
+  remain unverified.
+- Full `Grapple`, region-integrity sever ordering, predator AI (`Senses`/`Memory`/
+  `Steering`), survival, destruction, vehicles, and human-authored UI/audio remain
+  later roadmap work. The current kill scene is intentionally a minimal playable seam.
+- `tools/find-dead-config.js --src code` now audits all eight Vitriol config modules.
+  It reports planned future-WP tables such as `MonsterConfig.Memory`/
+  `Prediction`, `GameConfig.AnimationIds`/`Tags`, and destruction/vehicle/survival
+  tables as dead until their readers land; verify before removing them.
 - `tools/check-syntax.js` fails on `Lib/RNG.luau` and `Lib/Noise.luau`: luaparse is a
-  **Lua 5.1** parser and cannot read bitwise operators. Both files are executed for
-  real by `tools/vitriol-smoke-test.js` under Lua 5.3, which is stronger evidence.
-- The session harness proves *logic* against a fake DataModel. It cannot prove
-  replication, attribute delivery timing, packet size, or that a client sees the sky
-  it should — those stay on the Studio checklist (docs/06 §9 items 1-3,
-  and the halves of 5-6 that need a real place).
-- `tools/validate-project.js` expects a Rojo `default.project.json`. This project
-  is deliberately Explorer-first, so that one check reports a missing project file
-  by design.
+  **Lua 5.1** parser and cannot read bitwise operators. Both files, plus the new
+  choreography, are executed for real by the smoke/session harnesses. The new
+  quality gate allowlists exactly those two paths and fails on any new one.
+- `tools/vitriol-quality-gate.js` is the strict future-agent command; it runs the
+  smoke/session tests, all requested reports, model evaluation, and `git diff --check`.
+- The project remains Explorer-first. `tools/validate-project.js` is retained for
+  legacy Rojo checkouts but `tools/audit.sh` skips it when no `default.project.json`
+  exists; no Rojo project is to be created merely for tooling.
+
+## Latest validation snapshot — 2026-09-09 UTC
+
+- `node tools/vitriol-smoke-test.js`: **366 passed, 0 failed**.
+- `node tools/vitriol-session-test.js`: **87 passed, 0 failed**; includes creature
+  spawn, bounded victim scene, first-person event payload, player-only death, wound-only
+  creature disablement, and no extra scheduler.
+- `node tools/check-syntax.js code`: **43 files parse**; the two known Lua 5.1 parser
+  exceptions remain `Lib/RNG.luau` and `Lib/Noise.luau` (bitwise `&`).
+- `node tools/metrics.js --src code`: **45 files; LOC 10993 | code 8001 | comments
+  2125 | exports 381 | requires 35**.
+- `node tools/hot-loop-scan.js --src code`: **Priced calls 31 | inside-a-loop 8 | in
+  a RunService file 0**; the extra loop flag is the kill-only limb lookup.
+- `node tools/call-graph.js --src code`: **45 modules | 381 exports | 35 require
+  edges**; includes the BloodAdapter/CreatureService/kill/camera edges.
+- `node tools/find-dead-config.js --src code`: audits all eight Vitriol config modules;
+  reports planned future-WP keys such as `MonsterConfig` AI/memory/prediction,
+  `GoreConfig` body-integrity, `GameConfig` animation/tag settings, and
+  destruction/vehicle/survival tables as verify-before-removing candidates.
+- `node tools/vitriol-quality-gate.js --src code`: **9/9 checks passed**, including
+  both harnesses, all static reports, model evaluation, and `git diff --check`.
+- `node tools/evaluate-models.js --models tools/models.example.json --suite
+  tools/evaluation-suite.example.json`: `fixture-known-good: ADMIT 100.0%`,
+  `candidate-local: REJECT 0.0%`.

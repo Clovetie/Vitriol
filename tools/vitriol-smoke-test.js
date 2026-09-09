@@ -56,6 +56,7 @@ const MODULES = {
 	// ServerStorage, but its codec/adapter half is pure Lua + a `buffer` shim, which
 	// is what the Replicator parity test needs to prove array/buffer agreement.
 	Replicator: "code/ServerStorage/Vitriol/Creature/Replicator.luau",
+	KillChoreography: "code/ServerStorage/Vitriol/Creature/Body/KillChoreography.luau",
 };
 
 // ---------------------------------------------------------------------------

@@ -25,6 +25,7 @@ local MonsterConfig = VitriolRequire("MonsterConfig")
 local Remotes = VitriolRequire("Remotes")
 local NetContract = VitriolRequire("NetContract")
 local Replicator = VitriolRequire("Replicator")
+local KillChoreography = VitriolRequire("KillChoreography")
 local TimeModel = VitriolRequire("TimeModel")
 
 TESTS = { passed = 0, failed = 0 }
@@ -1576,6 +1577,36 @@ check(rep.refX == 100, "the 1 mm nudge is absorbed by the 0.02 stud core grid, s
 local third = rep:encode(skels, 104.5, 0, 0)
 check(math.abs(rep.refX - 104.5) <= SkeletonCodec.MAX_CORE_ERROR + 1e-9, "and a real 4.5 stud move still lands inside the core budget (" .. rep.refX .. ")")
 check(third == first, "same pose shape, same byte count")
+
+end
+do
+print("=== KillChoreography: cadence-owned victim scene ===")
+local phases = {}
+local severed = 0
+local completed = false
+local scene = KillChoreography.new({
+	VictimUserId = 7,
+	CreatureId = 1,
+	Duration = 1.2,
+	Timings = {
+		GRAB = 0.1,
+		LIFT = 0.2,
+		COIL = 0.2,
+		TENDERIZE = 0.3,
+		CONSUME = 0.2,
+		DISCARD = 0.2,
+	},
+	Dismemberment = true,
+	OnPhase = function(phase) phases[#phases + 1] = phase end,
+	OnSever = function() severed = severed + 1 end,
+	OnComplete = function() completed = true end,
+})
+for _ = 1, 12 do
+	scene:step(0.1)
+end
+check(phases[1] == "GRAB" and phases[2] == "LIFT", "victim scene starts at GRAB and advances in configured order")
+check(severed == 1, "optional dismemberment callback fires once during TENDERIZE")
+check(completed and scene:isDone(), "victim scene completes without a second scheduler")
 
 end
 do

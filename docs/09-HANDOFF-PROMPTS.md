@@ -255,7 +255,7 @@ cap the creature.
 
 ```
 Implement ServerStorage/Vitriol/Creature/Body/{Grapple, KillChoreography},
-Services/GoreService, Shared/{RegionIntegrity, GoreAdapter}, and the client
+HealthService/KillChoreography, Shared/{RegionIntegrity, BloodAdapter}, and the client
 controllers VictimCamera + PostProcessDriver hooks.
 
 - Grapple per docs/03 §6 (IKMoveTo drag, helical coil, escape mash).
@@ -263,7 +263,7 @@ controllers VictimCamera + PostProcessDriver hooks.
 - RegionIntegrity per docs/04 §2 (shear damage, severance, downstream rule).
   It is a PURE module and must be unit-tested in tools/vitriol-smoke-test.js:
   assert that two different wrap geometries produce different sever orders.
-- GoreAdapter per docs/04 §3, including the built-in fallback so the whole system
+- BloodAdapter per docs/04 §3, including the bounded built-in fallback so the whole system
   runs with no gore assets present.
 
 Acceptance: docs/04 §7, all five criteria.

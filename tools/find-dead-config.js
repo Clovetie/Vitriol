@@ -23,23 +23,26 @@
  * under-reported; treat DEAD as "high confidence, verify before removing."
  *
  * Usage:
- *   node tools/find-dead-config.js --file src/ReplicatedStorage/Gerstner/Settings/init.luau
- *   node tools/find-dead-config.js                        # guess Settings + IslandConfig
+ *   node tools/find-dead-config.js --file code/ReplicatedStorage/Vitriol/Config/GameConfig.luau
+ *   node tools/find-dead-config.js --src code    # audit every Vitriol config
+ *   node tools/find-dead-config.js               # use the current checkout's defaults
  *   node tools/find-dead-config.js --json out.json
  */
 
 const fs = require('fs');
 const path = require('path');
 const luau = require('./lib/luau');
+const { defaultSourceRoot } = require('./lib/paths');
 
 function die(msg) { console.error(`find-dead-config: ${msg}`); process.exit(2); }
 
 function parseArgs(argv) {
-	const defaults = [
-		path.resolve(__dirname, '..', 'src/ReplicatedStorage/Gerstner/Settings/init.luau'),
-		path.resolve(__dirname, '..', 'src/ReplicatedStorage/IslandGeneration/IslandConfig.luau'),
+	const repoRoot = path.resolve(__dirname, '..');
+	const legacyDefaults = [
+		path.join(repoRoot, 'src/ReplicatedStorage/Gerstner/Settings/init.luau'),
+		path.join(repoRoot, 'src/ReplicatedStorage/IslandGeneration/IslandConfig.luau'),
 	];
-	const out = { files: [], json: null, src: path.resolve(__dirname, '..', 'src') };
+	const out = { files: [], json: null, src: defaultSourceRoot() };
 	for (let i = 2; i < argv.length; i++) {
 		const a = argv[i];
 		if (a === '--file') out.files.push(path.resolve(process.cwd(), argv[++i]));
@@ -48,7 +51,17 @@ function parseArgs(argv) {
 		else if (a === '--help') { console.log('Usage: node tools/find-dead-config.js [--file f] [--src src] [--json out.json]'); process.exit(0); }
 		else die(`unknown argument ${a}`);
 	}
-	if (!out.files.length) out.files = defaults;
+	if (!out.files.length) {
+		const vitriolConfigRoot = path.join(out.src, 'ReplicatedStorage', 'Vitriol', 'Config');
+		if (fs.existsSync(vitriolConfigRoot) && fs.statSync(vitriolConfigRoot).isDirectory()) {
+			out.files = fs.readdirSync(vitriolConfigRoot)
+				.filter((name) => name.endsWith('.luau'))
+				.sort()
+				.map((name) => path.join(vitriolConfigRoot, name));
+		} else {
+			out.files = legacyDefaults;
+		}
+	}
 	return out;
 }
 
@@ -186,7 +199,7 @@ function main() {
 			console.log('  DEAD (verify before removing):');
 			for (const d of r.dead) console.log(`    ✗ ${d.key}`);
 			if (r.alive.length) {
-				console.log(`  alreaded-referenced (${r.alive.length}): ${r.alive.map((a) => a.key).join(', ')}`);
+				console.log(`  already-referenced (${r.alive.length}): ${r.alive.map((a) => a.key).join(', ')}`);
 			}
 		}
 	}

@@ -101,7 +101,10 @@ MonsterConfig.Threat = {
 	-- director output, and a director that snaps is felt as a cheat (P4).
 	MaxChangePerSecond = 0.02,
 	-- Creatures per creature-count ladder, keyed by threat (docs/02 §13 open q 2).
-	CreatureCountAtThreat = { 0.0, 0.45, 0.70 }, -- < 0.45 -> 1, < 0.70 -> 2, else 3
+	-- MVP decision: the threat dial changes pacing and behaviour, never count.
+	-- An empty threshold list makes creatureCount() stay at one, so Threat 1
+	-- remains one readable, woundable monster rather than a surprise swarm.
+	CreatureCountAtThreat = {},
 }
 
 ---------------------------------------------------------------------------
@@ -233,6 +236,49 @@ MonsterConfig.Locomotion = {
 	HaulSeconds = 0.35,
 	AnchorGrip = { Concrete = 1.0, Wood = 0.9, Metal = 0.8, Grass = 0.5, Glass = 0.2 },
 	GlideSpeedFraction = 0.45, -- open-ground fallback
+	ProbeReachMultiplier = 1.15,
+}
+
+---------------------------------------------------------------------------
+-- Runtime presentation (code-generated MVP; no mesh asset is required).
+---------------------------------------------------------------------------
+MonsterConfig.Presentation = {
+	CoreColor = { 22, 18, 24 },
+	TendrilColor = { 48, 36, 52 },
+	WoundColor = { 96, 28, 32 },
+	Material = "Slate",
+	SegmentDepthMultiplier = 0.90,
+	CoreTransparency = 0.0,
+	SegmentTransparency = 0.0,
+	Shadow = true,
+}
+
+-- Wounds are disabling, never lethal. A monster may become unable to threaten
+-- players, but CreatureService never removes it because of health reaching zero.
+MonsterConfig.Wounds = {
+	Max = 1.0,
+	DisableThreatAt = 0.85,
+	SpeedMultiplierAtMax = 0.20,
+	ActiveTendrilFractionAtMax = 0.25,
+}
+
+MonsterConfig.Spawn = {
+	DistanceFromPlayer = 28,
+	HeightOffset = 3,
+	FallbackX = 0,
+	FallbackY = 6,
+	FallbackZ = 0,
+}
+
+-- The first playable attack is a bounded, server-owned scene. It is deliberately
+-- separate from Wounds: it can kill a player, but it can never kill the Braid.
+-- CreatureService starts it only after the procedural core reaches this distance.
+MonsterConfig.Kill = {
+	GrabDistance = 5.5,
+	DurationSeconds = 5.8,
+	DamageAtLift = 8,
+	DamageAtTenderize = 12,
+	DismemberAtTenderize = true,
 }
 
 ---------------------------------------------------------------------------

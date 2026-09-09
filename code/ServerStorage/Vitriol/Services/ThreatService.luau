@@ -181,6 +181,10 @@ function ThreatService:creatureCount(): number
 			n = i + 1
 		end
 	end
+	local cap = self.Config.Session.MaxCreatures
+	if cap ~= nil and n > cap then
+		n = cap
+	end
 	return n
 end
 
