@@ -433,6 +433,13 @@ that `ensure()` is idempotent, that it *completes* a hand-authored tree instead 
 overwriting it, and that `setVisible` toggles the takeover. Import the `.rbxmx` into
 `StarterGui` to own the look; skip it and the same tree is built at runtime.
 
+**One observed flake (not caused by the package).** In a single gate run the
+`session` check failed while the suite passes on its own; three subsequent gate runs
+were 12/12 and the direct run was 87/0 every time. The session harness is
+timing-sensitive and `code/` is byte-identical to the pre-package commit, so if it
+recurs, look at the session suite's own timing assertions before suspecting the
+package.
+
 **Next.** `docs/11` §8: the server-side struggle hook (start from the kill
 choreography over a `RE_CreatureEvent` equivalent, report over a client intent, clamp
 the score server-side, fold `grade.escapeWeight` into the grip meter).

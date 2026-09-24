@@ -1712,5 +1712,4 @@ check(approx(fullMoon, DayNightConfig.Moon.BrightnessDelta, 1e-9), "and the peak
 
 end
 
-
 return TESTS
