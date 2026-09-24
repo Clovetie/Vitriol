@@ -10,6 +10,11 @@
  * limitation in check-syntax.js (Lua 5.1 luaparse cannot parse Luau bitwise
  * `&` in Lib/RNG and Lib/Noise), but fails closed on every new syntax failure.
  *
+ * It covers BOTH trees: `code/` (the Vitriol place) and `qte/` (the QTE package,
+ * which is a self-contained product with its own module map, suite and generated
+ * UI). `qte` and `qte-ui` are the two checks specific to the package; the rest run
+ * over whichever tree is named by --src.
+ *
  * Usage:
  *   node tools/vitriol-quality-gate.js
  *   node tools/vitriol-quality-gate.js --src code --report tools/reports/quality-gate.json
@@ -148,12 +153,25 @@ function evaluateCheck(id, output) {
 		const match = combined.match(/VITRIOL session test:\s+(\d+) passed,\s+(\d+) failed/);
 		return { passed: output.exitCode === 0 && !!match && Number(match[2]) === 0, summary: match ? match[0] : null };
 	}
+	if (id === "qte") {
+		// Same harness, the package's own module map and suite.
+		const match = combined.match(/VITRIOL smoke test:\s+(\d+) passed,\s+(\d+) failed/);
+		const suite = combined.match(/^Suite:\s+(.+)$/m);
+		return {
+			passed: output.exitCode === 0 && !!match && Number(match[2]) === 0 && Number(match[1]) > 0,
+			summary: match ? `${match[0]} [${suite ? suite[1] : "?"}]` : null,
+		};
+	}
+	if (id === "qte-ui") {
+		const match = combined.match(/qte-build-ui:\s+(.+)$/m);
+		return { passed: output.exitCode === 0 && /up to date/.test(combined), summary: match ? match[1] : null };
+	}
 	if (id === "syntax") return syntaxAssessment(output);
 	if (id === "metrics") {
 		const match = combined.match(/=== BRINE metrics \((\d+) files\) ===[\s\S]*?LOC (\d+) \| code (\d+) \| comments (\d+) \| exports (\d+) \| requires (\d+)/);
 		return { passed: output.exitCode === 0 && !!match && Number(match[1]) > 0, summary: match ? match[0].replace(/\s+/g, " ") : null };
 	}
-	if (id === "hot-loop") {
+	if (id === "hot-loop" || id === "qte-hot-loop") {
 		const match = combined.match(/Priced calls:\s+(\d+) \| inside-a-loop:\s+(\d+) \| in a RunService file:\s+(\d+)/);
 		return { passed: output.exitCode === 0 && !!match && Number(match[3]) === 0, summary: match ? match[0] : null, framePathCalls: match ? Number(match[3]) : null };
 	}
@@ -182,8 +200,15 @@ function main() {
 		["smoke", ["tools/vitriol-smoke-test.js"]],
 		["session", ["tools/vitriol-session-test.js"]],
 		["syntax", ["tools/check-syntax.js", src]],
+		// The QTE package is not part of code/: it has its own module map (the
+		// package lives in qte/) and its own suite, so it needs its own run.
+		["qte", ["tools/vitriol-smoke-test.js", "--modules", "tools/vitriol/modules-qte.js", "--tests", "tools/vitriol/tests-qte.luau"]],
+		// The overlay artifacts are generated from qte/UI/QTEOverlay.luau; this fails
+		// if the checked-in .rbxmx/.preview.svg no longer match the module.
+		["qte-ui", ["tools/qte-build-ui.js", "--check"]],
 		["metrics", ["tools/metrics.js", "--src", src]],
 		["hot-loop", ["tools/hot-loop-scan.js", "--src", src]],
+		["qte-hot-loop", ["tools/hot-loop-scan.js", "--src", "qte"]],
 		["call-graph", ["tools/call-graph.js", "--src", src]],
 		["dead-config", ["tools/find-dead-config.js", "--src", src]],
 		["evaluation", ["tools/evaluate-models.js", "--models", "tools/models.example.json", "--suite", "tools/evaluation-suite.example.json"]],

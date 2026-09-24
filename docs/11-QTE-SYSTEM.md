@@ -1,11 +1,16 @@
 # VITRIOL — QTE System (design, roster, integration)
 
-Status: **code complete and gate-green** (`tools/vitriol-quality-gate.js` 9/9).
-The server-side struggle hook (§8) is specified here and **not yet implemented** —
-it is the next work package.
+> **The implementation is no longer part of `code/`.** The QTE system is now a
+> standalone, self-contained package at the repository root: **`qte/`**, documented
+> by **`qte/README.md`** (install, API, roster, UI, testing, server contract). This
+> file is kept as the *design record* — why it is shaped the way it is, and how a
+> Vitriol-shaped game would use it — and as the place where the creature-side maths
+> live, since `docs/02`/`docs/03` own the grip and escape model that a struggle feeds.
 
-This document is the authority for the QTE system. `docs/02`/`docs/03` own the
-creature's grip and escape maths; this file owns the skill checks that feed it.
+Status: **package complete and gate-green** (`tools/vitriol-quality-gate.js` 12/12,
+including the package's own 58-assertion suite and its generated-UI drift check).
+The server-side struggle hook (§8) is specified here and **not yet implemented** in
+any game — it is the next work package for whoever wires a place to the package.
 
 ---
 
@@ -34,20 +39,26 @@ fixes the bugs the read-through found:
 
 ## 2. Module map
 
-| Explorer path | File | Responsibility |
+| Explorer path (the game's own tree, e.g. in Vitriol) | File in `qte/` | Responsibility |
 | --- | --- | --- |
-| `ReplicatedStorage > Vitriol > Config > QTEConfig` | `Config/QTEConfig.luau` | pure data: human input model, presets, pressure, grades, capability sets, input maps, word/number/colour/morse banks |
-| `ReplicatedStorage > Vitriol > Lib > QTECatalog` | `Lib/QTECatalog.luau` | the 68 QTE definitions (id, label, mode, category, weight, caps, accent, generator) |
-| `ReplicatedStorage > Vitriol > Lib > QTEEngine` | `Lib/QTEEngine.luau` | the 34 modes: cost, state machine, judging, widgets, `expect` solver channel |
-| `ReplicatedStorage > Vitriol > Lib > QTEDirector` | `Lib/QTEDirector.luau` | picking, freshness, feasibility-correct time limits, grading, stats, custom registration |
-| `StarterPlayer > StarterPlayerScripts > Vitriol > Controllers > QTEStruggle` | `Controllers/QTEStruggle.luau` | the only Roblox-aware file: input sampling, widget rendering, freeze, verdict, result signal |
+| `ReplicatedStorage > QTE > Config > QTEConfig` | `Config/QTEConfig.luau` | pure data: human input model, presets, pressure, grades, capability sets, input maps, word/number/colour/morse banks |
+| `ReplicatedStorage > QTE > Lib > QTECatalog` | `Lib/QTECatalog.luau` | the 68 QTE definitions (id, label, mode, category, weight, caps, accent, generator) |
+| `ReplicatedStorage > QTE > Lib > QTEEngine` | `Lib/QTEEngine.luau` | the 34 modes: cost, state machine, judging, widgets, `expect` solver channel |
+| `ReplicatedStorage > QTE > Lib > QTEDirector` | `Lib/QTEDirector.luau` | picking, freshness, feasibility-correct time limits, grading, stats, custom registration |
+| `ReplicatedStorage > QTE > Client > QTEStruggle` | `Client/QTEStruggle.luau` | the only Roblox-aware file: input sampling, widget rendering, freeze, verdict, result signal |
+| `ReplicatedStorage > QTE > UI > QTEOverlay` | `UI/QTEOverlay.luau` | the interface as a spec; `Client`, plus the generated `QTEOverlay.rbxmx` / `.preview.svg` |
+| (the boot script) | `Client/QTEStruggleClient.luau` | builds the controller, optionally binds a remote |
 
 The four `Config`/`Lib` modules are **pure**: no services, no Instances, no yields,
 no `os.clock`, and every random draw comes from an injected `Lib/RNG`. That is what
 lets the headless harness play all 68 QTEs (§9).
 
 Requires are one-directional: `QTEConfig` → `QTECatalog` → `QTEEngine` →
-`QTEDirector` → `QTEStruggle`. Nothing in `Lib/` may require a controller.
+`QTEDirector` → `QTEStruggle`/`QTEOverlay`, and they are all **siblings** (`Root =
+script.Parent.Parent`), which is what makes the folder relocatable. Nothing in
+`Lib/` may require a controller, and nothing in the package requires anything
+outside it: `Lib/RNG` and `Lib/Signal` are vendored copies precisely so a game can
+drop this folder in and change nothing else.
 
 ---
 
@@ -103,117 +114,27 @@ limit     = clamp(baseTime * preset.timeMult * adaptive * pressure,
 
 ## 5. Roster (68)
 
-Families follow `docs/03` §3's taxonomy. Weight is the base pick weight; freshness
-divides it by `1 + appearances * Freshness.AppearancePenalty`, so repeats fade.
+The catalogue is the authority (`qte/Lib/QTECatalog.luau`), and the full table -
+id, label, mode, weight and the device capability each one needs - is generated into
+`qte/README.md` §3 by the package's own test tooling, so it cannot drift from the
+code. Counts by family:
 
-**Reflex (9)**
-
-| id | label | mode | weight | caps |
-| --- | --- | --- | --- | --- |
-| Press | Press | press | 10 | Key |
-| React | React | react | 10 | Key |
-| Dodge | Dodge | react | 9 | Key |
-| Snap | Snap | react | 7 | Key |
-| QuickDraw | Quick Draw | quickdraw | 7 | Key |
-| DoubleTap | Double Tap | exact | 7 | Key |
-| Ambush | Ambush | react | 6 | Key |
-| ReflexMulti | Reflex Multi | hit | 6 | Click+Pointer |
-| Sequence | Sequence | sequence | 8 | Key |
-
-**Motor (9)**
-
-| id | label | mode | weight | caps |
-| --- | --- | --- | --- | --- |
-| Spam | Mash | mash | 10 | Key |
-| MultiSpam | Alternate | alternate | 8 | Key |
-| TripleThreat | Triple Threat | alternate | 6 | Key |
-| Survive | Survive | meter | 6 | Key |
-| Crescendo | Crescendo | meter | 5 | Key |
-| TugOfWar | Tug of War | tug | 5 | Key |
-| ExactTaps | Exact Taps | exact | 6 | Key |
-| Endure | Endure | hold | 6 | Key |
-| Brace | Brace | holdAll | 5 | Key |
-
-**Precision (10)**
-
-| id | label | mode | weight | caps |
-| --- | --- | --- | --- | --- |
-| Aim | Aim | aim | 7 | Pointer |
-| ClickTarget | Click Target | hit | 7 | Click+Pointer |
-| Skeet | Skeet | hit | 4 | Click+Pointer |
-| Shake | Shake | shake | 5 | Pointer |
-| Spin | Spin | spin | 5 | Pointer |
-| SafeCracker | Safe Cracker | spin | 3 | Pointer |
-| Track | Track | track | 4 | Pointer |
-| Trace | Trace | trace | 4 | Pointer |
-| Steady | Steady | steady | 4 | Click+Pointer |
-| HotCold | Hot / Cold | search | 4 | Pointer |
-
-**Timing (7)**
-
-| id | label | mode | weight | caps |
-| --- | --- | --- | --- | --- |
-| StepTiming | On the Beat | timed | 7 | Key |
-| Metronome | Metronome | timed | 6 | Key |
-| Rhythm | Rhythm | timed | 5 | Key |
-| SlideBar | Slide Bar | release | 7 | Key |
-| FuseCut | Fuse Cut | release | 5 | Key |
-| TimedRelease | Timed Release | release | 6 | Key |
-| PressureGauge | Pressure Gauge | gauge | 4 | Key |
-
-**Memory (15)**
-
-| id | label | mode | weight | caps |
-| --- | --- | --- | --- | --- |
-| Simon | Simon | memorise | 6 | Key |
-| ReverseSeq | Reverse | memorise | 5 | Key |
-| LastKeyFlash | Last Key | memorise | 6 | Key |
-| PatternMemoryBurst | Memory Burst | memorise | 5 | Key |
-| ColourSequence | Colour Sequence | memorise | 5 | Key |
-| MemoryGrid | Memory Grid | grid | 4 | Click+Pointer |
-| FlashDigit | Flash Digit | memorise | 5 | Key |
-| PhoneDial | Phone Dial | memorise | 5 | Key |
-| MemoryPalace | Memory Palace | memorise | 3 | Key |
-| WordRecall | Word Recall | type | 6 | Key |
-| WordType | Type It | type | 6 | Key |
-| Spelling | Spelling | type | 4 | Key |
-| RapidTyping | Rapid Typing | type | 5 | Key |
-| MorseCode | Morse Code | morse | 3 | Key |
-| CountFlash | Count Flash | count | 5 | Key |
-
-**Cognition (12)**
-
-| id | label | mode | weight | caps |
-| --- | --- | --- | --- | --- |
-| MathCalc | Calculate | type | 8 | Key |
-| TrueFalse | True / False | classify | 8 | Key |
-| EvenOdd | Even / Odd | classify | 7 | Key |
-| NumberOrder | Number Order | sort | 6 | Key |
-| SortPress | Alphabetise | sort | 5 | Key |
-| StroopWord | Stroop Word | classify | 7 | Key |
-| StroopInk | Stroop Ink | classify | 6 | Key |
-| BiggerOf | Bigger | classify | 5 | Key |
-| NextInSeries | Next In Series | classify | 4 | Key |
-| Tally | Tally | classify | 5 | Key |
-| Mirror | Mirror | symbol | 6 | Key |
-| Opposite | Opposite | symbol | 6 | Key |
-
-**Interoception (6)**
-
-| id | label | mode | weight | caps |
-| --- | --- | --- | --- | --- |
-| BalanceCorrection | Balance | balance | 6 | Key |
-| MomentumStabilizer | Stabilise | counter | 6 | Key+Motion |
-| CameraAlignment | Orient | align | 4 | Look |
-| FootstepSync | Footstep Sync | timed | 4 | Key |
-| NoPress | No Press | idle | 5 | – |
-| HoldBreath | Hold Breath | idle | 4 | – |
+| Family | Count | What it measures |
+| --- | --- | --- |
+| Reflex | 9 | see it, answer it: short windows, one input |
+| Motor | 9 | sustained output: mash, alternate, hold |
+| Precision | 10 | the pointer: aim, trace, spin, hold still |
+| Timing | 7 | cues and releases, judged against a window |
+| Memory | 15 | encode then recall; the answer must not be on screen at recall |
+| Cognition | 12 | read then decide: arithmetic, parity, sorting, Stroop |
+| Interoception | 6 | your own body as the input, including two QTEs answered by doing nothing |
 
 **34 modes, all reachable**: `aim align alternate balance classify count counter
 exact gauge grid hit hold holdAll idle mash memorise meter morse press quickdraw
 react release search sequence shake sort spin steady symbol timed trace track tug
-type`. A test asserts that no mode is dead code and that no definition names a mode
-that does not exist.
+type`. The suite fails if a mode is unreachable or a definition names a mode that
+does not exist.
+
 
 ### 5.1 Adding a QTE
 
@@ -253,7 +174,7 @@ The shell never displays it.
 
 ---
 
-## 7. Client shell (`Controllers/QTEStruggle`)
+## 7. Client shell (`Client/QTEStruggle`)
 
 * **One loop.** `Heartbeat` is connected on `start()` and disconnected when the
   verdict finishes. There is no idle cost and no second scheduler.
@@ -319,8 +240,17 @@ handler or a Studio test can call `struggle:start("Spam")`).
 
 ## 9. Testing and evidence
 
-`tools/vitriol/tests.luau` runs the real modules inside the headless harness
-(`node tools/vitriol-smoke-test.js`). The QTE block adds 58 assertions:
+`tools/vitriol/tests-qte.luau` runs the real package modules inside the repository's
+headless harness:
+
+```
+node tools/vitriol-smoke-test.js \
+     --modules tools/vitriol/modules-qte.js \
+     --tests   tools/vitriol/tests-qte.luau
+```
+
+(or `node tools/vitriol-quality-gate.js`, which runs it as the `qte` check and
+`tools/qte-build-ui.js --check` as `qte-ui`). It adds 58 assertions:
 
 * **Shape**: catalogue validates against the engine; unique ids/labels; valid
   accents, caps, categories and base times; the v5 classics are still present.
@@ -353,7 +283,11 @@ limit in the game moves with that table.
 
 ## 10. Human-authored work
 
-`docs/10` §2.2 owns the UI hierarchy. The QTE overlay is the one addition:
+The overlay is authored **inside the package** now: `qte/UI/QTEOverlay.luau` is the
+spec, and `qte/README.md` §7 is the styling guide (import
+`qte/UI/QTEOverlay.rbxmx`, restyle it in Studio; the code completes but never
+overwrites an authored tree). For a Vitriol-shaped place the subtree looks like this
+and `docs/10` §2.2 lists it as the `QTE` frame under `VitriolGui`:
 
 ```
 VitriolGui (ScreenGui)

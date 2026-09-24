@@ -1,6 +1,6 @@
 --!strict
 -- QTEEngine.luau
--- Location: ReplicatedStorage > Vitriol > Lib > QTEEngine  (ModuleScript)
+-- Location: ReplicatedStorage > QTE > Lib > QTEEngine  (ModuleScript)
 -- Purpose:  The QTE interpreter. A "task" (produced by Lib/QTECatalog and timed by
 --           Lib/QTEDirector) is a plain data description of one quick-time event;
 --           this module turns it into a deterministic state machine driven by frames:
@@ -15,7 +15,7 @@
 --           when a QTE had no deadline. Here the LOGIC is pure - no game:GetService,
 --           no Instances, no task.*, no os.clock, no math.random - so the smoke harness
 --           can execute every QTE on every difficulty and assert that perfect play
---           wins, idling cannot win, and nothing can hang (tools/vitriol/tests.luau).
+--           wins, idling cannot win, and nothing can hang (tools/vitriol/tests-qte.luau).
 --           Time comes in as `dt`; randomness comes from the task's own parameters.
 --
 --           THE SOLUTION CHANNEL. view.expect is the engine stating what a correct
@@ -24,7 +24,7 @@
 --           future tutorial/"assist mode" has a single source of truth for the answer.
 --
 -- Requires: Config/QTEConfig
--- Used by:  Lib/QTEDirector, Controllers/QTEStruggle, tools/vitriol/tests.luau
+-- Used by:  Lib/QTEDirector, Client/QTEStruggle, tools/vitriol/tests-qte.luau
 
 local QTEConfig = require(script.Parent.Parent.Config.QTEConfig)
 
@@ -1608,7 +1608,7 @@ defineMode("meter", {
 		st.value = st.value - drain * ctx.dt
 		if st.value <= 0 then
 			-- Emptying the meter is a loss, but the elapsed fraction still scores:
-			-- the escape model reads progress, not just the verdict (docs/11 §5).
+			-- the escape model reads progress, not just the verdict (README.md §10).
 			resolve(st, false, clamp01(st.elapsed / st.required), QTEEngine.REASONS.OutOfBounds)
 			return
 		end

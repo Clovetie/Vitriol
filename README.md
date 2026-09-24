@@ -26,7 +26,7 @@ creature** that hunts by vibration, scent and memory — and **learns your habit
 | 9 | [`docs/08-RESEARCH-NOTES.md`](docs/08-RESEARCH-NOTES.md) | **Sourced** engine facts and gotchas |
 | 10 | [`docs/09-HANDOFF-PROMPTS.md`](docs/09-HANDOFF-PROMPTS.md) | Copy-paste prompts WP1–WP11 for the next iteration |
 | 11 | [`docs/10-HUMAN-AUTHORED.md`](docs/10-HUMAN-AUTHORED.md) | Briefs + hierarchies for map, UI, meshes, audio — **no code** |
-| 12 | [`docs/11-QTE-SYSTEM.md`](docs/11-QTE-SYSTEM.md) | QTE design, the 68-entry roster, the time model, client shell, server hook |
+| 12 | [`docs/11-QTE-SYSTEM.md`](docs/11-QTE-SYSTEM.md) | The QTE design record — why it is shaped this way. The implementation lives at [`qte/`](qte/README.md) |
 | — | [`ROADMAP.md`](ROADMAP.md) | Milestones and open decisions |
 
 ---
@@ -57,11 +57,17 @@ sources in [`docs/08-RESEARCH-NOTES.md`](docs/08-RESEARCH-NOTES.md).
 ## Layout
 
 ```
-docs/     11 design documents (the iteration-1 deliverable)
+docs/     12 design documents (see the reading order below)
 code/     Copy-paste-ready Luau, mirroring the Studio Explorer tree
-tools/    The repo's analysis tooling + the Vitriol runtime smoke test
+qte/      The QTE package: a self-contained, game-agnostic product (qte/README.md)
+tools/    The repo's analysis tooling + the runtime harnesses
 ROADMAP.md
 ```
+
+`qte/` is **not** part of the place: it is a product you drop into any Roblox game.
+It keeps its own modules, its own test suite, its own generated UI, and it requires
+nothing outside its own folder - read [`qte/README.md`](qte/README.md) for the
+install, the API and the roster.
 
 `code/` mirrors Explorer paths so the destination of each file is obvious, e.g.
 `code/ReplicatedStorage/Vitriol/Lib/Fabrik.luau` →
@@ -84,6 +90,11 @@ node tools/vitriol-quality-gate.js --src code
 # Or run an individual report:
 node tools/vitriol-smoke-test.js
 node tools/vitriol-session-test.js
+
+# The QTE package (qte/) has its own module map, suite and generated UI:
+node tools/vitriol-smoke-test.js \
+  --modules tools/vitriol/modules-qte.js --tests tools/vitriol/tests-qte.luau
+node tools/qte-build-ui.js --check        # model/preview match the source spec
 node tools/check-syntax.js code
 node tools/metrics.js --src code
 node tools/hot-loop-scan.js --src code
@@ -96,10 +107,11 @@ node tools/evaluate-models.js \
 
 `tools/vitriol-smoke-test.js` loads the **real** modules from `code/` into a
 Lua 5.3 VM (fengari) and asserts their behaviour — convergence, bone-length
-preservation, cone limits, determinism, genome budget projection, kill choreography,
-that two different coil geometries produce different sever orders, and that a bot
-with human input limits wins **all 68 QTEs at all four difficulty presets** while a
-bot that does nothing loses them all (`docs/11-QTE-SYSTEM.md` §9). The session
+preservation, cone limits, determinism, genome budget projection, kill choreography
+and that two different coil geometries produce different sever orders. The same
+harness runs the QTE package with `--modules tools/vitriol/modules-qte.js`, where a
+bot held to human input limits must win **all 68 QTEs at all four presets** and a bot
+that does nothing must lose them all ([`qte/README.md`](qte/README.md) §10). The session
 harness boots the server with a virtual DataModel and exercises creature spawning,
 first-person victim events, player-only death, and scheduler invariants. These are
 not reimplementations, so regressions in the source modules fail the suites.
@@ -110,15 +122,17 @@ Re-run every time; these are the latest recorded outputs:
 
 | Check | Result |
 | --- | --- |
-| `vitriol-smoke-test.js` | **424 passed, 0 failed** (58 of them the QTE stack) |
+| `vitriol-smoke-test.js` | **366 passed, 0 failed** (`code/`) |
 | `vitriol-session-test.js` | **87 passed, 0 failed** |
-| `check-syntax.js code` | **48 OK, 2 known failures** — `Lib/RNG.luau` and `Lib/Noise.luau` use Luau bitwise syntax rejected by the Lua 5.1 parser |
-| `metrics.js --src code` | **50 files; LOC 17214; code 13416; comments 2611; exports 481; requires 47** |
-| `hot-loop-scan.js --src code` | **34 priced calls; 8 inside loops; 0 in a RunService file** |
-| `call-graph.js --src code` | **50 modules; 481 exports; 47 require edges** |
+| QTE suite (`--modules tools/vitriol/modules-qte.js`) | **58 passed, 0 failed** (`qte/`) |
+| `qte-build-ui.js --check` | model and preview up to date (12 instances, every part present) |
+| `check-syntax.js code` | **43 OK, 2 known failures** — `Lib/RNG.luau` and `Lib/Noise.luau` use Luau bitwise syntax rejected by the Lua 5.1 parser; `check-syntax.js qte` is **7 OK, 0 failures** |
+| `metrics.js --src code` | **45 files; LOC 10993; code 8001; comments 2125; exports 381; requires 35** |
+| `hot-loop-scan.js --src code` | **31 priced calls; 8 inside loops; 0 in a RunService file** (`--src qte`: 5 / 0 / 0) |
+| `call-graph.js --src code` | **45 modules; 381 exports; 35 require edges** |
 | `find-dead-config.js --src code` | all eight Vitriol configs; planned future-WP keys are reported for review |
 | model evaluation | **ADMIT 100.0% / REJECT 0.0%** |
-| `vitriol-quality-gate.js --src code` | **9/9 checks passed** |
+| `vitriol-quality-gate.js --src code` | **12/12 checks passed** |
 
 ---
 

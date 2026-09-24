@@ -169,13 +169,13 @@ A minimum `KillChoreography`/`HealthService`/`BloodAdapter`/`VictimCamera` path 
 implemented. Full Grapple, region-integrity choreography and Studio presentation are
 still open; see the continuation table above.
 
-### M5b — The struggle QTE (WP11) ✅
-`QTEConfig`/`QTECatalog`/`QTEEngine`/`QTEDirector`/`QTEStruggle` implement 68 QTEs
-across 34 engine modes, with a feasibility-correct time model, device-gated pools,
-grading and a client shell that keeps the v5 public API. Design, roster, maths and
-the (unimplemented) server hook are in `docs/11-QTE-SYSTEM.md`; the smoke harness
-plays every QTE at every preset with human input limits.
-**Exit met:** 58 new assertions, gate 9/9.
+### M5b — The struggle QTE (WP11) ✅ (shipped as a separate package)
+The QTE system is **not** part of the place. It lives at `qte/` as a self-contained,
+game-agnostic package: 68 QTEs over 34 engine modes, a feasibility-correct time
+model, device-gated pools, grading, a spec-driven overlay with generated Studio
+artifacts, and a client shell that keeps the v5 public API. `qte/README.md` is the
+manual; `docs/11-QTE-SYSTEM.md` keeps the design record and the creature-side maths.
+**Exit met:** 58 package assertions, generated-UI drift check, gate 12/12.
 **Still open:** the server-side struggle hook (`docs/11` §8) — start a QTE from the
 kill choreography over `RE_CreatureEvent`, report back over `RE_ClientIntent`, and
 fold `grade.escapeWeight` into `docs/03` §6.3's grip meter.
@@ -229,22 +229,31 @@ authority or scope.
 
 ## Latest validation snapshot — 2026-09-24 UTC
 
-- `node tools/vitriol-smoke-test.js`: **424 passed, 0 failed** (58 of them the QTE
-  suite: feasibility, perfect-play-wins, idle-loses, spam-safety, determinism,
-  director behaviour, concealment).
+The QTE package now lives outside `code/`, so the place's numbers are back to their
+pre-package values and the package has its own two checks.
+
+- `node tools/vitriol-smoke-test.js`: **366 passed, 0 failed** (`code/`).
+- `node tools/vitriol-smoke-test.js --modules tools/vitriol/modules-qte.js --tests
+  tools/vitriol/tests-qte.luau`: **58 passed, 0 failed** (`qte/`): feasibility,
+  perfect-play-wins, idle-loses, spam-safety, determinism, director behaviour,
+  concealment.
+- `node tools/qte-build-ui.js --check`: **model and preview up to date** — the
+  `.rbxmx` and `.preview.svg` still match `qte/UI/QTEOverlay.luau`, and every part
+  the shell looks up by name exists in the generated tree.
 - `node tools/vitriol-session-test.js`: **87 passed, 0 failed** (unchanged).
-- `node tools/check-syntax.js code`: **48 files parse**; the two known Lua 5.1
+- `node tools/check-syntax.js code`: **43 files parse**; the two known Lua 5.1
   parser exceptions remain `Lib/RNG.luau` and `Lib/Noise.luau`.
-- `node tools/metrics.js --src code`: **50 files; LOC 17214 | code 13416 | comments
-  2611 | exports 481 | requires 47**.
-- `node tools/hot-loop-scan.js --src code`: **priced calls 34 | inside-a-loop 8 | in
-  a RunService file 0** — the QTE client shell drives one Heartbeat loop and holds
-  no priced call, which is why the gate stays green.
-- `node tools/call-graph.js --src code`: **50 modules | 481 exports | 47 require
+  `node tools/check-syntax.js qte`: **7 files parse, 0 failures**.
+- `node tools/metrics.js --src code`: **45 files; LOC 10993 | code 8001 | comments
+  2125 | exports 381 | requires 35**.
+- `node tools/hot-loop-scan.js --src code`: **priced calls 31 | inside-a-loop 8 | in
+  a RunService file 0**; `--src qte`: **5 | 0 | 0**, so the package's Heartbeat loop
+  holds no priced call either.
+- `node tools/call-graph.js --src code`: **45 modules | 381 exports | 35 require
   edges**.
-- `node tools/vitriol-quality-gate.js --src code`: **9/9 checks passed**.
-- Studio acceptance is still outstanding for the QTE overlay: the harness proves the
-  rules, not the pixels (`docs/11` §9).
+- `node tools/vitriol-quality-gate.js --src code`: **12/12 checks passed**.
+- Studio acceptance is still outstanding for the overlay: the harness proves the
+  rules and the layout's numbers, not the pixels that reach a screen.
 
 ## Previous validation snapshot — 2026-09-09 UTC
 

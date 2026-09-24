@@ -1,12 +1,12 @@
 --!strict
 -- QTEStruggle.luau
--- Location: StarterPlayer > StarterPlayerScripts > Vitriol > Controllers > QTEStruggle
---           (ModuleScript; required by ClientMain, never by the server)
+-- Location: ReplicatedStorage > QTE > Client > QTEStruggle  (ModuleScript)
+--           (required by the place's own bootstrap, or by the LocalScript beside it)
 -- Purpose:  The Roblox shell for the QTE stack: input in, pixels out, nothing else.
 --           All of the rules (which QTE, how long, what a score means) live in the
---           pure modules - Lib/QTEConfig -> Lib/QTECatalog -> Lib/QTEEngine ->
---           Lib/QTEDirector - and are covered by tools/vitriol/tests.luau. This file
---           is deliberately the thin, untestable part:
+--           pure modules - Config/QTEConfig -> Lib/QTECatalog -> Lib/QTEEngine ->
+--           Lib/QTEDirector - and are covered by tools/vitriol/tests-qte.luau. This
+--           file is deliberately the thin, untestable part:
 --
 --             * reads the device (UserInputService) into the engine's sample table,
 --             * draws the engine's view (widgets) with a pooled instance set,
@@ -15,17 +15,19 @@
 --
 --           What v5 got wrong and this does not: no task.wait/watchdog chains (one
 --           loop, driven by RunService), no TakeDamage/HealthChanged writes (the
---           result is a Signal; HealthService owns health, docs/01 §6), the mouse
---           is read with GuiService:GetGuiInset() applied (GetMouseLocation is in
---           screen space, not GUI space), and the pool is filtered by the device
---           the player is actually holding.
+--           result is a Signal; the game owns health), the mouse is read with
+--           GuiService:GetGuiInset() applied (GetMouseLocation is in screen space,
+--           not GUI space), and the pool is filtered by the device the player is
+--           actually holding.
 --
--- Requires: ReplicatedStorage.Vitriol.Config.QTEConfig,
---           ReplicatedStorage.Vitriol.Lib.QTECatalog,
---           ReplicatedStorage.Vitriol.Lib.QTEDirector,
---           ReplicatedStorage.Vitriol.Lib.QTEEngine,
---           ReplicatedStorage.Vitriol.Lib.Signal
--- Used by:  StarterPlayerScripts/Vitriol/ClientMain
+--           The interface is NOT built here. UI/QTEOverlay owns every frame and
+--           label (and tools/qte-build-ui.js generates the importable copy of it
+--           from that same spec); this file only writes text, colours, sizes and
+--           visibility onto the pooled widgets under the stage.
+--
+-- Requires: Config/QTEConfig, Lib/QTECatalog, Lib/QTEDirector, Lib/QTEEngine,
+--           Lib/Signal, UI/QTEOverlay  (all siblings - see README.md §3)
+-- Used by:  the place's client bootstrap, e.g. Client/QTEStruggleClient
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -33,14 +35,17 @@ local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local Workspace = game:GetService("Workspace")
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Vitriol = ReplicatedStorage:WaitForChild("Vitriol")
+-- The package is self-contained: every module it needs is a sibling of this file,
+-- so the whole QTE folder can be dropped anywhere that replicates (ReplicatedStorage,
+-- ReplicatedStorage.SomeGame.Modules, ...) without editing a single path here.
+local Root = script.Parent.Parent
 
-local QTEConfig = require(Vitriol.Config.QTEConfig)
-local QTECatalog = require(Vitriol.Lib.QTECatalog)
-local QTEDirector = require(Vitriol.Lib.QTEDirector)
-local QTEEngine = require(Vitriol.Lib.QTEEngine)
-local Signal = require(Vitriol.Lib.Signal)
+local QTEConfig = require(Root.Config.QTEConfig)
+local QTECatalog = require(Root.Lib.QTECatalog)
+local QTEDirector = require(Root.Lib.QTEDirector)
+local QTEEngine = require(Root.Lib.QTEEngine)
+local Signal = require(Root.Lib.Signal)
+local QTEOverlay = require(Root.UI.QTEOverlay)
 
 local QTEStruggle = {}
 QTEStruggle.__index = QTEStruggle
@@ -48,7 +53,7 @@ QTEStruggle.__index = QTEStruggle
 -- ── Small helpers ────────────────────────────────────────────────────────────
 local function colour(rgb: any): Color3
 	if rgb == nil then
-		return Color3.fromRGB(255, 255, 255)
+		return Color3.fromRGB(QTEOverlay.Theme.Paper[1], QTEOverlay.Theme.Paper[2], QTEOverlay.Theme.Paper[3])
 	end
 	return Color3.fromRGB(rgb[1] or 255, rgb[2] or 255, rgb[3] or 255)
 end
@@ -94,8 +99,9 @@ end
 --   seed = number,
 --   preset = "Normal",
 --   freeze = false,          -- freeze the character while a QTE runs
---   applyConsequences = false, -- v5 healed/damaged directly; Vitriol's HealthService owns health
---   gui = ScreenGui?,        -- an authored StarterGui.VitriolGui, if the game has one
+--   applyConsequences = false, -- v5 healed/damaged directly; the game's health owner should
+--   gui = ScreenGui?,        -- your own ScreenGui; when omitted QTEOverlay is used
+--   guiName = "QTEOverlay",  -- name to look for / create under PlayerGui
 -- }
 function QTEStruggle.new(opts: any?): any
 	local o = opts or {}
@@ -142,7 +148,9 @@ function QTEStruggle.new(opts: any?): any
 	self.tokenByUserInput = {}
 	self:buildInputMaps()
 
-	self.gui = o.gui or self:findGui()
+	self.gui = o.gui
+	self.guiName = o.guiName or "QTEOverlay"
+	self.parts = nil
 	self.stage = nil
 	self.labels = {}
 	self.pools = { text = {}, bar = {}, track = {}, target = {}, grid = {}, chips = {}, dot = {}, cell = {} }
@@ -151,31 +159,24 @@ function QTEStruggle.new(opts: any?): any
 	self.connections = {}
 	self.loopConnection = nil
 	self.frozen = nil
-	self.warnedMissingGui = false
 
 	self:bindInput()
 	self:bindCharacter()
 	return self
 end
 
-function QTEStruggle:findGui(): any
-	-- docs/10 §2 authors VitriolGui; the QTE subtree is documented there too. If the
-	-- human has not built it yet the shell creates a plain one so the game is
-	-- playable, and says so once instead of failing silently every frame.
+function QTEStruggle:resolveGui(): any
+	-- One ScreenGui, resolved once. If the game passed `gui` in, that is used as-is;
+	-- otherwise UI/QTEOverlay ensures its own tree under PlayerGui - which means an
+	-- imported-and-restyled QTEOverlay.rbxmx is picked up and completed, never
+	-- replaced, so hand-authored looks survive.
 	local playerGui = self.playerGui or self.player:FindFirstChildOfClass("PlayerGui")
 	if playerGui == nil then
 		return nil
 	end
 	self.playerGui = playerGui
-	local gui = findFirst(playerGui, "VitriolGui")
-	if gui == nil then
-		gui = Instance.new("ScreenGui")
-		gui.Name = "VitriolGui"
-		gui.ResetOnSpawn = false
-		gui.IgnoreGuiInset = true
-		gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-		gui.Parent = playerGui
-	end
+	local gui = self.gui or QTEOverlay.ensure(playerGui, { name = self.guiName })
+	self.gui = gui
 	return gui
 end
 
@@ -237,7 +238,7 @@ function QTEStruggle:bindInput(): ()
 			self.down[token] = nil
 		end
 	end)
-	-- Motion only arrives through InputChanged (docs/08 §1): mouse look for the
+	-- Motion only arrives through InputChanged: mouse look for the
 	-- pointer, touch drag for the same thing, and the camera for Look QTEs.
 	self.connections[#self.connections + 1] = uis.InputChanged:Connect(function(input: any)
 		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
@@ -337,105 +338,38 @@ end
 
 -- ── GUI ──────────────────────────────────────────────────────────────────────
 function QTEStruggle:ensureStage(): any
-	if self.stage ~= nil and self.stage.Parent ~= nil then
-		return self.stage
+	local existing = self.stage
+	if existing ~= nil and existing.Parent ~= nil then
+		return existing
 	end
-	local gui = self.gui or self:findGui()
+	local gui = self.gui or self:resolveGui()
 	if gui == nil then
 		return nil
 	end
-	self.gui = gui
-	local stage = findFirst(gui, "QTE")
-	if stage == nil then
-		if not self.warnedMissingGui then
-			self.warnedMissingGui = true
-			warn(QTEConfig.Diagnostics.Prefix .. " VitriolGui.QTE was not authored; using the built-in fallback overlay (docs/10 §2.4)")
+	-- parts() is one traversal at the start of a run; the frame loop only writes to
+	-- the instances it returns (never searches for them).
+	local parts = self.parts or QTEOverlay.parts(gui)
+	if parts == nil or parts.root == nil then
+		-- Only reachable when a game passes its own `gui` that has no QTE subtree.
+		-- That is the game's to fix, so say it once instead of every frame.
+		if not self.warnedBadGui then
+			self.warnedBadGui = true
+			warn(QTEConfig.Diagnostics.Prefix .. ": the ScreenGui handed to QTEStruggle has no QTE subtree, so nothing can be drawn")
 		end
-		stage = Instance.new("Frame")
-		stage.Name = "QTE"
-		stage.AnchorPoint = Vector2.new(0.5, 0.5)
-		stage.Position = UDim2.fromScale(0.5, 0.45)
-		stage.Size = UDim2.fromScale(0.66, 0.42)
-		stage.BackgroundTransparency = 1
-		stage.Visible = false
-		stage.ZIndex = 20
-
-		local title = Instance.new("TextLabel")
-		title.Name = "Title"
-		title.AnchorPoint = Vector2.new(0.5, 1)
-		title.Position = UDim2.fromScale(0.5, 0)
-		title.Size = UDim2.fromScale(1, 0.18)
-		title.BackgroundTransparency = 1
-		title.TextScaled = true
-		title.Font = Enum.Font.GothamBold
-		title.TextColor3 = Color3.fromRGB(255, 255, 255)
-		title.TextStrokeTransparency = 0.4
-		title.Parent = stage
-
-		local constraint = Instance.new("UITextSizeConstraint")
-		constraint.MaxTextSize = 34
-		constraint.MinTextSize = 12
-		constraint.Parent = title
-
-		local hint = Instance.new("TextLabel")
-		hint.Name = "Hint"
-		hint.AnchorPoint = Vector2.new(0.5, 0)
-		hint.Position = UDim2.fromScale(0.5, 1)
-		hint.Size = UDim2.fromScale(1, 0.14)
-		hint.BackgroundTransparency = 1
-		hint.TextScaled = true
-		hint.Font = Enum.Font.Gotham
-		hint.TextColor3 = Color3.fromRGB(210, 210, 210)
-		hint.TextStrokeTransparency = 0.6
-		hint.Parent = stage
-
-		local timer = Instance.new("Frame")
-		timer.Name = "Timer"
-		timer.AnchorPoint = Vector2.new(0.5, 0)
-		timer.Position = UDim2.fromScale(0.5, 0.88)
-		timer.Size = UDim2.fromScale(0.7, 0.035)
-		timer.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
-		timer.BackgroundTransparency = 0.35
-		timer.BorderSizePixel = 0
-		timer.Parent = stage
-		local fill = Instance.new("Frame")
-		fill.Name = "Fill"
-		fill.Size = UDim2.fromScale(1, 1)
-		fill.BackgroundColor3 = Color3.fromRGB(240, 240, 240)
-		fill.BorderSizePixel = 0
-		fill.Parent = timer
-
-		local surface = Instance.new("Frame")
-		surface.Name = "Stage"
-		surface.Position = UDim2.fromScale(0, 0.22)
-		surface.Size = UDim2.fromScale(1, 0.62)
-		surface.BackgroundTransparency = 1
-		surface.Parent = stage
-
-		local verdict = Instance.new("TextLabel")
-		verdict.Name = "Verdict"
-		verdict.AnchorPoint = Vector2.new(0.5, 0.5)
-		verdict.Position = UDim2.fromScale(0.5, 0.5)
-		verdict.Size = UDim2.fromScale(0.8, 0.24)
-		verdict.BackgroundTransparency = 1
-		verdict.TextScaled = true
-		verdict.Font = Enum.Font.GothamBlack
-		verdict.TextColor3 = Color3.fromRGB(255, 255, 255)
-		verdict.TextTransparency = 1
-		verdict.Parent = stage
-
-		stage.Parent = gui
+		return nil
 	end
-	self.stage = stage
+	self.parts = parts
+	self.stage = parts.root
+	self.surface = parts.surface or parts.root
 	self.labels = {
-		title = findFirst(stage, "Title"),
-		hint = findFirst(stage, "Hint"),
-		fill = findFirst(stage, "Timer") and findFirst(findFirst(stage, "Timer"), "Fill") or nil,
-		verdict = findFirst(stage, "Verdict"),
-		ui = stage,
+		title = parts.title,
+		hint = parts.hint,
+		fill = parts.fill,
+		verdict = parts.verdict,
+		accent = parts.accent,
+		ui = parts.root,
 	}
-	self.surface = findFirst(stage, "Stage") or stage
-	return stage
+	return self.stage
 end
 
 function QTEStruggle:acquire(kind: string): any
@@ -472,7 +406,7 @@ function QTEStruggle:makeWidget(kind: string): any
 		return label
 	elseif kind == "bar" then
 		local track = Instance.new("Frame")
-		track.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+		track.BackgroundColor3 = colour(QTEOverlay.Theme.Ink)
 		track.BackgroundTransparency = 0.4
 		track.BorderSizePixel = 0
 		track.Visible = false
@@ -484,7 +418,7 @@ function QTEStruggle:makeWidget(kind: string): any
 		return track
 	elseif kind == "track" then
 		local frame = Instance.new("Frame")
-		frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+		frame.BackgroundColor3 = colour(QTEOverlay.Theme.Ink)
 		frame.BackgroundTransparency = 0.4
 		frame.BorderSizePixel = 0
 		frame.Visible = false
@@ -492,13 +426,13 @@ function QTEStruggle:makeWidget(kind: string): any
 		local zone = Instance.new("Frame")
 		zone.Name = "Zone"
 		zone.BorderSizePixel = 0
-		zone.BackgroundColor3 = Color3.fromRGB(120, 255, 150)
+		zone.BackgroundColor3 = colour(QTEOverlay.Theme.Good)
 		zone.BackgroundTransparency = 0.55
 		zone.Parent = frame
 		local marker = Instance.new("Frame")
 		marker.Name = "Marker"
 		marker.BorderSizePixel = 0
-		marker.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		marker.BackgroundColor3 = colour(QTEOverlay.Theme.Paper)
 		marker.Parent = frame
 		return frame
 	elseif kind == "chips" then
@@ -547,7 +481,11 @@ function QTEStruggle:draw(view: any): ()
 	local labels = self.labels
 	if labels.title ~= nil then
 		labels.title.Text = view.prompt or ""
-		labels.title.TextColor3 = colour(view.accent)
+		labels.title.TextColor3 = colour(QTEOverlay.Theme.Paper)
+	end
+	if labels.accent ~= nil then
+		-- The one accent in the composition, and it carries the QTE's own colour.
+		labels.accent.BackgroundColor3 = colour(view.accent)
 	end
 	if labels.hint ~= nil then
 		labels.hint.Text = view.sub or ""
@@ -662,7 +600,7 @@ function QTEStruggle:draw(view: any): ()
 					label.BackgroundTransparency = 1
 					label.TextScaled = true
 					label.Font = Enum.Font.GothamBold
-					label.TextColor3 = Color3.fromRGB(255, 255, 255)
+					label.TextColor3 = colour(QTEOverlay.Theme.Paper)
 					label.Parent = chip
 					self.chipLabels[chip] = label
 				end
@@ -742,7 +680,7 @@ function QTEStruggle:start(defId: string?, startOpts: any?): any
 	end
 	local stage = self:ensureStage()
 	if stage ~= nil then
-		stage.Visible = true
+		QTEOverlay.setVisible(self.gui, true)
 	end
 	if self.labels.verdict ~= nil then
 		self.labels.verdict.TextTransparency = 1
@@ -812,7 +750,7 @@ function QTEStruggle:finish(reason: string?): ()
 		else
 			copy = QTEConfig.Copy.Miss
 		end
-		self:showVerdict(copy[(self.director.runs % #copy) + 1], { 255, 80, 80 })
+		self:showVerdict(copy[(self.director.runs % #copy) + 1], QTEOverlay.Theme.Danger)
 	else
 		if grade.name == "sloppy" then
 			copy = QTEConfig.Copy.Sloppy
@@ -821,7 +759,7 @@ function QTEStruggle:finish(reason: string?): ()
 		else
 			copy = QTEConfig.Copy.Perfect
 		end
-		self:showVerdict(copy[(self.director.runs % #copy) + 1], { 140, 255, 160 })
+		self:showVerdict(copy[(self.director.runs % #copy) + 1], QTEOverlay.Theme.Good)
 	end
 
 	local payload = {
@@ -848,8 +786,9 @@ function QTEStruggle:finish(reason: string?): ()
 	self.resultSignal:fire(payload)
 
 	if self.applyConsequences and (grade.damage > 0 or grade.heal > 0) then
-		-- Off by default: in Vitriol, HealthService alone writes player health
-		-- (docs/01 §6). A game that wants v5's behaviour opts in.
+		-- Off by default: a QTE result is reported, not applied. A game with a
+		-- single owner of health (as any sane one has) wants resultSignal and
+		-- nothing else; a game that wants v5's direct writes opts in here.
 		local humanoid = self.humanoid
 		if humanoid ~= nil then
 			if grade.damage > 0 then
@@ -890,7 +829,7 @@ end
 function QTEStruggle:hideStage(): ()
 	self.phase = "idle"
 	if self.stage ~= nil then
-		self.stage.Visible = false
+		QTEOverlay.setVisible(self.gui, false)
 	end
 	if self.labels.verdict ~= nil then
 		self.labels.verdict.TextTransparency = 1
@@ -947,7 +886,7 @@ end
 -- A payload of { qte = "start", id = "Spam", healthFraction = 0.3 } begins a
 -- struggle QTE; { qte = "cancel" } aborts one. The SERVER starts struggles because
 -- it owns the kill choreography; the client only reports back, and the server
--- treats the report as a request, never as truth (docs/11 §8).
+-- treats the report as a request, never as truth (README.md §10).
 function QTEStruggle:bind(creatureEvent: any): ()
 	if creatureEvent == nil then
 		return

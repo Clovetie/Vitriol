@@ -1,7 +1,7 @@
 --!strict
 -- QTEConfig.luau
--- Location: ReplicatedStorage > Vitriol > Config > QTEConfig  (ModuleScript)
--- Purpose:  Data for the quick-time-event system (docs/11-QTE-SYSTEM.md): the human
+-- Location: ReplicatedStorage > QTE > Config > QTEConfig  (ModuleScript)
+-- Purpose:  Data for the quick-time-event system (README.md is the manual): the human
 --           input model the feasibility floor is derived from, difficulty presets,
 --           dynamic time pressure, the grading table, device capability sets, the
 --           abstract-input -> KeyCode maps and every word / question / symbol bank
@@ -15,8 +15,8 @@
 --           only conversion to Color3/Vector3 in the system.
 --
 -- Requires: (none)
--- Used by:  Lib/QTECatalog, Lib/QTEDirector, Controllers/QTEStruggle,
---           tools/vitriol/tests.luau
+-- Used by:  Lib/QTECatalog, Lib/QTEDirector, Client/QTEStruggle,
+--           tools/vitriol/tests-qte.luau
 
 local QTEConfig = {}
 
@@ -26,7 +26,7 @@ QTEConfig.Version = 6
 -- Every time limit in the system is derived from this table rather than typed in
 -- per QTE. A QTE declares HOW MANY inputs it needs and HOW LONG the player must
 -- read; QTEEngine.cost() converts that into seconds, and QTEDirector refuses to
--- ship a limit below it at any difficulty (docs/11 §4). Numbers are deliberately
+-- ship a limit below it at any difficulty (README.md §4). Numbers are deliberately
 -- conservative: they describe a competent player on a good device, not a pro.
 QTEConfig.Human = {
 	ReactionSeconds = 0.22, -- see it, decide, begin moving
@@ -198,7 +198,7 @@ QTEConfig.Pairs = {
 
 -- ── Word bank ────────────────────────────────────────────────────────────────
 -- Spelling matters: every letter must exist as a token in InputMap.Keyboard or the
--- QTE is unanswerable. tests.luau asserts that for every word (docs/11 §7).
+-- QTE is unanswerable. The test suite asserts that for every word (README.md §11).
 QTEConfig.Words = {
 	Short = {
 		"FIRE", "JUMP", "RUN", "STOP", "HELP", "DODGE", "RUSH", "SAFE",

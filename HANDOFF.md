@@ -108,23 +108,28 @@ are included in the current continuation commit; Studio verification remains ope
 
 | Check | Output |
 | --- | --- |
-| `vitriol-smoke-test.js` | `VITRIOL smoke test: 424 passed, 0 failed` (58 QTE assertions) |
+| `vitriol-smoke-test.js` | `VITRIOL smoke test: 366 passed, 0 failed` (`code/`) |
+| QTE suite (`--modules tools/vitriol/modules-qte.js`) | `VITRIOL smoke test: 58 passed, 0 failed` (`qte/`) |
+| `qte-build-ui.js --check` | `model and preview are up to date (12 instances, 0 missing parts)` |
 | `vitriol-session-test.js` | `VITRIOL session test: 87 passed, 0 failed` |
-| `check-syntax.js code` | 48 OK / `2 file(s) failed` — `Lib/RNG.luau`, `Lib/Noise.luau` (§3) |
-| `metrics.js --src code` | `50 files; LOC 17214; code 13416; comments 2611; exports 481; requires 47` |
-| `hot-loop-scan.js --src code` | `Priced calls: 34 \| inside-a-loop: 8 \| in a RunService file: 0` |
-| `call-graph.js --src code` | current graph includes `Bootstrap -> BloodAdapter/CreatureService`, `CreatureService -> CreatureCore/TendrilRig/Locomotion`, `HealthService -> KillChoreography`, `ClientMain -> VictimCamera/QTEStruggle/Remotes`, and the QTE chain `QTEConfig -> QTECatalog -> QTEEngine -> QTEDirector -> QTEStruggle` |
+| `check-syntax.js code` | 43 OK / `2 file(s) failed` — `Lib/RNG.luau`, `Lib/Noise.luau` (§3); `check-syntax.js qte` is 7 OK / 0 failed |
+| `metrics.js --src code` | `45 files; LOC 10993; code 8001; comments 2125; exports 381; requires 35` |
+| `hot-loop-scan.js --src code` | `Priced calls: 31 \| inside-a-loop: 8 \| in a RunService file: 0` (`--src qte`: 5 / 0 / 0) |
+| `call-graph.js --src code` | current graph includes `Bootstrap -> BloodAdapter/CreatureService`, `CreatureService -> CreatureCore/TendrilRig/Locomotion`, `HealthService -> KillChoreography` and `ClientMain -> VictimCamera/Remotes` |
 | `find-dead-config.js --src code` | audits all eight Vitriol configs; planned future-WP keys are reported for review |
 | `evaluate-models.js` | `fixture-known-good: ADMIT 100.0%` / `candidate-local: REJECT 0.0%` |
 | `vitriol-quality-gate.js --src code` | `9/9 checks passed` including both harnesses and `git diff --check` |
 
-Latest validation run for this continuation (2026-09-24 UTC): smoke **424 passed,
-0 failed**; session **87 passed, 0 failed**. `check-syntax.js code` reports 48
-parseable files plus the two known bitwise exceptions (`Lib/RNG.luau`, `Lib/Noise.luau`).
-Metrics report 50 files, 17,214 LOC, 13,416 code lines, 2,611 comment lines, 481
-exports and 47 require edges. Hot-loop reports 34 priced calls, 8 inside loops, and
-0 in a RunService file (the QTE shell drives one Heartbeat loop and holds no priced
-call). The evaluator prints `fixture-known-good: ADMIT 100.0%` and
+Latest validation run for this continuation (2026-09-24 UTC): the Vitriol suite is
+**366 passed, 0 failed** and the QTE package's own suite is **58 passed, 0 failed**;
+session **87 passed, 0 failed**. `check-syntax.js code` reports 43 parseable files
+plus the two known bitwise exceptions (`Lib/RNG.luau`, `Lib/Noise.luau`);
+`check-syntax.js qte` parses all 7 package files cleanly. Metrics report 45 files,
+10,993 LOC, 8,001 code lines, 2,125 comment lines, 381 exports and 35 require edges —
+identical to the pre-package snapshot, which is the proof that `code/` was left
+untouched (the package's files live outside it by design). Hot-loop reports 31 priced
+calls, 8 inside loops and 0 in a RunService file for the place, and 5 / 0 / 0 for the
+package - its Heartbeat loop holds no priced call either. The evaluator prints `fixture-known-good: ADMIT 100.0%` and
 `candidate-local: REJECT 0.0%`.
 
 The 8 loop flags are the seven existing `table.insert` sites in `Genetics` and
@@ -385,10 +390,19 @@ core-relative vs parent-relative quantisation). Iteration 3 added:
 
 ---
 
-## 7. QTE subsystem (added 2026-09-24)
+## 7. QTE subsystem (added 2026-09-24) — now a SEPARATE package
 
-**Files.** `Config/QTEConfig.luau`, `Lib/QTECatalog.luau`, `Lib/QTEEngine.luau`,
-`Lib/QTEDirector.luau`, `Controllers/QTEStruggle.luau`; design authority is
+**Location.** It is **not** in `code/`. The whole system lives at the repository
+root in **`qte/`** as a self-contained product, with its own manual
+(`qte/README.md`), its own test module map/suite, and generated UI artifacts. The
+place is back to its pre-QTE state: `git diff` on `code/` against the last merge
+commit is empty.
+
+**Files.** `qte/Config/QTEConfig.luau`, `qte/Lib/QTECatalog.luau`,
+`qte/Lib/QTEEngine.luau`, `qte/Lib/QTEDirector.luau`, `qte/Client/QTEStruggle.luau`,
+`qte/UI/QTEOverlay.luau` (+ `.rbxmx`, `.preview.svg`, `.preview.png`),
+`qte/Client/QTEStruggleClient.luau`, `qte/Client/QTEPlayground.luau`, plus vendored
+`qte/Lib/RNG.luau` and `qte/Lib/Signal.luau`. Design record:
 `docs/11-QTE-SYSTEM.md`.
 
 **What it is.** 68 QTEs over 34 engine modes, all pure except the client shell, with
@@ -398,19 +412,30 @@ the v5 public API (`StartRandomQTE`, `StartQTE`, `StartChain`, `RegisterCustomQT
 `SetDifficulty`, `SetConfig`, `GetStats`, `ResetStats`, `GetQTEList`,
 `ResetAppearances`) and fires `resultSignal` instead of writing health.
 
-**Verification.** `node tools/vitriol-smoke-test.js` → 424 passed / 0 failed; the
-QTE block proves feasibility (limit ≥ cost at every preset/seed/zero health),
+**Verification.** `node tools/vitriol-smoke-test.js --modules
+tools/vitriol/modules-qte.js --tests tools/vitriol/tests-qte.luau` → 58 passed /
+0 failed; it proves feasibility (limit ≥ cost at every preset/seed/zero health),
 perfect-play-wins (`68 × 4` preset runs with a bot limited to 7.5 inputs/s), that
 idling wins nothing except the two `idle` QTEs, spam safety, determinism, weighted
-pick coverage, grading, capability gating and answer concealment. The gate is 9/9.
+pick coverage, grading, capability gating and answer concealment.
+`node tools/qte-build-ui.js --check` proves the checked-in `.rbxmx`/`.preview.svg`
+still match the source spec and that every part the shell looks up exists. The gate
+is **12/12**, and the place's own numbers are unchanged (366/87, 45 files).
 
 **Not verified.** The overlay has never rendered: widget layout, 480p legibility,
 real-device feel, and the `Color3`/`Vector2` conversions in `QTEStruggle` are
 reviewed, not run. `docs/11` §9 lists exactly what the harness cannot claim.
 
+**UI.** The overlay is generated, not hand-drawn: `qte/UI/QTEOverlay.luau` holds one
+spec table and `tools/qte-build-ui.js` runs that module in the harness and emits the
+Studio-importable `.rbxmx` plus an SVG/PNG layout preview, asserting in the same run
+that `ensure()` is idempotent, that it *completes* a hand-authored tree instead of
+overwriting it, and that `setVisible` toggles the takeover. Import the `.rbxmx` into
+`StarterGui` to own the look; skip it and the same tree is built at runtime.
+
 **Next.** `docs/11` §8: the server-side struggle hook (start from the kill
-choreography over `RE_CreatureEvent`, report over a `RE_ClientIntent` intent, clamp
-the score server-side, fold `grade.escapeWeight` into `docs/03` §6.3's grip meter).
+choreography over a `RE_CreatureEvent` equivalent, report over a client intent, clamp
+the score server-side, fold `grade.escapeWeight` into the grip meter).
 
 **Harness notes for the next agent.** Compound assignment must start a line
 (`x += 1` mid-line is not transformed and becomes a Lua 5.3 syntax error), anonymous

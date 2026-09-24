@@ -134,13 +134,18 @@ StarterGui
   `docs/04` §5.
 - All text must be legible at 480p (mobile) and support text-size scaling.
 
-### 2.4 QTE overlay (docs/11)
-The QTE subtree above is specified in `docs/11-QTE-SYSTEM.md` §10. It must stay a
-*thin rule and a word*, in the same muted-paper/ink language as the rest: no
-progress bars per docs/00 §7, no numbers except the timer rule. `QTEStruggle`
-finds whatever is authored here and only falls back to building its own copy when
-the subtree is missing, so putting the real frames in later requires no code
-change. Required child names: `Title`, `Hint`, `Stage`, `Timer/Fill`, `Verdict`.
+### 2.4 QTE overlay (the package owns it)
+The QTE system is a separate package (`qte/README.md`), and **it brings its own
+interface**: `qte/UI/QTEOverlay.luau` is the spec, `qte/UI/QTEOverlay.rbxmx` is the
+Studio-importable model, and `qte/UI/QTEOverlay.preview.svg`/`.png` show the
+composition. Import the model into `StarterGui` and restyle it there - the package
+completes a tree like that one and never overwrites a node it did not create, so
+your edits survive with no code change. If you would rather keep it inside a single
+`VitriolGui`, the subtree listed above is the same design, and the package accepts
+your own ScreenGui via `QTEStruggle.new({ gui = ... })`.
+
+Either way it stays a *thin rule and a word*, in the same muted-paper/ink language
+as the rest: no progress bars per `docs/00` §7, no numbers except the timer rule.
 
 ### 2.5 Brief / prompt
 

@@ -1,6 +1,6 @@
 --!strict
 -- QTECatalog.luau
--- Location: ReplicatedStorage > Vitriol > Lib > QTECatalog  (ModuleScript)
+-- Location: ReplicatedStorage > QTE > Lib > QTECatalog  (ModuleScript)
 -- Purpose:  Every QTE the game can ask for, as DATA. A definition names an engine
 --           mode and supplies a generator that turns an RNG into that QTE's task
 --           parameters, so "what QTEs exist" is one readable list and "what a QTE
@@ -12,11 +12,11 @@
 --           executed off-device. A definition here cannot do any of that: it can
 --           only choose a mode, set parameters, and be picked.
 --
---           The list is grouped by family (docs/11 §3) and each entry records the
+--           The list is grouped by family (README.md §5) and each entry records the
 --           device capabilities it needs, so a phone is never asked to press Q.
 --
 -- Requires: Config/QTEConfig
--- Used by:  Lib/QTEDirector, tools/vitriol/tests.luau
+-- Used by:  Lib/QTEDirector, Lib/QTEEngine (honours the params), tools/vitriol/tests-qte.luau
 
 local QTEConfig = require(script.Parent.Parent.Config.QTEConfig)
 

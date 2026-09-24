@@ -1,6 +1,6 @@
 --!strict
 -- QTEDirector.luau
--- Location: ReplicatedStorage > Vitriol > Lib > QTEDirector  (ModuleScript)
+-- Location: ReplicatedStorage > QTE > Lib > QTEDirector  (ModuleScript)
 -- Purpose:  Decides WHICH QTE runs, HOW LONG the player gets, and WHAT a result
 --           means. It is the piece the game talks to; Lib/QTEEngine runs the one
 --           that was chosen and Lib/QTECatalog is the list it chooses from.
@@ -212,8 +212,8 @@ function QTEDirector.grade(result: any): any
 end
 
 -- record(result) -> {grade, streak, bestStreak, wins, losses, adaptive}
--- The caller decides what damage/heal MEANS; in Vitriol that is HealthService's
--- business (docs/01 §3), which is why this module never touches a Humanoid.
+-- The caller decides what damage/heal MEAN; in a game with a single health owner that is
+-- the health service's business, which is why this module never touches a Humanoid.
 function QTEDirector:record(result: any): any
 	local grade = QTEDirector.grade(result)
 	if result.state == QTEEngine.STATES.Won then
