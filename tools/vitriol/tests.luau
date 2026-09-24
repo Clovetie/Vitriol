@@ -1711,4 +1711,5 @@ check(fullMoon > newMoon, "a full moon adds more light than a new one (" .. stri
 check(approx(fullMoon, DayNightConfig.Moon.BrightnessDelta, 1e-9), "and the peak is exactly the configured delta")
 
 end
+
 return TESTS

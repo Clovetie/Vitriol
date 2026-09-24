@@ -28,7 +28,12 @@ const { lua, lauxlib, lualib, to_luastring, to_jsstring } = fengari;
 const ROOT = path.resolve(__dirname, "..");
 
 // Modules under test: logical name -> repo-relative path.
-const MODULES = {
+// --modules <file.js> swaps this whole map, which is how the QTE package (which
+// lives outside code/, in qte/) gets tested by this same harness and this same
+// transform:
+//   node tools/vitriol-smoke-test.js --modules tools/vitriol/modules-qte.js \
+//        --tests tools/vitriol/tests-qte.luau
+const DEFAULT_MODULES = {
 	MathExt: "code/ReplicatedStorage/Vitriol/Lib/MathExt.luau",
 	RNG: "code/ReplicatedStorage/Vitriol/Lib/RNG.luau",
 	Fabrik: "code/ReplicatedStorage/Vitriol/Lib/Fabrik.luau",
@@ -53,11 +58,18 @@ const MODULES = {
 	Remotes: "code/ReplicatedStorage/Vitriol/Shared/Remotes.luau",
 	NetContract: "code/ReplicatedStorage/Vitriol/Shared/NetContract.luau",
 	TimeModel: "code/ReplicatedStorage/Vitriol/Shared/TimeModel.luau",
+	// The QTE stack is NOT here: it is a separate package that lives in qte/ and is
+	// loaded with its own map (see modules-qte.js above).
 	// ServerStorage, but its codec/adapter half is pure Lua + a `buffer` shim, which
 	// is what the Replicator parity test needs to prove array/buffer agreement.
 	Replicator: "code/ServerStorage/Vitriol/Creature/Replicator.luau",
 	KillChoreography: "code/ServerStorage/Vitriol/Creature/Body/KillChoreography.luau",
 };
+
+const modulesArgIdx = process.argv.indexOf("--modules");
+const suite = modulesArgIdx >= 0 ? require(path.resolve(ROOT, process.argv[modulesArgIdx + 1])) : null;
+const MODULES = suite ? suite.modules : DEFAULT_MODULES;
+const SUITE_LABEL = suite ? suite.label || "custom module map" : "Vitriol modules (code/)";
 
 // ---------------------------------------------------------------------------
 // Luau -> Lua 5.3 transform (shared with vitriol-session-test.js; see tools/lib)
@@ -225,5 +237,6 @@ const failed = lua.lua_tonumber(L, -1);
 lua.lua_pop(L, 2);
 
 console.log("");
+console.log(`Suite: ${SUITE_LABEL} (tests: ${testsPath})`);
 console.log(`VITRIOL smoke test: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

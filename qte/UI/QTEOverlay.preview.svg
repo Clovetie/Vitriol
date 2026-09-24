@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="816" viewBox="0 0 1280 816" role="img" aria-label="QTE overlay layout preview">
+<rect width="1280" height="816" fill="#14181a" />
+<rect x="0" y="0" width="1280" height="720" fill="rgb(26,32,34)" />
+<rect x="0.0" y="0.0" width="1280.0" height="720.0" fill="rgba(10,10,12,0.550)" />
+<rect x="564.0" y="168.8" width="152.1" height="2.0" fill="rgba(198,74,58,0.850)" />
+<rect x="276.7" y="469.2" width="726.5" height="2.0" fill="rgba(16,16,20,0.550)" />
+<rect x="276.7" y="469.2" width="726.5" height="2.0" fill="rgb(198,74,58)" />
+<rect x="217.6" y="172.8" width="844.8" height="276.4" fill="none" stroke="#6f7a7d" stroke-dasharray="6 6" stroke-width="1" />
+<text x="640.0" y="311.0" fill="#6f7a7d" font-family="Montserrat, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">widget stage - bars, targets, grids and chips are pooled here per QTE</text>
+<text x="640.0" y="151.8" fill="rgb(238,233,222)" font-family="Gotham, Montserrat, Arial, Helvetica, sans-serif" font-size="30.0" font-weight="700" letter-spacing="1.80" text-anchor="middle" dominant-baseline="middle">PRESS  E</text>
+<text x="640.0" y="324.0" fill="rgba(238,233,222,0.000)" font-family="Gotham, Montserrat, Arial, Helvetica, sans-serif" font-size="30.0" font-weight="700" letter-spacing="1.80" text-anchor="middle" dominant-baseline="middle">GOOD</text>
+<text x="640.0" y="493.2" fill="rgb(186,179,165)" font-family="Gotham, Montserrat, Arial, Helvetica, sans-serif" font-size="20.0" font-weight="700" letter-spacing="1.20" text-anchor="middle" dominant-baseline="middle">three times, before it closes</text>
+<rect x="0" y="720" width="1280" height="96" fill="#0d1012" />
+<text x="24" y="746" fill="#9aa3a6" font-family="Montserrat, Arial, Helvetica, sans-serif" font-size="13">QTE overlay at 1280 x 720 - generated from qte/UI/QTEOverlay.luau by tools/qte-build-ui.js</text>
+<text x="24" y="764" fill="#9aa3a6" font-family="Montserrat, Arial, Helvetica, sans-serif" font-size="13">Dark scrim, paper-white instruction, a faint accent rule that carries the QTE family colour, a thin timer RULE (never a graph),</text>
+<text x="24" y="782" fill="#9aa3a6" font-family="Montserrat, Arial, Helvetica, sans-serif" font-size="13">and one verdict word. Every label is TextScaled inside a UITextSizeConstraint (12-34 px), so it stays legible at 480p.</text>
+<text x="24" y="800" fill="#9aa3a6" font-family="Montserrat, Arial, Helvetica, sans-serif" font-size="13">Strings shown here are samples; the shell writes the real prompt, hint and verdict. The dashed area is the widget stage.</text>
+</svg>
