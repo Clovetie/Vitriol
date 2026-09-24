@@ -169,6 +169,17 @@ A minimum `KillChoreography`/`HealthService`/`BloodAdapter`/`VictimCamera` path 
 implemented. Full Grapple, region-integrity choreography and Studio presentation are
 still open; see the continuation table above.
 
+### M5b — The struggle QTE (WP11) ✅
+`QTEConfig`/`QTECatalog`/`QTEEngine`/`QTEDirector`/`QTEStruggle` implement 68 QTEs
+across 34 engine modes, with a feasibility-correct time model, device-gated pools,
+grading and a client shell that keeps the v5 public API. Design, roster, maths and
+the (unimplemented) server hook are in `docs/11-QTE-SYSTEM.md`; the smoke harness
+plays every QTE at every preset with human input limits.
+**Exit met:** 58 new assertions, gate 9/9.
+**Still open:** the server-side struggle hook (`docs/11` §8) — start a QTE from the
+kill choreography over `RE_CreatureEvent`, report back over `RE_ClientIntent`, and
+fold `grade.escapeWeight` into `docs/03` §6.3's grip meter.
+
 ### M6 — World interaction (WP9–WP10) ⬜
 `DestructionService`, `VehicleService`, `InventoryService`, `InteractionController`,
 `SurvivalService`, `LightingDriver`, `CreatureAudio`, `VibrationFx`.
@@ -216,7 +227,26 @@ authority or scope.
   legacy Rojo checkouts but `tools/audit.sh` skips it when no `default.project.json`
   exists; no Rojo project is to be created merely for tooling.
 
-## Latest validation snapshot — 2026-09-09 UTC
+## Latest validation snapshot — 2026-09-24 UTC
+
+- `node tools/vitriol-smoke-test.js`: **424 passed, 0 failed** (58 of them the QTE
+  suite: feasibility, perfect-play-wins, idle-loses, spam-safety, determinism,
+  director behaviour, concealment).
+- `node tools/vitriol-session-test.js`: **87 passed, 0 failed** (unchanged).
+- `node tools/check-syntax.js code`: **48 files parse**; the two known Lua 5.1
+  parser exceptions remain `Lib/RNG.luau` and `Lib/Noise.luau`.
+- `node tools/metrics.js --src code`: **50 files; LOC 17214 | code 13416 | comments
+  2611 | exports 481 | requires 47**.
+- `node tools/hot-loop-scan.js --src code`: **priced calls 34 | inside-a-loop 8 | in
+  a RunService file 0** — the QTE client shell drives one Heartbeat loop and holds
+  no priced call, which is why the gate stays green.
+- `node tools/call-graph.js --src code`: **50 modules | 481 exports | 47 require
+  edges**.
+- `node tools/vitriol-quality-gate.js --src code`: **9/9 checks passed**.
+- Studio acceptance is still outstanding for the QTE overlay: the harness proves the
+  rules, not the pixels (`docs/11` §9).
+
+## Previous validation snapshot — 2026-09-09 UTC
 
 - `node tools/vitriol-smoke-test.js`: **366 passed, 0 failed**.
 - `node tools/vitriol-session-test.js`: **87 passed, 0 failed**; includes creature

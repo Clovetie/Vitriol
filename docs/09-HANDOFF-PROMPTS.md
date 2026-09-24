@@ -271,6 +271,19 @@ Acceptance: docs/04 §7, all five criteria.
 
 ---
 
+## WP11 — The struggle QTE  ✅ *delivered: 2026-09-24 (docs/11)*
+
+Delivered: `Config/QTEConfig`, `Lib/QTECatalog` (68 QTEs), `Lib/QTEEngine` (34
+modes), `Lib/QTEDirector` (feasibility-correct limits, grading, stats),
+`Controllers/QTEStruggle` (client shell, v5 API kept), plus 58 harness assertions.
+Remaining from that prompt: the **server hook** — start a struggle from the kill
+choreography over `RE_CreatureEvent`, report the outcome over a `RE_ClientIntent`
+intent, clamp it server-side, and fold `grade.escapeWeight` into the grip meter of
+`docs/03` §6.3. The contract is written out in `docs/11` §8; do not invent a new
+remote for it.
+
+---
+
 ## WP9 — Destruction + vehicles
 
 ```

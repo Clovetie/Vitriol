@@ -53,6 +53,12 @@ const MODULES = {
 	Remotes: "code/ReplicatedStorage/Vitriol/Shared/Remotes.luau",
 	NetContract: "code/ReplicatedStorage/Vitriol/Shared/NetContract.luau",
 	TimeModel: "code/ReplicatedStorage/Vitriol/Shared/TimeModel.luau",
+	// The QTE stack: config -> catalogue -> engine -> director. The engine and the
+	// director are pure on purpose, which is what lets the harness play every QTE.
+	QTEConfig: "code/ReplicatedStorage/Vitriol/Config/QTEConfig.luau",
+	QTECatalog: "code/ReplicatedStorage/Vitriol/Lib/QTECatalog.luau",
+	QTEEngine: "code/ReplicatedStorage/Vitriol/Lib/QTEEngine.luau",
+	QTEDirector: "code/ReplicatedStorage/Vitriol/Lib/QTEDirector.luau",
 	// ServerStorage, but its codec/adapter half is pure Lua + a `buffer` shim, which
 	// is what the Replicator parity test needs to prove array/buffer agreement.
 	Replicator: "code/ServerStorage/Vitriol/Creature/Replicator.luau",

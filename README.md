@@ -24,8 +24,9 @@ creature** that hunts by vibration, scent and memory — and **learns your habit
 | 7 | [`docs/06-DAY-NIGHT.md`](docs/06-DAY-NIGHT.md) | Seamless cycle, keyframe table, client-authoritative lighting |
 | 8 | [`docs/07-DESTRUCTION-VEHICLES.md`](docs/07-DESTRUCTION-VEHICLES.md) | Breakable joint graph, integrity collapse, cars |
 | 9 | [`docs/08-RESEARCH-NOTES.md`](docs/08-RESEARCH-NOTES.md) | **Sourced** engine facts and gotchas |
-| 10 | [`docs/09-HANDOFF-PROMPTS.md`](docs/09-HANDOFF-PROMPTS.md) | Copy-paste prompts WP1–WP10 for the next iteration |
+| 10 | [`docs/09-HANDOFF-PROMPTS.md`](docs/09-HANDOFF-PROMPTS.md) | Copy-paste prompts WP1–WP11 for the next iteration |
 | 11 | [`docs/10-HUMAN-AUTHORED.md`](docs/10-HUMAN-AUTHORED.md) | Briefs + hierarchies for map, UI, meshes, audio — **no code** |
+| 12 | [`docs/11-QTE-SYSTEM.md`](docs/11-QTE-SYSTEM.md) | QTE design, the 68-entry roster, the time model, client shell, server hook |
 | — | [`ROADMAP.md`](ROADMAP.md) | Milestones and open decisions |
 
 ---
@@ -96,7 +97,9 @@ node tools/evaluate-models.js \
 `tools/vitriol-smoke-test.js` loads the **real** modules from `code/` into a
 Lua 5.3 VM (fengari) and asserts their behaviour — convergence, bone-length
 preservation, cone limits, determinism, genome budget projection, kill choreography,
-and that two different coil geometries produce different sever orders. The session
+that two different coil geometries produce different sever orders, and that a bot
+with human input limits wins **all 68 QTEs at all four difficulty presets** while a
+bot that does nothing loses them all (`docs/11-QTE-SYSTEM.md` §9). The session
 harness boots the server with a virtual DataModel and exercises creature spawning,
 first-person victim events, player-only death, and scheduler invariants. These are
 not reimplementations, so regressions in the source modules fail the suites.
@@ -107,12 +110,12 @@ Re-run every time; these are the latest recorded outputs:
 
 | Check | Result |
 | --- | --- |
-| `vitriol-smoke-test.js` | **366 passed, 0 failed** |
+| `vitriol-smoke-test.js` | **424 passed, 0 failed** (58 of them the QTE stack) |
 | `vitriol-session-test.js` | **87 passed, 0 failed** |
-| `check-syntax.js code` | **43 OK, 2 known failures** — `Lib/RNG.luau` and `Lib/Noise.luau` use Luau bitwise syntax rejected by the Lua 5.1 parser |
-| `metrics.js --src code` | **45 files; LOC 10993; code 8001; comments 2125; exports 381; requires 35** |
-| `hot-loop-scan.js --src code` | **31 priced calls; 8 inside loops; 0 in a RunService file** |
-| `call-graph.js --src code` | **45 modules; 381 exports; 35 require edges** |
+| `check-syntax.js code` | **48 OK, 2 known failures** — `Lib/RNG.luau` and `Lib/Noise.luau` use Luau bitwise syntax rejected by the Lua 5.1 parser |
+| `metrics.js --src code` | **50 files; LOC 17214; code 13416; comments 2611; exports 481; requires 47** |
+| `hot-loop-scan.js --src code` | **34 priced calls; 8 inside loops; 0 in a RunService file** |
+| `call-graph.js --src code` | **50 modules; 481 exports; 47 require edges** |
 | `find-dead-config.js --src code` | all eight Vitriol configs; planned future-WP keys are reported for review |
 | model evaluation | **ADMIT 100.0% / REJECT 0.0%** |
 | `vitriol-quality-gate.js --src code` | **9/9 checks passed** |

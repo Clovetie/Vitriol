@@ -112,6 +112,12 @@ StarterGui
    │  ├─ InteractionPrompt (Frame)       ← diegetic "hold E" near world objects
    │  ├─ CarryIndicator (Frame)
    │  └─ SubtitleHint (TextLabel)        ← for the creature's lure vocalisations
+   ├─ QTE (Frame)                        ← struggle overlay, hidden when idle (docs/11 §10)
+   │  ├─ Title (TextLabel)               ← the instruction; TextScaled + UITextSizeConstraint
+   │  ├─ Hint (TextLabel)                ← secondary line
+   │  ├─ Stage (Frame)                   ← widget surface: pooled bars / targets / grid / chips
+   │  ├─ Timer (Frame) └─ Fill (Frame)   ← a thin RULE, not a graph: remaining time as width
+   │  └─ Verdict (TextLabel)             ← one word, transparency 1 when idle
    ├─ Vignette (ImageLabel)              ← driven by PostProcessDriver, not by UI code
    └─ Menus (FL)
       ├─ MainMenu (Frame)
@@ -128,7 +134,15 @@ StarterGui
   `docs/04` §5.
 - All text must be legible at 480p (mobile) and support text-size scaling.
 
-### 2.4 Brief / prompt
+### 2.4 QTE overlay (docs/11)
+The QTE subtree above is specified in `docs/11-QTE-SYSTEM.md` §10. It must stay a
+*thin rule and a word*, in the same muted-paper/ink language as the rest: no
+progress bars per docs/00 §7, no numbers except the timer rule. `QTEStruggle`
+finds whatever is authored here and only falls back to building its own copy when
+the subtree is missing, so putting the real frames in later requires no code
+change. Required child names: `Title`, `Hint`, `Stage`, `Timer/Fill`, `Verdict`.
+
+### 2.5 Brief / prompt
 
 > Design a diegetic horror-survival UI for Roblox. **No health/hunger bars on the
 > HUD, ever.** State is communicated by audio and post-processing. The only numbers

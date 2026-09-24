@@ -1,4 +1,4 @@
-# Handoff — Vitriol, playable creature slice (2026-09-09 UTC)
+# Handoff — Vitriol, playable creature slice (2026-09-24 UTC)
 
 Everything in this file was produced by running a command in this repository, not
 recalled. Where a claim is unverified it says so. Two iterations of "the doc said X,
@@ -108,22 +108,23 @@ are included in the current continuation commit; Studio verification remains ope
 
 | Check | Output |
 | --- | --- |
-| `vitriol-smoke-test.js` | `VITRIOL smoke test: 366 passed, 0 failed` |
+| `vitriol-smoke-test.js` | `VITRIOL smoke test: 424 passed, 0 failed` (58 QTE assertions) |
 | `vitriol-session-test.js` | `VITRIOL session test: 87 passed, 0 failed` |
-| `check-syntax.js code` | 43 OK / `2 file(s) failed` — `Lib/RNG.luau`, `Lib/Noise.luau` (§3) |
-| `metrics.js --src code` | `45 files; LOC 10993; code 8001; comments 2125; exports 381; requires 35` |
-| `hot-loop-scan.js --src code` | `Priced calls: 31 \| inside-a-loop: 8 \| in a RunService file: 0` |
-| `call-graph.js --src code` | current graph includes `Bootstrap -> BloodAdapter/CreatureService`, `CreatureService -> CreatureCore/TendrilRig/Locomotion`, `HealthService -> KillChoreography`, and `ClientMain -> VictimCamera/Remotes` |
+| `check-syntax.js code` | 48 OK / `2 file(s) failed` — `Lib/RNG.luau`, `Lib/Noise.luau` (§3) |
+| `metrics.js --src code` | `50 files; LOC 17214; code 13416; comments 2611; exports 481; requires 47` |
+| `hot-loop-scan.js --src code` | `Priced calls: 34 \| inside-a-loop: 8 \| in a RunService file: 0` |
+| `call-graph.js --src code` | current graph includes `Bootstrap -> BloodAdapter/CreatureService`, `CreatureService -> CreatureCore/TendrilRig/Locomotion`, `HealthService -> KillChoreography`, `ClientMain -> VictimCamera/QTEStruggle/Remotes`, and the QTE chain `QTEConfig -> QTECatalog -> QTEEngine -> QTEDirector -> QTEStruggle` |
 | `find-dead-config.js --src code` | audits all eight Vitriol configs; planned future-WP keys are reported for review |
 | `evaluate-models.js` | `fixture-known-good: ADMIT 100.0%` / `candidate-local: REJECT 0.0%` |
 | `vitriol-quality-gate.js --src code` | `9/9 checks passed` including both harnesses and `git diff --check` |
 
-Latest validation run for this continuation (2026-09-09 UTC): smoke **366 passed,
-0 failed**; session **87 passed, 0 failed**. `check-syntax.js code` reports 43
+Latest validation run for this continuation (2026-09-24 UTC): smoke **424 passed,
+0 failed**; session **87 passed, 0 failed**. `check-syntax.js code` reports 48
 parseable files plus the two known bitwise exceptions (`Lib/RNG.luau`, `Lib/Noise.luau`).
-Metrics report 45 files, 10,993 LOC, 8,001 code lines, 2,125 comment lines, 381
-exports and 35 require edges. Hot-loop reports 31 priced calls, 8 inside loops, and
-0 in a RunService file. The evaluator prints `fixture-known-good: ADMIT 100.0%` and
+Metrics report 50 files, 17,214 LOC, 13,416 code lines, 2,611 comment lines, 481
+exports and 47 require edges. Hot-loop reports 34 priced calls, 8 inside loops, and
+0 in a RunService file (the QTE shell drives one Heartbeat loop and holds no priced
+call). The evaluator prints `fixture-known-good: ADMIT 100.0%` and
 `candidate-local: REJECT 0.0%`.
 
 The 8 loop flags are the seven existing `table.insert` sites in `Genetics` and
@@ -160,9 +161,10 @@ iteration 2: `GameConfig.{Net,Intents,Diagnostics}`, `GameConfig.Ticks.CadenceSl
 `DayNightConfig.Driver.AnchorMaterial`, `SurvivalConfig.Health`, `SurvivalConfig.Emission.BloodAirIntensity`.
 `DayNightConfig.RateCurve` is **deleted** (§4.7).
 
-**Lib/** (11, pure — no services, no Instances, no yields): `MathExt`, `RNG`,
+**Lib/** (15, pure — no services, no Instances, no yields): `MathExt`, `RNG`,
 `Fabrik`, `Genetics`, `Tables`, `Signal`, `Noise`, `SpatialHash`, `UtilityAI`,
-`QLearning`, `MarkovPredictor`. Surfaces as iteration 2's handoff described them;
+`QLearning`, `MarkovPredictor`, plus the QTE stack `QTECatalog`, `QTEEngine`,
+`QTEDirector` (and `Config/QTEConfig`). Surfaces as iteration 2's handoff described them;
 `SpatialHash:sampleDecay` and `:prune(now, maxAge, onRemove)` now have a consumer
 (`NoiseField`), which is what their signatures were shaped for.
 
@@ -380,3 +382,39 @@ core-relative vs parent-relative quantisation). Iteration 3 added:
     sniff boost, water-immersion masking and occlusion are `Senses'`. The table in
     docs/02 §2 is the arbiter; code and doc were made to agree in iteration 3 and the
     session test asserts the weather path end-to-end through the clock.
+
+---
+
+## 7. QTE subsystem (added 2026-09-24)
+
+**Files.** `Config/QTEConfig.luau`, `Lib/QTECatalog.luau`, `Lib/QTEEngine.luau`,
+`Lib/QTEDirector.luau`, `Controllers/QTEStruggle.luau`; design authority is
+`docs/11-QTE-SYSTEM.md`.
+
+**What it is.** 68 QTEs over 34 engine modes, all pure except the client shell, with
+a time model whose floor is each QTE's own measured input cost. `ClientMain` boots
+the shell next to `VictimCamera` and binds it to `RE_CreatureEvent`; the shell keeps
+the v5 public API (`StartRandomQTE`, `StartQTE`, `StartChain`, `RegisterCustomQTE`,
+`SetDifficulty`, `SetConfig`, `GetStats`, `ResetStats`, `GetQTEList`,
+`ResetAppearances`) and fires `resultSignal` instead of writing health.
+
+**Verification.** `node tools/vitriol-smoke-test.js` → 424 passed / 0 failed; the
+QTE block proves feasibility (limit ≥ cost at every preset/seed/zero health),
+perfect-play-wins (`68 × 4` preset runs with a bot limited to 7.5 inputs/s), that
+idling wins nothing except the two `idle` QTEs, spam safety, determinism, weighted
+pick coverage, grading, capability gating and answer concealment. The gate is 9/9.
+
+**Not verified.** The overlay has never rendered: widget layout, 480p legibility,
+real-device feel, and the `Color3`/`Vector2` conversions in `QTEStruggle` are
+reviewed, not run. `docs/11` §9 lists exactly what the harness cannot claim.
+
+**Next.** `docs/11` §8: the server-side struggle hook (start from the kill
+choreography over `RE_CreatureEvent`, report over a `RE_ClientIntent` intent, clamp
+the score server-side, fold `grade.escapeWeight` into `docs/03` §6.3's grip meter).
+
+**Harness notes for the next agent.** Compound assignment must start a line
+(`x += 1` mid-line is not transformed and becomes a Lua 5.3 syntax error), anonymous
+function *return* type annotations break `check-syntax.js` (`st.masked = function(s:
+any): string` had to become a named local), and `table.insert`/`table.sort`/
+`:FindFirstChild(`/`task.wait` count as priced calls — the QTE shell avoids all of
+them because it wires `RunService`.
