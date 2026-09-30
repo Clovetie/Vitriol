@@ -95,11 +95,21 @@ const rel = (p) => path.relative(REPO, p).replace(/\\/g, "/");
 // may read a clock, touch the engine, or yield.
 const PURE = ["Config", "Lib", "Shared", "Domain"];
 
+// The layers that may not reach the DataModel at all. Iteration 4 added
+// `Client`: every view is a pure presenter and `Main.client.luau` is the only
+// client file allowed to resolve a service, exactly as `Main.server.luau` is
+// the only server one. This is a STRICTER set than iteration 3 shipped, not a
+// looser one (D22).
+const NO_DATAMODEL = ["Config", "Lib", "Shared", "Domain", "Client"];
+
 // `scope`  — directory names under the Tidekeeper tree the rule applies to;
 //            null means every file.
 // `except` — module basenames (no extension) the rule does not apply to; this
 //            is how "exactly one file may do X" is expressed.
 // `exceptDirs` — directory names the rule does not apply to.
+// `exceptFiles` — path suffixes the rule does not apply to. Use this rather
+//            than `except` whenever two files share a basename, as
+//            Main.server.luau and Main.client.luau do.
 const RULES = [
 	{
 		id: "math.random",
@@ -121,7 +131,7 @@ const RULES = [
 	},
 	{
 		id: "services",
-		scope: PURE,
+		scope: NO_DATAMODEL,
 		pattern: /\bgame\s*[:.]\s*GetService\b|\bInstance\.new\b|\bworkspace\b|\bgame\.Workspace\b/,
 		why: "layers L0-L2 are pure. Roblox surface belongs in the adapter layer (L1) and the services layer (L3).",
 	},
@@ -156,16 +166,18 @@ const RULES = [
 		scope: null,
 		strings: true,
 		except: ["CadenceService"],
+		exceptFiles: ["Tidekeeper/Main.client.luau"],
 		pattern: /\bRunService\b/,
-		why: "there is exactly ONE RunService connection in this game and CadenceService owns it (docs/01 §5). A second connection means server time no longer belongs to a named slot with a declared budget.",
+		why: "there is exactly ONE RunService connection per side: CadenceService owns the server's, Main.client owns the client's (docs/01 §5). A second connection is frame time that no slot budgets for and no profiler attributes. The `single-connection` check below counts them, so naming a file here does not buy it two.",
 	},
 	{
 		id: "scheduler-scope",
 		scope: null,
 		exceptDirs: ["Adapters"],
 		except: ["CadenceService"],
+		exceptFiles: ["Tidekeeper/Main.client.luau"],
 		pattern: /\btask\.(?:wait|spawn|delay|defer)\s*\(|(?:^|[^.\w])wait\s*\(|(?:^|[^.\w])delay\s*\(|(?:^|[^.\w])spawn\s*\(/,
-		why: "yielding belongs to I/O (Adapters/) and to the scheduler (CadenceService). A task.spawn anywhere else is work that no slot budgets for and no profiler attributes.",
+		why: "yielding belongs to I/O (Adapters/), to the scheduler (CadenceService), and to the one startup task each boundary script runs before its tick exists. A task.spawn anywhere else is work that no slot budgets for and no profiler attributes.",
 	},
 	{
 		id: "no-free-text",
@@ -299,6 +311,11 @@ for (const file of files) {
 		for (const rule of RULES) {
 			if (rule.scope && (!layer || !rule.scope.includes(layer))) continue;
 			if (rule.except && rule.except.includes(baseName)) continue;
+			// Path-precise exemption. `except` matches a basename, and
+			// `Main.server.luau` and `Main.client.luau` share the basename
+			// "Main" -- so exempting one would silently exempt the other.
+			// `exceptFiles` names the file.
+			if (rule.exceptFiles && rule.exceptFiles.some((f) => relPath.endsWith(f))) continue;
 			if (rule.exceptDirs && rule.exceptDirs.some((d) => segments.includes(d))) continue;
 			if (!rule.pattern.test(rule.strings ? codeWithStrings : code)) continue;
 			if (allowMatch && allowMatch[1] === rule.id) {
@@ -336,6 +353,56 @@ for (const file of files) {
 
 // ---------------------------------------------------------------- the report
 
+// -------------------------------------------- single-connection (whole tree)
+//
+// The `runservice` rule above is an exemption list, and an exemption list can
+// only say WHICH files may mention RunService -- not how many connections they
+// make. The invariant doc 01 section 5 actually states is a COUNT: one
+// connection on the server, one on the client. So count them.
+//
+// This is the stricter replacement D22 requires for naming Main.client in the
+// exemption list: adding a file there no longer buys it a second connection,
+// and it does not buy CadenceService a second one either.
+// Match on the SIGNAL NAME, not on the receiver. The first version of this
+// check required the literal identifier `RunService`, so it silently missed
+// `self.runService.Heartbeat:Connect(...)` in CadenceService -- the service
+// takes RunService by injection, which is the whole reason the session
+// harness can drive the server without a DataModel. The check therefore
+// reported 1 connection in a game that has 2, which is the most dangerous
+// kind of wrong: a green check for an invariant nobody is enforcing.
+//
+// The signal names below are distinctive enough that matching any receiver
+// is safe. A false positive here would be a custom signal named `Heartbeat`,
+// which would itself be a scheduler worth counting.
+const CONNECT_RE = /[\w.:\]]\s*[.:]\s*(?:Heartbeat|Stepped|RenderStepped|PreRender|PreSimulation|PostSimulation|PreAnimation)\s*[:.]\s*Connect\s*\(/g;
+const connectionSites = [];
+for (const file of files) {
+	const relPath = rel(file);
+	const source = fs.readFileSync(file, "utf8");
+	const text = source
+		.split(/\r?\n/)
+		.map(blankCommentsOnly)
+		.join("\n");
+	let m;
+	CONNECT_RE.lastIndex = 0;
+	while ((m = CONNECT_RE.exec(text)) !== null) {
+		const line = text.slice(0, m.index).split("\n").length;
+		connectionSites.push({ file: relPath, line });
+	}
+}
+const MAX_CONNECTIONS = 2; // one server (CadenceService), one client (Main.client)
+if (connectionSites.length > MAX_CONNECTIONS) {
+	for (const site of connectionSites) {
+		violations.push({
+			file: site.file,
+			line: site.line,
+			rule: "single-connection",
+			text: "RunService connection",
+			why: `the whole game may hold at most ${MAX_CONNECTIONS} RunService connections -- one per side (doc 01 section 5). Found ${connectionSites.length}.`,
+		});
+	}
+}
+
 const byRule = {};
 for (const v of violations) byRule[v.rule] = (byRule[v.rule] || 0) + 1;
 
@@ -350,6 +417,13 @@ if (!args.quiet) {
 	}
 	const layeringCount = byRule.layering || 0;
 	console.log(`${layeringCount === 0 ? "  ok " : "FAIL "} ${"layering".padEnd(22)} ${layeringCount} violation(s)`);
+	const connCount = byRule["single-connection"] || 0;
+	console.log(
+		`${connCount === 0 ? "  ok " : "FAIL "} ${"single-connection".padEnd(22)} ${connectionSites.length}/${MAX_CONNECTIONS} RunService connection(s)`
+	);
+	for (const site of connectionSites) {
+		console.log(`         ${site.file}:${site.line}`);
+	}
 
 	if (allowances.length) {
 		console.log("\nexplicit allowances:");

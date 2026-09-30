@@ -79,21 +79,28 @@ released, 27 Drifters per simulated month were delivered twice, and a MemoryStor
 outage blocked every join. The first two were the same platform fact — returning `nil`
 from an `UpdateAsync` transform aborts the update, it does not delete the key.
 
-## Iteration 4 — it plays ⬜
+## Iteration 4 — it plays 🟡
 
 | Deliverable | Status |
 | --- | --- |
-| `Client/` layer: bootstrap + six views, all integer-driven | ⬜ |
-| `Client/Strings` — every word the player reads, keyed by template id | ⬜ |
-| The Ledger replay, re-running the real `Visit.resolve` | ⬜ |
-| ≥ 40 Ledger prose templates | ⬜ |
-| **OD16: `S.publishedAt` in PostCodec v2, with a real migration through `Shared/Version`** | ⬜ |
-| Migration test: load a v1 blob, assert it upgrades | ⬜ |
-| Localisation-coverage test: every template id and slot arity renders | ⬜ |
-| Studio MCP connection; `execute_luau` settles **OD12** | ⬜ |
-| `execute_luau` verification: buffer/base64 round trip, MemoryStore, `Tide.height` cost | ⬜ |
-| Playtest with console output + screenshots | ⬜ |
-| **R1: the Ledger in front of five real humans** | ⬜ |
+| `Client/` layer: bootstrap + six views, all integer-driven | ✅ 8 modules + 1 LocalScript |
+| `Client/Strings` — every word the player reads, keyed by template id | ✅ |
+| The Ledger replay, re-running the real `Visit.resolve` | ✅ `LedgerView` |
+| ≥ 40 Ledger prose templates | ✅ 21 ids × 3–4 variants |
+| **OD16: `S.publishedAt` in PostCodec v2, with a real migration through `Shared/Version`** | ✅ doc 05 §6.1 |
+| Migration test: load a v1 blob, assert it upgrades | ✅ committed 249-byte fixture |
+| Localisation-coverage test: every template id and slot arity renders | ✅ scenario 15 |
+| **OD12 settled** | ✅ — by **real Luau**, not MCP. doc 04 §6.1, L3.5 |
+| Studio MCP connection; `execute_luau` | ⬜ **no Studio reachable** — deferred to it5 |
+| `execute_luau` verification: buffer/base64 round trip, MemoryStore, `Tide.height` cost | ⬜ deferred to it5 |
+| Playtest with console output + screenshots | ⬜ deferred to it5 |
+| **R1: the Ledger in front of five real humans** | ⬜ deferred to it5 |
+
+The half of iteration 4 that needed a running Roblox Studio did not happen, because
+none is reachable from this environment — the same wall iterations 2 and 3 hit. What
+changed is that **one of those blocked items turned out not to need Studio at all**:
+OD12 was closed by building the standalone Luau VM (doc 10 §7.4). The remaining
+Studio-shaped work is genuinely Studio-shaped and is restated in iteration 5.
 
 ## Iteration 5 — it ships ⬜
 
@@ -133,11 +140,13 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD9 | Do MemoryStore keys count toward the memory quota? (doc 10 §6) | ~~it3~~ | **Answered (doc 10 §6.2): documented as counting for sorted maps, unstated for hash maps.** `MemoryAdapter` charges for them |
 | OD10 | Offline-play reconciliation policy (doc 04 §11) | it5 | Last-write-wins on post, union on ledger, conflict noted |
 | OD11 | Rewarded Video Ads at all? (doc 13 §4) | post-it5 | Not at launch; the tone is fragile |
-| OD12 | Is `Visit.resolve` actually inside 18 µs in Luau? | **it4** | **Still unknown after two iterations.** No Studio was reachable in it2 or it3. Measure with MCP `execute_luau`; do not estimate |
+| OD12 | Is `Visit.resolve` actually inside 18 µs in Luau? | ~~it4~~ | **Closed at L3.5 (doc 04 §6.1).** Real Luau 0.700, median **15.9 µs** against an 18 µs budget — inside, but only 1.1×. p99 26.3 µs and full catch-up 2.9 ms both have room. `--codegen` is *slower*, so the hot path is table-bound, not arithmetic-bound |
 | OD13 | Arrival scheduling is window-width dependent (see below) | ~~it3~~ | **Closed.** `CadenceService.planChunks` and `chunkForDrifter` are pure; at-most-once is asserted by session scenario 8 |
-| OD14 | Should `warmth` feed the price a Drifter will accept, not just the prose? | it4 | Currently prose-only. Settle before the client makes it visible |
+| OD14 | Should `warmth` feed the price a Drifter will accept, not just the prose? | **it5** | **Lean: no — keep it prose-only.** Now that the client exists, `warmth` reads as memory and courtesy. Wiring it into price turns it into a stat to farm and makes every visitor an optimisation problem, which is the opposite of doc 00's pillars. Decide against a playtest, not in the abstract |
 | OD15 | DataStore compresses values itself; does our base64 packing still pay? (doc 10 §6.2) | it4 | Binary packing is not compression, but base64 inflates 33 %. Sizes are far inside budget — measure, do not redesign |
-| OD16 | `S.publishedAt` is not persisted, so one-Drifter-per-epoch holds only per server (doc 10 §6.4) | it4 | Add it in schema v2 with a migration. `Shared/Version.luau` exists for this and has never been exercised |
+| OD17 | Replace the hand-rolled `luau`-CLI bundling with **Lute** (doc 10 §7.4) | it5 | Yes if reachable. Lute has a native test runner, so `pure-tests.lua` could stop being transformed Lua 5.3 under fengari and become real Luau — deleting `floatifyNumbers`, the `bit32` shim and the `%d` rewrite |
+| OD18 | Adopt **LibMP** to measure the client frame budget on real devices (doc 10 §7.2) | it5 | Yes for the Ledger replay, sampled on a fraction of sessions — Roblox warns it raises memory |
+| OD16 | `S.publishedAt` is not persisted, so one-Drifter-per-epoch holds only per server (doc 10 §6.4) | ~~it4~~ | **Closed.** Schema v2 appends it at the blob tail with a real migration and a committed v1 fixture (doc 05 §6.1). Shipped a sentinel bug en route — see **D28** |
 
 ### OD13 in full — the one non-commuting property
 
@@ -152,6 +161,23 @@ This is correct behaviour, not a bug: in the live game the exchange hands each D
 to exactly one resolve. But it makes *at-most-once delivery* a hard requirement on
 `ExchangeService`, not a nicety, and a retry that re-delivers a batch would corrupt
 history rather than duplicate it.
+
+## Validation snapshot — end of iteration 4
+
+Full command output is pasted in [`HANDOFF.md`](HANDOFF.md) §2.
+
+| Check | Real output |
+| --- | --- |
+| `tidekeeper-quality-gate.js` | **12/12** checks passed |
+| `tidekeeper-doc-gate.js` | **169/169** checks passed |
+| `check-syntax.js` | all **57** Luau files parsed |
+| `tidekeeper-determinism-scan.js` | **clean** — 57 files, **13** rules, 5 explicit allowances, **2/2** RunService connections |
+| `tidekeeper-smoke-test.js` | **888 passed, 0 failed**, 3/3 static proofs |
+| `tidekeeper-session-test.js` | **117 passed, 0 failed** — 15 scenarios against a fake DataModel |
+| `tidekeeper-luau-bench.js` | **within budget** — median 15.9 µs, p99 22.3 µs, catch-up 2.95 ms |
+| Measured platform cost | **5.64 DataStore / 5.24 MemoryStore requests per session** (unchanged) |
+| Gameplay code | **57** modules, **12 222** lines, layers L0–L5 |
+| Verification level claimed | **L3.5 — runs in a real Luau VM** (doc 09 §4). Not L4: no Roblox engine was involved |
 
 ## Validation snapshot — end of iteration 3
 

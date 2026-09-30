@@ -131,15 +131,14 @@ function LedgerService:absorbReceipts(userId, S, receipts)
 		-- turns that into which sentence the player reads. `remote` is what
 		-- makes it read as "your traveller, elsewhere" rather than "someone,
 		-- here".
-		local templateId = Ledger.selectTemplate(r.outcome, {
+		-- REMOTE range. `selectTemplate` answers "who came to my post" and
+		-- its slots mean find ids and shelf prices -- facts a receipt does
+		-- not have. Feeding a receipt through it put a coin amount where a
+		-- find id belongs and rendered "12" as the name of an object.
+		local templateId = Ledger.selectRemoteTemplate(r.outcome, {
 			warmth = r.warmth,
-			class = 0,
-			gifted = false,
-			firstFind = false,
-			sourPrice = false,
-			metWant = false,
-			gatedByStanding = false,
-			remote = true,
+			spent = r.spent,
+			noteId = r.noteId,
 		})
 		local entry = Ledger.entry(templateId, r.epoch, r.hostId, self:slotsFor(templateId, r))
 		if entry ~= nil then
@@ -157,13 +156,22 @@ end
 -- guessed. An entry that would not validate is dropped and counted, never
 -- silently reshaped.
 function LedgerService:slotsFor(templateId, r)
-	local expected = Ledger.SLOT_COUNT[templateId] or 0
-	local slots = {}
-	local pool = { r.spent, r.warmth, r.noteId or 0, r.flags or 0 }
-	for i = 1, expected do
-		slots[i] = pool[i] or 0
+	-- Explicit per template. The previous version filled slots from a
+	-- positional pool `{spent, warmth, noteId, flags}` regardless of what the
+	-- template's slots MEANT, so template 102's "tide" slot received a coin
+	-- amount. It never showed up because nothing rendered these entries until
+	-- the client existed.
+	if templateId == Ledger.T_REMOTE_SOLD then
+		return { r.spent or 0, r.warmth or 0 }
+	elseif templateId == Ledger.T_REMOTE_MISSED then
+		-- A real tide code, derived from the epoch the receipt carries --
+		-- the tide is a pure function of time, so this is not a guess.
+		return { Tide.codeForEpoch(r.epoch) }
+	elseif templateId == Ledger.T_REMOTE_LETTER then
+		return { r.noteId or 0 }
 	end
-	return slots
+	-- 101, 103, 104: one slot, the reception.
+	return { r.warmth or 0 }
 end
 
 -- Registered on the `io` slot. One page write per call, at most.

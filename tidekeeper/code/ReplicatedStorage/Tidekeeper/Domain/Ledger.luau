@@ -60,6 +60,20 @@ Ledger.T_MISSED_TIDE = 9
 Ledger.T_MISSED_TIDE_DEEPWATER = 10
 Ledger.T_NO_BERTH = 11
 Ledger.T_GIFT = 12
+-- 100..149 REMOTE receipts: your drifter, at somebody else's post. These are
+-- a separate range and not a reuse of 1..99 because a receipt carries
+-- completely different facts. A receipt knows what your traveller SPENT and
+-- how it was received; it does not know which find was on the shelf, what the
+-- host's tide was doing, or what class of boat the host saw. Rendering a
+-- receipt through a visit template therefore fills `{find:1}` with a coin
+-- amount, which is how iteration 4's localisation-coverage test found this.
+Ledger.T_REMOTE_SOLD = 100
+Ledger.T_REMOTE_EMPTY = 101
+Ledger.T_REMOTE_MISSED = 102
+Ledger.T_REMOTE_NO_BERTH = 103
+Ledger.T_REMOTE_GIFTED = 104
+Ledger.T_REMOTE_LETTER = 105
+
 Ledger.T_EPOCH_SUMMARY = 200
 Ledger.T_EPOCH_QUIET = 201
 Ledger.T_LONG_ABSENCE = 250
@@ -79,6 +93,12 @@ Ledger.SLOT_COUNT = {
 	[10] = 1,
 	[11] = 1,
 	[12] = 3,
+	[100] = 2,
+	[101] = 1,
+	[102] = 1,
+	[103] = 1,
+	[104] = 1,
+	[105] = 1,
 	[200] = 4,
 	[201] = 1,
 	[250] = 3,
@@ -131,6 +151,28 @@ function Ledger.selectTemplate(outcome, ctx)
 		return Ledger.T_SERVED_WARM
 	end
 	return Ledger.T_SERVED_PLAIN
+end
+
+-- Which sentence does a RECEIPT become? The visit ladder above answers "who
+-- came to me"; this answers "where did my traveller get to". Same outcome
+-- codes, different range, because the available facts are different.
+function Ledger.selectRemoteTemplate(outcome, ctx)
+	if ctx ~= nil and ctx.noteId ~= nil and ctx.noteId > 0 then
+		return Ledger.T_REMOTE_LETTER
+	end
+	if outcome == Ledger.MISSED_TIDE then
+		return Ledger.T_REMOTE_MISSED
+	elseif outcome == Ledger.NO_BERTH then
+		return Ledger.T_REMOTE_NO_BERTH
+	elseif outcome == Ledger.REFUSED then
+		return Ledger.T_REMOTE_EMPTY
+	elseif outcome == Ledger.SERVED or outcome == Ledger.PARTIAL then
+		if ctx ~= nil and (ctx.spent or 0) <= 0 then
+			return Ledger.T_REMOTE_GIFTED
+		end
+		return Ledger.T_REMOTE_SOLD
+	end
+	return Ledger.T_REMOTE_EMPTY
 end
 
 -- Build an entry. `slots` is a dense array of integers -- ids and quantities,

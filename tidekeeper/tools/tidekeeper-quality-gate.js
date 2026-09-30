@@ -39,7 +39,7 @@ const MAX_CAPTURE = 200000;
  * constant on purpose: a gate that infers how far along the project is will
  * eventually infer wrongly and let a missing harness through.
  */
-const CURRENT_ITERATION = 3;
+const CURRENT_ITERATION = 4;
 
 function die(message) {
 	console.error(`tidekeeper-quality-gate: ${message}`);
@@ -177,6 +177,11 @@ run("determinism-scan", "tidekeeper-determinism-scan.js", ["--src", rel(args.src
 // 4. Harnesses. Pending until their iteration; required once source exists.
 run("smoke-test", "tidekeeper-smoke-test.js", [], { requiredFrom: 2 });
 run("session-test", "tidekeeper-session-test.js", [], { requiredFrom: 3 });
+// Real-Luau benchmark. Required from iteration 4, when OD12 was settled.
+// It exits 0 and prints SKIPPED when no `luau` binary is present, so the gate
+// stays green on a machine that has not built one -- but it says so loudly
+// rather than vanishing.
+run("luau-bench", "tidekeeper-luau-bench.js", [], { requiredFrom: 4 });
 
 // 5. Whitespace hygiene in the working tree.
 (function diffCheck() {

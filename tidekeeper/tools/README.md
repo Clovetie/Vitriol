@@ -13,7 +13,7 @@ npm --prefix tidekeeper/tools install
 node tidekeeper/tools/tidekeeper-quality-gate.js
 ```
 
-## What is here now (end of iteration 3)
+## What is here now (end of iteration 4)
 
 | Tool | Origin | Purpose |
 | --- | --- | --- |
@@ -236,3 +236,61 @@ and assert with `ok` / `eq` / `le` / `ge`. Numbers the documentation quotes go i
 `REPORT` global, which the runner prints and can write to JSON — a documented
 performance claim that no test measures is a claim that is already wrong and nobody has
 noticed.
+
+
+---
+
+## 7. `tidekeeper-luau-bench.js` — shipped in iteration 4
+
+Runs the pure modules in a **real Luau VM** instead of fengari, and checks
+`Visit.resolve` against the doc 04 §6 budget.
+
+```bash
+node tidekeeper/tools/tidekeeper-luau-bench.js          # human output
+node tidekeeper/tools/tidekeeper-luau-bench.js --json report.json
+node tidekeeper/tools/tidekeeper-luau-bench.js --codegen  # native codegen (slower here)
+TIDEKEEPER_LUAU=/path/to/luau node tidekeeper/tools/tidekeeper-luau-bench.js
+```
+
+Needs a `luau` binary — see [`bin/README.md`](bin/README.md), four minutes from source.
+With no binary it prints `SKIPPED` plus build instructions and **exits 0**, so the gate
+stays green on a machine that has not built one while still saying the number is
+missing. It exits 1 on over-budget, on a fixture `MISMATCH` against the fengari suite,
+or on a missing `RESULT` line.
+
+### Why this exists, and why §5b stops being necessary once OD17 lands
+
+§5b lists what the fengari harness has to fake to run Lua 5.3 against Luau source:
+`floatifyNumbers`, a `bit32` shim, a `%d`→`%.0f` rewrite. Every one of those is a place
+where **the harness can disagree with the shipping game**, and one of them once produced
+841 meaningless passes.
+
+The Luau path applies exactly one transform — the Roblox `require` rewrite — because
+the VM *is* the language. The bench uses it today for timings only; **OD17** is to move
+the correctness suite there too, which deletes the shims outright.
+
+`tools/lib/luau-native.js` is the whole mechanism: `findLuau`, `rewriteRequires`,
+`buildBundle`, `runBundle`. It is deliberately small.
+
+### What a number from here is worth
+
+**L3.5** (doc 09 §4). The same language runtime Roblox embeds, at a pinned version —
+but no DataModel, different GC tuning and build flags, and CI hardware. A fair order of
+magnitude and a real Luau number; **not** a number from Roblox hardware. The report says
+so every time it prints.
+
+---
+
+## 8. `fixture-blobs/` — shipped in iteration 4
+
+Genuine encoded blobs from older schema versions, committed as base64.
+
+**Three rules, and they are the entire point (D24):**
+
+1. **Never edit a fixture.** Not to fix a test, not to add a field.
+2. **Never regenerate one.** A regenerated fixture tests the current code against
+   itself and proves nothing. The value is that `post-v1.b64` was written by code that
+   no longer exists.
+3. **Add one per `SCHEMA_VERSION` bump**, before the bump lands.
+
+If a fixture stops decoding, the migration is wrong. That is the test working.

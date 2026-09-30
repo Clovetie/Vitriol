@@ -29,7 +29,19 @@
 --   u8   ringCount + n x u48       owner*8192 + (epoch mod 8192)
 --   u8   claimCount + n x (u16 id, u16 qty, u64 fromOwner, i32 epoch)
 --   u32  stats[6]
+--   u32  publishedAt               v2 ONLY. (tide epoch of the last published
+--                                  Drifter) + 1, so 0 means never. Epoch 0 is
+--                                  a real epoch. See OD16 / section 6.
 --   u32  checksum                  FNV-1a over everything before it
+--
+-- VERSION HISTORY
+--   v1  the original layout, shipped in iteration 2.
+--   v2  appends `publishedAt` (iteration 4). A v1 blob is migrated by leaving
+--       it absent, which reads as "this post has never published", and the very
+--       worst that can happen is one extra Drifter in the epoch the player
+--       first logs in after the update. Appending at the tail rather than
+--       inserting in the middle is deliberate: it keeps the v1 reader and the
+--       v2 reader byte-identical up to the new field.
 --
 -- Two rules the format obeys forever:
 --   * the version byte is first, and a blob NEWER than the server is refused
@@ -155,6 +167,12 @@ function PostCodec.encode(S)
 		w:u32(stats[PostCodec.STAT_ORDER[i]])
 	end
 
+	-- v2 tail. Stored as epoch + 1 so that the wire value 0 means "never
+	-- published" and cannot be confused with epoch 0, which is a real epoch
+	-- (the first 6.2 hours after TideConfig.EPOCH). A sentinel that collides
+	-- with a legal value is a bug that only shows up on launch day.
+	w:u32((S.publishedAt ~= nil) and (S.publishedAt + 1) or 0)
+
 	w:u32(Hash.bytes(w.bytes, 1, w.n))
 
 	if w.n > GameConfig.MAX_POST_BLOB_BYTES then
@@ -263,6 +281,18 @@ function PostCodec.decode(bytes)
 			S.stats[PostCodec.STAT_ORDER[i]] = r:u32()
 		end
 
+		-- The ONLY version-conditional read in the format. A v1 blob simply
+		-- stops here, and `Version.migrate` below supplies the default. The
+		-- trailing `r:pos()` check then proves we consumed exactly the bytes
+		-- this version defines -- so a v1 blob carrying v2 bytes, or the
+		-- reverse, is CORRUPT rather than silently misparsed.
+		if version >= 2 then
+			local rawPublished = r:u32()
+			if rawPublished > 0 then
+				S.publishedAt = rawPublished - 1
+			end
+		end
+
 		if r:pos() ~= body + 1 then
 			error(string.format("consumed %d bytes, expected %d", r:pos() - 1, body), 0)
 		end
@@ -272,8 +302,40 @@ function PostCodec.decode(bytes)
 	if not ok then
 		return nil, "CORRUPT", tostring(result)
 	end
-	return result, nil
+
+	-- Walk the decoded TABLE up to the current schema. The bytes were read
+	-- with the layout their own version declares; migration is a pure
+	-- table-to-table step on top of that, which is why Shared/Version knows
+	-- nothing about byte offsets.
+	local migrated, reason, why = Version.migrate(result, version)
+	if migrated == nil then
+		return nil, reason, why
+	end
+	return migrated, nil
 end
+
+-- Register this format's migrations. Called once at module load, and exposed
+-- so the harness can restore them after Version._reset(). Idempotent: the
+-- underlying Version.register refuses a duplicate, so the guard is here
+-- rather than an assert that would make a second call fatal.
+function PostCodec.registerMigrations()
+	if not Version.hasMigration(1) then
+		-- v1 -> v2: the post has no recorded publication. `publishedAt`
+		-- stays absent, which is what "never" is, and
+		-- ExchangeService:publish treats "never" as publishable. The worst
+		-- case is one extra Drifter in the epoch a player first logs in
+		-- after the update, which is a strictly better failure than
+		-- suppressing a real one.
+		Version.register(1, 2, function(d)
+			d.publishedAt = nil
+			d.v = 2
+			return d
+		end)
+	end
+	return true
+end
+
+PostCodec.registerMigrations()
 
 -- Convenience for the adapter layer: blob -> base64 string and back.
 function PostCodec.encodeToString(S)

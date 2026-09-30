@@ -153,6 +153,35 @@ reconstructed on the client from `templateId` + slots, so the *text* is never st
 can be re-translated or rewritten in a later patch without a migration. This is a
 deliberate localisation and live-ops affordance.
 
+### 6.1 Schema v2 — the first real migration (iteration 4)
+
+`SCHEMA_VERSION` went 1 → 2 to persist `publishedAt`. The change is deliberately the
+*cheapest possible* shape, because the point of doing it in iteration 4 rather than at
+launch was to prove the migration machinery on a field nobody would miss:
+
+- **Append at the tail, never insert.** v2 is byte-for-byte v1 followed by one `u32`
+  and then the checksum. A v1 reader that ignored the tail would still parse the head.
+- **Decode order is fixed:** version byte → `Version.classify` → checksum → parse (the
+  tail read is conditional on the version) → `Version.migrate`. Migration runs *after*
+  the `pcall`, so a malformed blob is rejected before any migration code sees it.
+- **`registerMigrations()` is idempotent**, so requiring the codec twice is safe.
+- **A genuine v1 blob is committed as a fixture** (`tools/fixture-blobs/post-v1.b64`,
+  249 bytes, base64). **D24: fixtures are never edited and never regenerated.** A
+  regenerated fixture tests the current code against itself and proves nothing; the
+  whole value is that those bytes were written by code that no longer exists.
+
+**The bug this shipped with, and what it cost.** `publishedAt` was first written as
+`0 = never published`. `Tide.epoch(TideConfig.EPOCH)` is **0** — epoch 0 is a real
+epoch, the first one — so a post created in the first 6.2 hours of the game read as
+"already published at epoch 0" and `ExchangeService:publish` refused it forever. Six
+previously-green session assertions went red at once and the cause looked like the
+unrelated client work landing in the same iteration.
+
+**D28: a sentinel must be impossible to confuse with a legal value.** The fix is that
+`publishedAt` is **absent** in memory for "never", and the codec stores **`epoch + 1`**
+on the wire so that wire-0 is unambiguous. Check a sentinel against the *range* of the
+field, not against what looks empty.
+
 ## 7. Session locking
 
 Roblox can run two servers for one player briefly (teleport, rejoin race). Without a

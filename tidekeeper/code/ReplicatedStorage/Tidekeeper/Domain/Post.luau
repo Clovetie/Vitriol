@@ -123,6 +123,18 @@ function Post.new(postId, owner, salt, now)
 		ring = {},
 		claims = {},
 		stats = { served = 0, refused = 0, partial = 0, missed = 0, noBerth = 0, coinEarned = 0 },
+		-- Schema v2 (OD16). The tide epoch of the most recent Drifter this
+		-- post published. Persisting it is what makes
+		-- one-Drifter-per-post-per-epoch hold ACROSS SERVERS: before v2 the
+		-- rule lived in a server-local table, so a player who hopped servers
+		-- inside one 6.2-hour epoch could publish twice and collide their own
+		-- id.
+		--
+		-- ABSENT means "never published". It is deliberately NOT 0, because
+		-- epoch 0 is a real epoch -- the first 6.2 hours after TideConfig.EPOCH
+		-- -- and a sentinel that collides with a real value is a bug waiting
+		-- for a launch day. The codec maps nil <-> the wire value 0 by storing
+		-- epoch + 1, so the persisted form has an unambiguous sentinel too.
 	}
 end
 

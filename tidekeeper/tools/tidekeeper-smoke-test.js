@@ -166,7 +166,14 @@ if (argv.includes("--debug-transform")) {
 
 const bundle = buildBundle({
 	modules: transformed,
-	globals: { BENCH_ENABLED: noBench ? "false" : "true" },
+	globals: {
+		BENCH_ENABLED: noBench ? "false" : "true",
+		// Real captured v1 save (tools/fixture-blobs/). Passed in rather than
+		// read from Lua because the harness has no filesystem.
+		FIXTURE_POST_V1: JSON.stringify(
+			fs.readFileSync(path.join(__dirname, "fixture-blobs", "post-v1.b64"), "utf8").trim()
+		),
+	},
 	tests: testSource,
 });
 

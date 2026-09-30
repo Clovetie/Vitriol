@@ -16,3 +16,7 @@ evaluation-report.json
 # TIDEKEEPER tooling (see tidekeeper/tools/README.md)
 tidekeeper/tools/node_modules/
 tidekeeper/tools/reports/
+# The Luau VM used by tidekeeper-luau-bench.js. ~19 MB, platform-specific,
+# and reproducible in four minutes from source -- see tidekeeper/tools/bin/.
+tidekeeper/tools/bin/luau
+tidekeeper/tools/bin/luau.exe

@@ -222,49 +222,108 @@ Update ROADMAP.md, rewrite HANDOFF.md, write the iteration 5 prompt.
 
 ## Prompt — Iteration 5: it ships
 
+> **Rewritten at the end of iteration 4.** The original version of this prompt assumed
+> iteration 4 had reached Studio and could start iteration 5 on content. It did not —
+> no Roblox Studio is reachable from this environment (three iterations running). So
+> iteration 5 inherits both the engine work and the content work, and the first job is
+> to find out which half is actually possible.
+
 ```
-You are iteration 5 of TIDEKEEPER (`tidekeeper/`). It plays. Your job is to make it good
-and get it ready to publish.
+You are iteration 5 of TIDEKEEPER (`tidekeeper/`). It plays in simulation: 57 modules,
+1005 assertions, 0 failures, 12/12 quality gate. Nothing has ever run inside Roblox.
 
 BRANCH: your session's fixed branch only.
-SEPARATION: never touch the VITRIOL tree.
+SEPARATION: never touch the VITRIOL tree (/code, /docs, /tools and the three root .md
+files belong to the other game).
 
-READ: tidekeeper/HANDOFF.md, then docs 06 (economy), 07 (content), 09 §2 (asset
-pipeline), 11 (human-authored), 13 (compliance + pre-launch checklist).
+READ FIRST, IN THIS ORDER:
+  tidekeeper/HANDOFF.md            -- especially section 3 (what is NOT verified) and
+                                      section 5 (D23-D30, and three real bugs)
+  tidekeeper/docs/10-RESEARCH-NOTES.md section 7
+  tidekeeper/ROADMAP.md            -- open decisions OD1-OD18
 
-DELIVER:
-  1. CONTENT
-     - 200 finds via the pipeline in doc 09 §2, with the human curation gate. Expect to
-       reject ~35%. Record every generated asset's source and licence in
-       tidekeeper/docs/ASSETS.md.
-     - 180 Ledger prose templates, 120 fixed-phrase letters, 64 Seed Drifter characters,
-       90 decor pieces, 4 post tier structures, 40 badges.
-     - Contingency: if Scene Generator has not shipped, build the island by hand per
-       doc 11 §2. Do not block on an unreleased tool.
-  2. ECONOMY TUNING
-     - Run the 30-day simulated lifetime at 8 different play patterns (daily 5 min,
-       daily 20 min, twice-weekly, lapsed-and-returned, whale, non-payer, tier-rusher,
-       pure-idler) and tune the curves in doc 06 §7 against the result.
-     - Prove the pacing targets or change them, with the reasoning written down.
-  3. THE COLD-START CASE
-     - Explicitly playtest at < 200 DAU with the echo/seed mix (doc 03 §8). This is R4.
-  4. DISCOVERY (R8)
-     - Choose the shipping title against live Roblox search data (doc 00 §10).
-     - Produce the thumbnail from the Chart screen. Produce 3 Moments-format clips of
-       the Ledger replay.
-  5. LAUNCH
-     - Complete every item in doc 13 §6. Do not tick a box you did not verify.
-     - Telemetry for D1, D7, first-30-seconds churn, session length, and the
-       live/echo/seed Drifter mix.
-     - Soft-launch region and rollback plan.
+STEP 0 -- TRIAGE, BEFORE YOU PLAN ANYTHING.
+Answer these three, with evidence, and write the answers into the handoff:
+  a) Is a Roblox Studio process reachable? Try an MCP server (doc 10 section 7.3 lists
+     several, 14 to 68 tools). If yes, L4 and L5 are both reachable this session and
+     they outrank everything else below.
+  b) Can you reach github.com release assets? If yes, install Lute (OD17). If not,
+     build the luau CLI from source -- four minutes, tidekeeper/tools/bin/README.md.
+  c) Re-check ExperienceNotificationService. It has been "coming" since RDC 2026 and
+     has been checked and found absent in iterations 2, 3 and 4. Check again, record
+     the date and the answer, and change nothing if the answer is still no.
+Do not plan the iteration until step 0 is done. Iterations 2, 3 and 4 each planned
+around Studio being available and each had to re-plan.
 
-Claim L6. L7 requires live telemetry and belongs to iteration 6+.
+THEN, IF STUDIO IS REACHABLE (this is the whole ballgame):
+  1. Run the pure core under `execute_luau` and diff it against the L3.5 numbers in
+     doc 04 section 6.1. Median headroom is only 1.1x, so a slower engine result is a
+     real finding and must be reported, not averaged away.
+  2. Verify on the engine, not in theory: buffer/base64 round trip, a real DataStore
+     write and read of the v1 fixture blob, a real MemoryStore queue, and the cost of
+     Tide.height.
+  3. RUN THE CLIENT. Main.client.luau builds real UI and has never executed. It is the
+     largest untested surface in the project. Expect it to be broken. Playtest, capture
+     console output and screenshots, and fix.
+  4. Claim L4, then L5, with transcripts pasted in.
 
-If you cannot finish, prioritise in this order: cold-start playtest > economy tuning >
-compliance checklist > content volume > polish. Ship 120 well-curated finds rather than
-200 mediocre ones.
+IF STUDIO IS NOT REACHABLE, do not fake it and do not spend the iteration trying.
+Say so in one line and do this instead:
+  1. OD17 -- move pure-tests.lua onto a real Luau runner. The fengari harness needs
+     floatifyNumbers, a bit32 shim and a %d->%.0f rewrite to work at all
+     (tools/README.md section 5b), and every one of those is a place the harness can
+     disagree with the shipping game. Deleting them is worth more than new features.
+  2. Build a headless render test: drive ClientBootstrap through a whole session and
+     assert on the view-model tables. The views are pure (D25) so this needs no engine.
+  3. Content, per the list below.
+
+CONTENT (do this in either branch of the above):
+  - 200 finds via the pipeline in doc 09 section 2, with the human curation gate.
+    Expect to reject about 35%. Record every generated asset's source and licence in
+    tidekeeper/docs/ASSETS.md.
+  - 180 Ledger prose templates, 120 fixed-phrase letters, 64 Seed Drifter characters,
+    90 decor pieces, 4 post tier structures, 40 badges.
+  - Every new template MUST be added to scenario 15's SAMPLE table in the same commit.
+    The test fails on an id with no prose AND on prose with no id, in both directions.
+  - Directives do not nest: `{plural:1|one boat|{1} boats}` is a bug, not a feature
+    (doc 08 section 8.1).
+  - Contingency: if Scene Generator has not shipped, build the island by hand per
+    doc 11 section 2. Do not block on an unreleased tool.
+
+ECONOMY TUNING:
+  - Run the 30-day simulated lifetime at 8 play patterns (daily 5 min, daily 20 min,
+    twice-weekly, lapsed-and-returned, whale, non-payer, tier-rusher, pure-idler) and
+    tune the curves in doc 06 section 7 against the result.
+  - Settle OD14. The lean is NO -- keep warmth prose-only. Wiring it into price makes
+    warmth a stat to farm and turns every visitor into an optimisation problem, which
+    inverts the pillars in doc 00. Overturn it only with playtest evidence.
+
+COLD START (R4) and DISCOVERY (R8): unchanged -- playtest below 200 DAU with the
+echo/seed mix (doc 03 section 8); choose the shipping title against live Roblox search
+data; thumbnail from the Chart screen; 3 Moments-format clips of the Ledger replay.
+
+LAUNCH: complete every item in doc 13 section 6. Do not tick a box you did not verify.
+Telemetry for D1, D7, first-30-seconds churn, session length, and the live/echo/seed
+mix. Soft-launch region and rollback plan.
+
+WHAT IRRITATES THE REVIEWER, LEARNED THE HARD WAY:
+  - A green check that enforces nothing. Iteration 4's connection counter matched the
+    literal identifier `RunService` and so never saw `self.runService.Heartbeat:Connect`
+    -- it reported 1/2 for a game with 2. When you write a check, first confirm it
+    CATCHES the thing that already exists.
+  - Server code producing data nothing reads. slotsFor filled Ledger slots from a
+    positional pool for two iterations and rendered a coin amount as an object's name.
+    Nothing caught it until a client existed.
+  - A sentinel inside the legal range of its field (D28). publishedAt = 0 meant "never"
+    in a game where epoch 0 is real, and it broke ALL publishing.
+
+Claim the highest level you have EVIDENCE for and no higher: L3.5 if nothing changed,
+L4 with an execute_luau transcript, L5 with a playtest, L6 only if a human played it.
+A partial honest result beats a complete claimed one.
 
 Update ROADMAP.md, rewrite HANDOFF.md, write the iteration 6 prompt.
+Run: node tidekeeper/tools/tidekeeper-quality-gate.js -- it must be green, and it now
+includes the real-Luau benchmark. Paste the real output.
 ```
 
 ---

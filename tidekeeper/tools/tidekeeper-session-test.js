@@ -109,6 +109,19 @@ const MODULES = {
 	DebugHandler: `${SCRIPTS}/RemoteHandlers/DebugHandler.luau`,
 	Profiler: `${SCRIPTS}/Diagnostics/Profiler.luau`,
 	BudgetMeter: `${SCRIPTS}/Diagnostics/BudgetMeter.luau`,
+	// L5 Client (iteration 4). Loaded so the localisation table and the
+	// presenters are exercised by the same suite that drives the server --
+	// the whole point of scenario 15 is that the ids the DOMAIN emits and the
+	// prose the CLIENT holds are checked against each other, and they can
+	// only be checked together.
+	Strings: `${REPLICATED}/Client/Strings.luau`,
+	Format: `${REPLICATED}/Client/Format.luau`,
+	LedgerView: `${REPLICATED}/Client/LedgerView.luau`,
+	TideView: `${REPLICATED}/Client/TideView.luau`,
+	PostView: `${REPLICATED}/Client/PostView.luau`,
+	OrdersView: `${REPLICATED}/Client/OrdersView.luau`,
+	DispatchView: `${REPLICATED}/Client/DispatchView.luau`,
+	ClientBootstrap: `${REPLICATED}/Client/ClientBootstrap.luau`,
 	// The fake platform is required like any other module.
 	FakePlatform: "tools/tests/fake-platform.lua",
 };

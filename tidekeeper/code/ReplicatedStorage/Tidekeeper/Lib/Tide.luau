@@ -231,6 +231,19 @@ end
 -- The state a whole tide epoch is characterised by: sampled at its midpoint.
 -- The resolver uses this so that "the tide during epoch e" is a single stable
 -- value rather than something that depends on when a visit happened to land.
+-- Wire codes for the five states. These are persisted inside Ledger slots,
+-- so they are a FORMAT: never renumber them. `Visit.TIDE_CODE` is the same
+-- table and exists because the resolver should not have to require Lib/Tide
+-- just to name a tide; both are asserted equal by the smoke suite.
+Tide.CODE = { LOW = 1, EBB = 2, FLOOD = 3, SLACK = 4, HIGH = 5 }
+
+-- The tide is a pure function of time, so the state of a past epoch is
+-- recoverable exactly rather than something that has to be stored alongside
+-- the entry that refers to it.
+function Tide.codeForEpoch(n)
+	return Tide.CODE[Tide.stateForEpoch(n)] or 0
+end
+
 function Tide.stateForEpoch(n)
 	return Tide.state(Tide.epochStart(n) + EPOCH_SECONDS * 0.5)
 end

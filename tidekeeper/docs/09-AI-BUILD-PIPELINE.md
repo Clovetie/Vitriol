@@ -135,7 +135,8 @@ What each iteration is allowed to claim.
 | --- | --- | --- |
 | L1 — parses | `check-syntax.js` | it2 |
 | L2 — executes correctly | Lua VM harness assertions | it2 |
-| L3 — integrates | session harness with faked adapters | it3 |
+| L3 — integrates | session harness against a fake DataModel | it3 |
+| **L3.5 — runs in real Luau** | the `luau` CLI: same language runtime, not the engine | **it4** |
 | L4 — runs in the engine | Studio MCP `execute_luau` transcript | it4 |
 | L5 — plays | Studio playtest, screenshots, console clean | it4 |
 | L6 — feels right | a human played it | it5 |
@@ -143,3 +144,26 @@ What each iteration is allowed to claim.
 
 **Never claim a level you do not have evidence for.** The handoff template in
 [`12-ITERATION-PROMPTS.md`](12-ITERATION-PROMPTS.md) requires the level to be stated.
+
+### Why L3.5 was added in iteration 4
+
+Iterations 2 and 3 both deferred the `Visit.resolve` performance budget (OD12)
+because the only two options looked like "fengari, which is 30–100× slow and proves
+nothing" and "Roblox Studio, which is not reachable from this environment". That was a
+false dichotomy: **Luau ships as a standalone binary**, maintained by the Luau team at
+Roblox, and it is the same language runtime the engine embeds. Building it takes four
+minutes ([`../tools/bin/README.md`](../tools/bin/README.md)).
+
+The gap between L3.5 and L4 is real and it is not hand-waving:
+
+| Same as Roblox | Different from Roblox |
+| --- | --- |
+| the VM, the bytecode, the optimiser | no DataModel, no engine work competing for the frame |
+| one number type, real `bit32`, real `buffer` | different GC tuning and build flags |
+| `table.create`, `string.format`, the string interner | `--codegen` may not match what a server enables |
+| — | the hardware is whatever the CI box is |
+
+So L3.5 answers "is this algorithm the right order of magnitude" with a real number, and
+leaves "does it hit the budget on Roblox's hardware" to L4. Iteration 4 used it to close
+OD12 as *within budget with thin headroom*, which is a far more useful answer than a
+third iteration of "unknown".

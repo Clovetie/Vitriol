@@ -191,6 +191,40 @@ takes ~2 s anyway. The player never sees a hitch, and the server never blows a f
 **zero allocations** in the steady path (use `Tables` pooling for the scratch arrays).
 The harness must measure and report this, not assert it by eye.
 
+### 6.1 Measured — iteration 4, real Luau (OD12 closed)
+
+Iterations 2 and 3 deferred this because fengari is 30–100× slower than Luau and a
+number from it means nothing. Iteration 4 built the **standalone Luau 0.700 CLI** from
+source and ran the same fixtures in the real VM
+(`tools/tidekeeper-luau-bench.js`, `tools/bench/resolve-bench.luau`).
+
+| Measure | Budget | Measured | Headroom |
+| --- | --- | --- | --- |
+| `Visit.resolve` median | 18 µs | **15.9 µs** | 1.1× — **thin** |
+| `Visit.resolve` p99 | 50 µs | **26.3 µs** | 1.9× |
+| Worst-case catch-up, 27 epochs / 216 arrivals | 12 ms | **2.9 ms** | 4.1× |
+
+Xeon 2.60 GHz, `-O2`, no `--codegen`. This is **L3.5** (doc 09 §4): the real Luau
+runtime, not the Roblox engine.
+
+Three things worth keeping:
+
+**The chunking decision is vindicated, but for the reason above rather than the one in
+the paragraph before it.** A full catch-up is 2.9 ms, not 11.7 ms, so it would in fact
+fit in one frame on this hardware. It is still chunked, because 4.1× headroom on a
+desktop Xeon is not 4.1× headroom on whatever a Roblox server actually is, and a hitch
+in catch-up lands on the one player who has been away longest.
+
+**Median headroom of 1.1× is the honest number and it is thin.** The p99 and the
+aggregate both have room; the median does not. Anything added to the per-visit path —
+another Orders opcode class, a second Almanac lookup — should be measured, not assumed.
+
+**`--codegen` made it *slower*** (16.3 µs median, 29.5 µs p99). Native codegen helps
+arithmetic-bound code; this loop is bound by table indexing and memory traffic, and the
+extra code size costs more than the compilation saves. That is a useful fact about the
+shape of the hot path: **to make `Visit.resolve` faster, reduce table lookups, not
+arithmetic.**
+
 ## 7. The Ledger as replay, not log
 
 Because resolution is deterministic and the entries carry their seeds, the client can

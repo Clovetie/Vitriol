@@ -573,6 +573,235 @@ do -- 14. BindToClose saves everyone
 	eq("and evicted them all", app.posts:residentCount(), 0)
 end
 
+-- =========================================================================
+do -- 15. CLIENT-SIDE LOCALISATION COVERAGE
+	-- =====================================================================
+	--
+	-- The one test that closes the loop between the two halves of the game.
+	--
+	-- The server emits `(templateId, epoch, actorId, slots[])`. The client
+	-- holds the prose. Those two lists live in different files, in different
+	-- layers, edited at different times by different people -- and NOTHING
+	-- else in the build checks that they agree. A template id with no prose
+	-- does not crash, does not warn, and does not fail any other check: it
+	-- renders a bland fallback line into a real player's history, forever,
+	-- and the first person to notice is the player.
+	--
+	-- So: run a real month on a real server, take the entries it ACTUALLY
+	-- produced, and render every one of them through the real client.
+
+	local Strings = TidekeeperRequire("Strings")
+	local Format = TidekeeperRequire("Format")
+	local LedgerView = TidekeeperRequire("LedgerView")
+	local DispatchView = TidekeeperRequire("DispatchView")
+	local Ledger = TidekeeperRequire("Ledger")
+
+	-- ---------------------------------------------- static coverage first
+	-- Every template the DOMAIN declares must have prose. This does not need
+	-- a server; it is a straight set comparison, and it is the check that
+	-- catches a new template id the moment it is added.
+	local missingProse = {}
+	local totalVariants = 0
+	for templateId in pairs(Ledger.SLOT_COUNT) do
+		local variants = Strings.LEDGER[templateId]
+		if variants == nil or #variants == 0 then
+			missingProse[#missingProse + 1] = templateId
+		else
+			totalVariants = totalVariants + #variants
+		end
+	end
+	eq("every Ledger template id has prose", #missingProse, 0)
+	ge("doc 04 section 4.1 wants >= 40 phrasings by iteration 4", totalVariants, 40)
+
+	-- ...and no prose for a template the domain does not declare. An orphan
+	-- string is dead weight that a translator will nonetheless translate.
+	local orphans = 0
+	for templateId in pairs(Strings.LEDGER) do
+		if Ledger.SLOT_COUNT[templateId] == nil then
+			orphans = orphans + 1
+		end
+	end
+	eq("no prose exists for a template the domain cannot emit", orphans, 0)
+
+	-- ------------------------------------------------- then the real thing
+	local app, env = newServer({ seed = 77 })
+	local userId = 5150
+	env:addPlayer(userId)
+	settle(app, env, 200)
+
+	-- Drive a month so the resolver produces real entries of many kinds.
+	-- `residentOf` is the server's own view of a post's Ledger, which is
+	-- exactly what RE_LedgerBatch replicates, so this reads the real thing
+	-- rather than a test-only accessor.
+	local collected = {}
+	local seenKey = {}
+	for day = 1, 30 do
+		env:advance(86400)
+		settle(app, env, 40)
+		local S = app.posts:get(userId)
+		if S ~= nil then
+			local resident = app.ledger:residentOf(S)
+			if resident ~= nil then
+				for i = 1, #resident do
+					local e = resident[i]
+					local key = tostring(e.templateId) .. ":" .. tostring(e.epoch) .. ":" .. tostring(e.actorId)
+					if not seenKey[key] then
+						seenKey[key] = true
+						collected[#collected + 1] = e
+					end
+				end
+			end
+		end
+	end
+
+	local realEntries = #collected
+
+	-- A month of one post does not necessarily emit all 21 templates -- a
+	-- quiet player may never trigger NO_BERTH, and no single post produces
+	-- both the visit range and the remote range. Relying on the simulation to
+	-- happen to cover the content is exactly how a template goes unrendered
+	-- until a player finds it, so the real entries are SUPPLEMENTED with one
+	-- synthetic entry per template per variant.
+	--
+	-- The synthetic slots are semantically valid, not arbitrary integers. An
+	-- earlier version filled them with `(k + variant) % 7 + 1` and produced
+	-- tide code 6, which does not exist -- the check then failed for a reason
+	-- that had nothing to do with the game. A fixture that is wrong in a
+	-- different way from the code is not a test, it is a second bug.
+	local SAMPLE = {
+		-- templateId = { slot values, in the order the domain writes them }
+		[1] = { 7, 18, 1 },
+		[2] = { 3, 12, 1 },
+		[3] = { 9, 110, 2, 80 },
+		[4] = { 12, 240, 180 },
+		[5] = { 1, 4, 1 },
+		[6] = { 19, 80, 2, 3 },
+		[7] = { 2, 4000 },
+		[8] = { 1, 2 },
+		[9] = { 5, 3 },
+		[10] = { 1 },
+		[11] = { 4 },
+		[12] = { 6, 90, 12 },
+		[100] = { 42, 60 },
+		[101] = { -10 },
+		[102] = { 2 },
+		[103] = { 0 },
+		[104] = { 75 },
+		[105] = { 8 },
+		[200] = { 4, 31, 3, 1 },
+		[201] = { 5 },
+		[250] = { 19, 40, 3 },
+	}
+
+	local uncovered = {}
+	for templateId, arity in pairs(Ledger.SLOT_COUNT) do
+		local sample = SAMPLE[templateId]
+		if sample == nil then
+			uncovered[#uncovered + 1] = templateId
+		else
+			eq("sample slots for template " .. templateId .. " match its arity", #sample, arity)
+			for variant = 0, 3 do
+				local entry = Ledger.entry(templateId, 100 + variant, 880000 + variant * 13, sample)
+				if entry ~= nil then
+					collected[#collected + 1] = entry
+				end
+			end
+		end
+	end
+	eq("every template has a coverage sample", #uncovered, 0)
+	ge("the coverage run produced entries to render", #collected, 80)
+	REPORT.realLedgerEntries = realEntries
+
+	Format.resetMisses()
+	local model = LedgerView.build(collected, { [880000] = "Marren" }, { withSilhouettes = true })
+	eq("every collected entry rendered", model.count, #collected)
+
+	-- THE assertion: nothing fell back.
+	eq("no template rendered a fallback", Format.misses.template, 0)
+	eq("no find name was missing", Format.misses.find, 0)
+	eq("no class name was missing", Format.misses.class, 0)
+	eq("no tide name was missing", Format.misses.tide, 0)
+	eq("no slot was missing or unknown", Format.misses.arity, 0)
+	eq("total render misses", Format.totalMisses(), 0)
+
+	-- No unexpanded directive reached the output, and nothing is blank.
+	local braces, blanks, shortest = 0, 0, 9999
+	for g = 1, #model.groups do
+		local lines = model.groups[g].lines
+		for i = 1, #lines do
+			local text = lines[i].text
+			if string.find(text, "{", 1, true) or string.find(text, "}", 1, true) then
+				braces = braces + 1
+			end
+			if text == nil or #text == 0 then
+				blanks = blanks + 1
+			elseif #text < shortest then
+				shortest = #text
+			end
+		end
+	end
+	eq("no rendered line contains an unexpanded directive", braces, 0)
+	eq("no rendered line is empty", blanks, 0)
+	ge("even the shortest line is a sentence", shortest, 12)
+
+	-- Every group carries a real tide silhouette from the real tide curve.
+	local badSilhouettes = 0
+	for g = 1, #model.groups do
+		local sil = model.groups[g].silhouette
+		if sil == nil or #sil ~= LedgerView.SILHOUETTE_SAMPLES then
+			badSilhouettes = badSilhouettes + 1
+		end
+	end
+	eq("every epoch group has a tide silhouette", badSilhouettes, 0)
+
+	-- DETERMINISM. The same entry must read the same way every time, or the
+	-- replay is lying about itself. Render the whole thing twice and compare.
+	local again = LedgerView.build(collected, { [880000] = "Marren" }, {})
+	local drift = 0
+	for g = 1, #model.groups do
+		local a = model.groups[g].lines
+		local b = again.groups[g].lines
+		for i = 1, #a do
+			if a[i].text ~= b[i].text then
+				drift = drift + 1
+			end
+		end
+	end
+	eq("the Ledger renders identically on a second read", drift, 0)
+
+	-- The highlight the first-60-seconds flow collapses to must exist.
+	local highlight = LedgerView.highlight(model)
+	ok("the Ledger produces a highlight line", highlight ~= nil)
+
+	-- UI labels: every one expands, and none leaks a directive.
+	local labelBraces, labelCount = 0, 0
+	for key in pairs(Strings.UI) do
+		local text = Format.label(key, { 1, 2 })
+		labelCount = labelCount + 1
+		if string.find(text, "{", 1, true) then
+			labelBraces = labelBraces + 1
+		end
+	end
+	ge("there are UI labels to check", labelCount, 20)
+	eq("no UI label leaks an unexpanded directive", labelBraces, 0)
+	eq("rendering labels introduced no new misses", Format.misses.template, 0)
+
+	-- NO FREE TEXT, proved on the client side of the wire too. The server
+	-- side is asserted by NetContract.hasNoStringFields in the smoke suite.
+	local payload = DispatchView.payload(1, 2, 7, { { findId = 3, qty = 1 } })
+	ok("a dispatch payload carries no strings", DispatchView.payloadHasNoStrings(payload))
+	eq("the phrase crosses the wire as an index", type(payload.phrase), "number")
+	ok("the phrase index names a real authored phrase", Strings.PHRASE[payload.phrase] ~= nil)
+
+	REPORT.ledgerTemplates = 0
+	for _ in pairs(Strings.LEDGER) do
+		REPORT.ledgerTemplates = REPORT.ledgerTemplates + 1
+	end
+	REPORT.ledgerVariants = totalVariants
+	REPORT.entriesRendered = #collected
+	app.shutdown()
+end
+
 print("")
 print(string.format(
 	"measured: %.2f DataStore and %.2f MemoryStore requests per session over %d sessions across %d posts and %d days",

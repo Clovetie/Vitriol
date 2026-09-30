@@ -133,6 +133,60 @@ The Chart and Almanac screens must **pause** the world render (they are full tak
 - Launch languages: en, es, pt-BR, id, th, tr, fr, de. Roblox's own real-time
   translation work suggests the platform's growth is not English-first.
 
+### 8.1 As built — iteration 4
+
+The client layer exists as of iteration 4: nine files, eight of them pure modules under
+`ReplicatedStorage/Tidekeeper/Client/` and exactly one `LocalScript`
+(`StarterPlayerScripts/Tidekeeper/Main.client.luau`). The split is **D25**: the views
+are presenters that take data and return a view-model table, and the LocalScript is the
+only client file that touches `game`, holds the only client `RunService` connection (the scan counts them game-wide: 2 of a maximum 2, one per side), and
+is the only place an Instance is created. The determinism scan enforces this — `Client`
+is in the `NO_DATAMODEL` set, so a view that calls `GetService` fails the build.
+
+**No sentence is ever stored, replicated, or sent (D26).** A Ledger entry on the wire is
+`(templateId, epoch, actorId, slots[])` — about 24 bytes of integers. `Client/Strings.luau`
+holds the prose; `Client/Format.luau` expands it at read time. A translator therefore
+edits one file and every historical entry in every save re-renders in the new language,
+because the save contains no English. This is the payoff the bullet above promises, and
+it is the reason the Ledger format is integers rather than text.
+
+**A variant is chosen by `hash(actorId, epoch)`, never randomly (D27).** Each template
+has three or four phrasings so the Ledger does not read like a receipt printer, but the
+Ledger is a *replay* (doc 04 §7) — reopening it must produce the same words forever.
+Randomising the phrasing would make the game's memory unreliable in a way players
+notice and cannot articulate.
+
+**Directives do not nest.** The expander matches `{[^{}]+}`, so a `{1}` written inside a
+`{plural:…}` branch is invisible to the outer match and both halves leak to the player
+as literal braces. Two variants did exactly this; §8.2 is why they were caught before a
+player saw them.
+
+### 8.2 The coverage test
+
+Localisation fails silently. A missing find name renders as `""` and a missing template
+renders as nothing at all — the game keeps running and the bug ships. So `Format`
+carries five **miss counters** (`find`, `class`, `tide`, `template`, `arity`) rather
+than falling back quietly, and session-test scenario 15 runs a 30-day simulation, then
+renders every Ledger template at four variants each, and asserts:
+
+- every id in `Ledger.SLOT_COUNT` has prose, and no prose exists for an id the domain
+  does not define (**both directions** — orphan prose is how a renamed template rots);
+- `Format.totalMisses() == 0` across all five counters;
+- no rendered line contains `{` or `}`, is blank, or is shorter than 12 characters;
+- a second `LedgerView.build` of the same entries is byte-identical (D27);
+- every `Strings.UI` label expands;
+- `DispatchView` payloads contain no string fields at all.
+
+It found four real bugs on its first green-to-red run, and the most serious was not a
+missing translation: `LedgerService:slotsFor` was filling Ledger slots from a positional
+pool `{spent, warmth, noteId, flags}` **regardless of what the template's slots meant**,
+so a receipt rendered a coin amount through `{find:1}` and named an object "12". The fix
+was structural — receipts now have their own template range (100–105), because a
+receipt genuinely does not know which find was on the shelf or what the host's tide was
+doing, and forcing it through a visit template was always going to invent facts. That
+bug was nine iterations-worth of invisible: nothing rendered those entries until a
+client existed.
+
 ## 9. Safety-shaped UX
 
 Because this game shows players to each other, the UX carries safety weight (doc 13).

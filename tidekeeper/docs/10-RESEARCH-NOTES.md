@@ -276,7 +276,100 @@ cross-server case is not. Resolve in iteration 4 by adding the field in schema v
 a migration, which is cheap because [`Shared/Version.luau`](../code/ReplicatedStorage/Tidekeeper/Shared/Version.luau)
 already exists for exactly this.
 
-## 7. Known unknowns
+## 7. Iteration-4 verification pass — 2026-10-01
+
+Three questions, asked in this order because each one changes what the next is worth.
+
+### 7.1 Has the turn-based notification API shipped? **No.**
+
+Re-checked 2026-10-01 against `create.roblox.com`:
+`ExperienceNotificationService`'s reference page carries `last_updated: 2026-09-30` and
+still exposes exactly **three members** — `CanPromptOptInAsync()`, `PromptOptIn()` and
+`OptInPromptClosed`. All three are client-only, all three concern *opting in*, and
+`CreateUserNotificationAsync` remains removed (it existed at API dump 591 and was gone
+by 616). There is no send API on the engine surface and no turn API of any kind.
+
+The send path is unchanged from §6.1: a Creator-Store Open Cloud **Luau package** the
+developer installs into `ServerScriptService` by hand, dashboard-authored message bodies
+of ≤99 characters, one notification per user per day, and delivery explicitly not
+guaranteed.
+
+**Consequence: none.** That is the point. `NotifyAdapter` reports `disabled` when the
+package is absent, `NotifyService` keeps one candidate per player per day, and nothing
+depends on a send succeeding (R5). The design has now survived two iterations of this
+question being answered "no", which is the evidence that building for the absence was
+right. **OD7 stays moot and the it5 prompt asks again.**
+
+### 7.2 Client performance tooling — two genuinely new things
+
+**LibMP, the MicroProfiler Luau API** (devforum announcement 2026-06-25, Studio beta).
+Every MicroProfiler counter is now readable *from Luau*, on client and server, on all
+platforms. It supports custom in-game profiler widgets, capturing snapshots on a client
+and shipping them to a server, and dumping traces for offline analysis. Live (non-Studio)
+access is gated behind a request form; Studio access is open to everyone. Roblox warns
+that enabling the MicroProfiler raises memory use and advises sampling a percentage of
+sessions rather than all of them.
+
+*Why it matters here:* doc 08 §7's client frame budget is currently a set of estimates.
+LibMP turns it into something the game can measure on real devices and report, which is
+exactly the shape of evidence doc 09 §4 calls L5. **Iteration 5 should adopt it** for the
+Ledger replay, which is the one client screen doing real per-frame string work.
+
+**Lute, the standalone Luau runtime** (`lute.luau.org`, `luau-lang/lute`, v1.0.0). An
+official general-purpose runtime for Luau — filesystem, HTTP, crypto, a test runner
+(`.test.luau` / `.spec.luau`), a linter, the type checker, and a **sampling profiler**
+that emits Perfetto traces. Its own documentation states it "runs Luau code, just like
+Roblox, allowing you to easily run and test modules that don't depend on the game engine
+itself", which is a precise description of this project's entire pure core.
+
+This is the most consequential finding of the iteration and it is a **tooling** finding,
+not a gameplay one — see §7.4.
+
+### 7.3 Studio MCP — richer than doc 09 §2, and still unreachable
+
+The third-party MCP-server ecosystem has grown considerably: servers now ship 14, 34, 54
+and 68 tools respectively, covering `execute_luau` / `run_luau`, `start_playtest` /
+`get_playtest_state`, `screenshot` / `capture_studio_screenshot`, `performance`,
+`character`/`input` driving, and Open Cloud passthrough (`execute_luau target="live"`,
+live DataStore reads, `universe` server restarts). Several can even launch Studio and
+drive its window.
+
+All of them require **a running Roblox Studio process on the same machine**. There is
+none in this environment and there was none in iterations 2 or 3. The capability is
+real and iteration 5 should use it the moment a Studio is available; it did not help
+iteration 4, and pretending otherwise would have meant another "unknown".
+
+### 7.4 The finding that changed the iteration: Luau runs outside Roblox
+
+For two iterations the performance budget (OD12) was blocked on a false dichotomy —
+fengari proves nothing, and Studio is unreachable, therefore the number is unknowable.
+That was wrong. **Luau is published as a standalone binary** by its team at Roblox, it
+builds from source in about four minutes with nothing but `g++` and `make`, and it is
+the same language runtime the engine embeds.
+
+Everything the fengari harness had to fake (§ `tools/README.md` 5b) simply disappears:
+
+| fengari (Lua 5.3 in JS) | real Luau |
+| --- | --- |
+| `255 * 16777216` = **-16777216** (32-bit integer wraparound) | **4278190080** |
+| `bit32` absent — shimmed over a 64 KB XOR table | native |
+| `string.format("%d", …)` rejects floats — rewritten to `%.0f` | works |
+| every integer literal rewritten to a float | no transform |
+| `buffer` absent | native |
+| ~30–100× slower than Luau, so timings are meaningless | **the actual runtime** |
+
+The only source transform the Luau path applies is the Roblox `require` rewrite. The
+measured result is in doc 04 §6.1. **OD12 is closed**, and a new verification level
+**L3.5** was added to doc 09 §4 to name exactly what a number from here is worth.
+
+**OD17 (new, it5):** adopt Lute in place of the hand-rolled `luau`-CLI bundling. Lute has
+a real test runner and a sampling profiler, so `pure-tests.lua` could run as native Luau
+under `lute test` rather than as transformed Lua 5.3 under fengari — which would delete
+`floatifyNumbers`, the `bit32` shim and the `%d` rewrite outright, and remove a whole
+class of "the harness disagrees with the game" bug. Blocked in iteration 4 only because
+this sandbox cannot reach GitHub release assets and Lute needs itself to bootstrap.
+
+## 8. Known unknowns
 
 Recorded so later iterations do not mistake absence of evidence for evidence.
 

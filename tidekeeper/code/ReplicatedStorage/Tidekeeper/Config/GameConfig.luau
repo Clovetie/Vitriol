@@ -9,7 +9,7 @@
 
 return {
 	-- Schema / save-format ---------------------------------------------------
-	SCHEMA_VERSION = 1,
+	SCHEMA_VERSION = 2,
 	OLDEST_SUPPORTED_VERSION = 1,
 
 	-- Resolve-on-read (doc 04 section 3) -------------------------------------

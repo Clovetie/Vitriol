@@ -874,6 +874,12 @@ eq(failReason, Version.NO_PATH, "a throwing migration reports NO_PATH")
 Version._reset()
 Version.CURRENT = realCurrent
 Version.OLDEST_SUPPORTED = 1
+-- Restore the real migration chain that PostCodec registered at load time.
+-- _reset() above wiped it, and every PostCodec test after this point needs
+-- the v1 -> v2 step to exist (OD16).
+PostCodec.registerMigrations()
+eq(Version.registeredCount(), 1, "the real v1 -> v2 migration is restored after the reset")
+ok(Version.hasMigration(1), "PostCodec registered a migration from v1")
 
 -- ================================================================ DrifterCodec
 end
@@ -1752,6 +1758,70 @@ eq(#restored.ring, #blobPost.ring, "the visitor ring keeps its length")
 eq(restored.ring[1].owner, 123456789, "a ring owner round trips")
 eq(#restored.claims, 1, "the claim queue round trips")
 eq(restored.claims[1].fromOwner, 4455667788, "a claim's owner round trips")
+
+-- ------------------------------------------------- schema v2 and the v1 blob
+-- OD16. Two separate things are checked here and they are not the same thing:
+--   1. a v2 blob round-trips `publishedAt`  -- trivially true by construction;
+--   2. a REAL v1 blob, captured before the field existed, still loads.
+-- Only the second one can fail in a way that matters to a live player.
+
+eq(Version.CURRENT, 2, "the current post schema is version 2")
+blobPost.publishedAt = 4242
+local v2Blob = PostCodec.encode(blobPost)
+local v2Back, v2Reason = PostCodec.decode(v2Blob)
+eq(v2Reason, nil, "a v2 blob decodes")
+eq(v2Back.publishedAt, 4242, "publishedAt round trips at v2")
+-- Epoch 0 is a real epoch and must survive as one, not decay into "never".
+blobPost.publishedAt = 0
+local zeroBack = PostCodec.decode(PostCodec.encode(blobPost))
+eq(zeroBack.publishedAt, 0, "epoch 0 round trips as epoch 0, not as never")
+blobPost.publishedAt = nil
+local neverBack = PostCodec.decode(PostCodec.encode(blobPost))
+eq(neverBack.publishedAt, nil, "never-published round trips as never")
+blobPost.publishedAt = 4242
+eq(v2Back.v, 2, "a v2 blob reports schema version 2")
+eq(#v2Blob, #postBlob, "publishedAt costs exactly the 4 bytes the layout says")
+
+local v1Bytes = Codec.base64Decode(FIXTURE_POST_V1)
+eq(v1Bytes[1], 1, "the fixture really is a version 1 blob")
+eq(#v1Bytes, 249, "the v1 fixture is the size it was captured at")
+local migrated, migReason, migWhy = PostCodec.decode(v1Bytes)
+eq(migReason, nil, "the captured v1 blob still decodes: " .. tostring(migWhy))
+ok(migrated ~= nil, "the v1 blob produced a state")
+eq(migrated.v, 2, "the v1 blob was migrated up to v2")
+eq(migrated.publishedAt, nil, "a migrated v1 post has never published")
+-- Everything the v1 blob DID carry must survive the migration untouched.
+eq(migrated.postId, 1001, "postId survives the migration")
+eq(migrated.owner, 4455667788, "owner survives the migration")
+eq(migrated.coin, 123456, "coin survives the migration")
+eq(migrated.renown, 4321, "renown survives the migration")
+eq(migrated.tier, 4, "tier survives the migration")
+eq(migrated.season, 3, "season survives the migration")
+ok(Tables.deepEqual(migrated.standing, { 11000, 250, 0, 4001, 30000 }), "standing survives the migration")
+eq(#migrated.claims, 1, "the claim queue survives the migration")
+eq(migrated.claims[1].fromOwner, 4455667788, "a claim's owner survives the migration")
+eq(#migrated.ring, 2, "the visitor ring survives the migration")
+
+-- A migrated post must be re-encodable at the new version, or the player is
+-- stuck reading a save they can never write back.
+local reBlob = PostCodec.encode(migrated)
+eq(reBlob[1], 2, "re-encoding a migrated post writes version 2")
+local reBack, reReason = PostCodec.decode(reBlob)
+eq(reReason, nil, "the re-encoded blob decodes")
+eq(reBack.coin, 123456, "coin survives the full v1 -> v2 -> bytes -> state trip")
+
+-- A blob from the FUTURE is refused, never guessed at.
+local futureBytes = Codec.base64Decode(FIXTURE_POST_V1)
+futureBytes[1] = 99
+local fut, futReason = PostCodec.decode(futureBytes)
+eq(fut, nil, "a blob newer than this server is refused")
+ok(futReason == Version.TOO_NEW or futReason == "CORRUPT", "refusing a future blob reports why")
+
+-- Put `blobPost` back the way the rest of this section found it. The later
+-- base64 tests compare against `postBlob`, which was encoded when this post
+-- had never published -- so the restore is `nil`, not 0. Those are different
+-- states and the codec is careful to keep them different.
+blobPost.publishedAt = nil
 ok(Tables.deepEqual(restored.stats, blobPost.stats), "the stats round trip")
 ok(Codec.equal(PostCodec.encode(restored), postBlob), "re-encoding a decoded post is byte-identical")
 
