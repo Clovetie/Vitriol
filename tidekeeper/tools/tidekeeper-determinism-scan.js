@@ -14,15 +14,37 @@
  *
  * What it forbids, and where:
  *
- *   Lib/ Domain/ Shared/ Config/   math.random, os.time, os.clock, os.date,
- *                                  tick(), DateTime, GetServerTimeNow,
- *                                  game:GetService, Instance.new, workspace,
- *                                  task.*, wait(), coroutine.*, spawn(), delay()
+ *   Config/ Lib/ Shared/ Domain/   os.time, os.clock, os.date, tick(),
+ *   ("the pure core")              DateTime, GetServerTimeNow, game:GetService,
+ *                                  Instance.new, workspace, task.*, wait(),
+ *                                  coroutine.*, spawn(), delay()
  *   Domain/                        bare pairs() / next() iteration — iteration
  *                                  order over a hash part is unspecified, and
  *                                  the simulation iterates stock and rules
+ *   everywhere in code/            math.random (one unseedable global stream)
+ *   everywhere in code/            TextBox / TextService / FilterStringAsync —
+ *                                  TIDEKEEPER has no free text ANYWHERE
+ *                                  (docs/13 §2), and the cheapest way to keep
+ *                                  that true is to make it unrepresentable
+ *   outside Adapters/              DataStoreService, MemoryStoreService,
+ *                                  HttpService, MessagingService — every
+ *                                  platform call goes through one adapter so
+ *                                  the session harness can substitute a fake
+ *   outside CadenceService         RunService — there is exactly one Heartbeat
+ *                                  connection in this game (docs/01 §5)
+ *   outside Adapters/ +            task.*, wait(), delay(), spawn() — yields
+ *   CadenceService                 belong to I/O and to the scheduler, nowhere
+ *                                  else
  *   everywhere in code/            a require that points at a HIGHER layer
- *                                  (Config < Lib < Shared < Domain < Services)
+ *                                  (Config < Lib < Shared < Domain < Adapters
+ *                                  < Services < Client)
+ *
+ * The pure-core rules were global in iteration 2, when Config/Lib/Shared/Domain
+ * were the only directories that existed. Scoping them to those four is not a
+ * weakening: the behaviour on every file that existed then is byte-identical,
+ * and the surface they used to cover is now covered by the three narrower,
+ * STRICTER rules above (platform, runservice, scheduler-scope), which name the
+ * one file each thing is allowed in rather than the layer.
  *
  * Every rule has a `-- determinism-scan: allow <rule> <reason>` escape hatch on
  * the preceding line, because a rule with no escape hatch gets deleted the
@@ -69,7 +91,15 @@ const rel = (p) => path.relative(REPO, p).replace(/\\/g, "/");
 
 // --------------------------------------------------------------------- rules
 
-// `scope` is a list of directory names under the Tidekeeper tree; null = all.
+// The pure core. These four directories are the simulation; nothing in them
+// may read a clock, touch the engine, or yield.
+const PURE = ["Config", "Lib", "Shared", "Domain"];
+
+// `scope`  — directory names under the Tidekeeper tree the rule applies to;
+//            null means every file.
+// `except` — module basenames (no extension) the rule does not apply to; this
+//            is how "exactly one file may do X" is expressed.
+// `exceptDirs` — directory names the rule does not apply to.
 const RULES = [
 	{
 		id: "math.random",
@@ -79,31 +109,31 @@ const RULES = [
 	},
 	{
 		id: "clock",
-		scope: null,
+		scope: PURE,
 		pattern: /\b(?:os\.time|os\.clock|os\.date|tick)\s*\(/,
-		why: "a pure module may not read the clock. Time enters the simulation only as the `now` argument to Resolve.run.",
+		why: "a pure module may not read the clock. Time enters the simulation only as the `now` argument to Resolve.run; services and adapters take a clock by injection so the harness can virtualise it.",
 	},
 	{
 		id: "datetime",
-		scope: null,
+		scope: PURE,
 		pattern: /\bDateTime\b|\bGetServerTimeNow\b/,
 		why: "a pure module may not read the clock. Time enters the simulation only as the `now` argument to Resolve.run.",
 	},
 	{
 		id: "services",
-		scope: null,
+		scope: PURE,
 		pattern: /\bgame\s*[:.]\s*GetService\b|\bInstance\.new\b|\bworkspace\b|\bgame\.Workspace\b/,
 		why: "layers L0-L2 are pure. Roblox surface belongs in the adapter layer (L1) and the services layer (L3).",
 	},
 	{
 		id: "scheduler",
-		scope: null,
+		scope: PURE,
 		pattern: /\btask\.(?:wait|spawn|delay|defer|synchronize|desynchronize)\s*\(|(?:^|[^.\w])wait\s*\(|(?:^|[^.\w])delay\s*\(|(?:^|[^.\w])spawn\s*\(/,
 		why: "a pure module may not yield or schedule. Yields make the simulation depend on frame timing.",
 	},
 	{
 		id: "coroutine",
-		scope: null,
+		scope: PURE,
 		pattern: /\bcoroutine\.(?:create|resume|wrap|yield)\b/,
 		why: "a pure module may not yield.",
 	},
@@ -113,11 +143,42 @@ const RULES = [
 		pattern: /\bin\s+(?:pairs|next)\s*\(|\bfor\s+\w+(?:\s*,\s*\w+)?\s+in\s+next\b/,
 		why: "hash-part iteration order is unspecified. Use a numeric for, ipairs, or Tables.sortedPairs.",
 	},
+	{
+		id: "platform",
+		scope: null,
+		strings: true,
+		exceptDirs: ["Adapters"],
+		pattern: /\bDataStoreService\b|\bMemoryStoreService\b|\bHttpService\b|\bMessagingService\b/,
+		why: "every platform request goes through an adapter under Adapters/. That is what lets tools/tests/fake-platform.lua substitute a fake DataModel and measure requests per session against the real service code.",
+	},
+	{
+		id: "runservice",
+		scope: null,
+		strings: true,
+		except: ["CadenceService"],
+		pattern: /\bRunService\b/,
+		why: "there is exactly ONE RunService connection in this game and CadenceService owns it (docs/01 §5). A second connection means server time no longer belongs to a named slot with a declared budget.",
+	},
+	{
+		id: "scheduler-scope",
+		scope: null,
+		exceptDirs: ["Adapters"],
+		except: ["CadenceService"],
+		pattern: /\btask\.(?:wait|spawn|delay|defer)\s*\(|(?:^|[^.\w])wait\s*\(|(?:^|[^.\w])delay\s*\(|(?:^|[^.\w])spawn\s*\(/,
+		why: "yielding belongs to I/O (Adapters/) and to the scheduler (CadenceService). A task.spawn anywhere else is work that no slot budgets for and no profiler attributes.",
+	},
+	{
+		id: "no-free-text",
+		scope: null,
+		strings: true,
+		pattern: /\bTextBox\b|\bTextService\b|\bFilterStringAsync\b|\bTextChatService\b|\bFilterForBroadcast\b/,
+		why: "TIDEKEEPER has no free text anywhere (docs/13 §2). Players exchange authored phrase ids, so there is no text to filter, nothing to moderate, and no hot path that calls a filtering API.",
+	},
 ];
 
 // Layer ordering. A module may require from its own layer or any layer to the
 // left of it, never to the right.
-const LAYER_ORDER = ["Config", "Lib", "Shared", "Domain", "Services", "Client"];
+const LAYER_ORDER = ["Config", "Lib", "Shared", "Domain", "Adapters", "Services", "Client"];
 
 // ---------------------------------------------------------------- collection
 
@@ -180,6 +241,36 @@ function blankNonCode(line) {
 	return out;
 }
 
+// Strip ONLY the trailing comment, keeping string literals intact. Rules that
+// name a Roblox service have to see inside strings, because the way you ask
+// for a service is `game:GetService("DataStoreService")` — blanking the string
+// would make the single most important rule in this file unenforceable.
+function blankCommentsOnly(line) {
+	let i = 0;
+	while (i < line.length) {
+		const c = line[i];
+		if (c === "-" && line[i + 1] === "-") return line.slice(0, i) + " ".repeat(line.length - i);
+		if (c === '"' || c === "'") {
+			const quote = c;
+			i += 1;
+			while (i < line.length) {
+				if (line[i] === "\\") {
+					i += 2;
+					continue;
+				}
+				if (line[i] === quote) {
+					i += 1;
+					break;
+				}
+				i += 1;
+			}
+			continue;
+		}
+		i += 1;
+	}
+	return line;
+}
+
 // ------------------------------------------------------------------- the scan
 
 const files = collect(args.src);
@@ -191,6 +282,8 @@ let linesScanned = 0;
 for (const file of files) {
 	const layer = layerOf(file);
 	const relPath = rel(file);
+	const segments = relPath.split("/");
+	const baseName = path.basename(file).replace(/\.(server|client)?\.?luau?$/, "").replace(/\.luau?$/, "");
 	const raw = fs.readFileSync(file, "utf8");
 	const lines = raw.split("\n");
 	scanned += 1;
@@ -198,13 +291,16 @@ for (const file of files) {
 
 	for (let i = 0; i < lines.length; i += 1) {
 		const code = blankNonCode(lines[i]);
+		const codeWithStrings = blankCommentsOnly(lines[i]);
 		if (!code.trim()) continue;
 		const previous = i > 0 ? lines[i - 1] : "";
 		const allowMatch = /--\s*determinism-scan:\s*allow\s+(\S+)\s*(.*)$/.exec(previous);
 
 		for (const rule of RULES) {
 			if (rule.scope && (!layer || !rule.scope.includes(layer))) continue;
-			if (!rule.pattern.test(code)) continue;
+			if (rule.except && rule.except.includes(baseName)) continue;
+			if (rule.exceptDirs && rule.exceptDirs.some((d) => segments.includes(d))) continue;
+			if (!rule.pattern.test(rule.strings ? codeWithStrings : code)) continue;
 			if (allowMatch && allowMatch[1] === rule.id) {
 				allowances.push({ file: relPath, line: i + 1, rule: rule.id, reason: allowMatch[2].trim() || "(no reason given)" });
 				continue;
@@ -220,7 +316,7 @@ for (const file of files) {
 
 		// Layering. `require(script.Parent.Parent.Lib.Codec)` -> the layer is the
 		// second-to-last path segment.
-		const req = /require\s*\(\s*script[.\w]*?\.(\w+)\.(\w+)\s*\)/.exec(code);
+		const req = /require\s*\(\s*[A-Za-z_][\w.]*?\.(\w+)\.(\w+)\s*\)/.exec(code);
 		if (req && layer) {
 			const targetLayer = req[1];
 			const here = LAYER_ORDER.indexOf(layer);
@@ -231,7 +327,7 @@ for (const file of files) {
 					line: i + 1,
 					rule: "layering",
 					text: lines[i].trim().slice(0, 120),
-					why: `${layer} may not require ${targetLayer}: the dependency arrow points the wrong way (Config < Lib < Shared < Domain < Services < Client).`,
+					why: `${layer} may not require ${targetLayer}: the dependency arrow points the wrong way (Config < Lib < Shared < Domain < Adapters < Services < Client).`,
 				});
 			}
 		}

@@ -12,15 +12,27 @@ Every number here is derived from a documented 2026 platform limit. Sources are 
 | DataStore total storage | **500 MB + 1 MB × lifetime users** (from 2026-07-29; was 100 MB) | [limit change](https://bloxbot.ai/guide/roblox-datastore-limits-july-2026) |
 | DataStore request budget | in-game **and** Open Cloud now share **one** per-experience budget | same |
 | DataStore value size | 4 MB per key | creator docs |
-| DataStore server rate | ~60 requests/min/server, 6/s | creator docs |
+| DataStore per-server rate (default) | **`60 + numPlayers × 40`**/min read, write and remove; `5 + numPlayers × 2`/min list. Creator-configurable with `SetRateLimitForRequestType` | [error codes and limits](https://create.roblox.com/docs/cloud-services/data-stores/error-codes-and-limits) |
+| DataStore per-experience rate | read `300 + CCU × 40`, write `300 + CCU × 20`, list `300 + CCU × 2`, remove `300 + CCU × 40` per minute — **shared with Open Cloud** | same |
+| DataStore per-key throughput | read 25 MB/min, write **4 MB/min**, rounded up to the next KB per request | same |
 | MemoryStore total memory | **64 KB + 1.2 KB × [number of users]**, per *universe* | [creator-docs](https://github.com/Roblox/creator-docs/blob/main/content/en-us/cloud-services/memory-stores/index.md) |
-| MemoryStore request units | `1000 + 100 × CCU` per minute, universe-wide | same |
-| MemoryStore per-structure | 100 000 request units/min; sorted map/queue 1 M items, 100 MB | same |
+| MemoryStore request units | **`1000 + 120 × CCU`** per minute, universe-wide | same |
+| MemoryStore per-structure | 100 000 request units/min; sorted map/queue 1 M items, 100 MB (**including keys**) | same |
+| MemoryStore per-partition | throttling begins ≈30 000 request units/min; hash-map per key ≈5 000 write / 15 000 read | same |
 | MemoryStore item size | key ≤ 128 B, value ≤ 32 KB | same |
 | MemoryStore HashMap | no item-count or per-structure memory limit; universe quota still applies | [HashMap beta](https://devforum.roblox.com/t/memorystore-hashmap-beta/2977379) |
 | Open Cloud Luau Execution | 5 min/task, **10 concurrent per place** | [docs](https://create.roblox.com/docs/cloud/reference/features/luau-execution) |
 | Open Cloud from HttpService | 2 500 OC requests/min/server | creator docs |
 | Experience Notifications | 13+, opted in, **1/user/day/experience** | [rate limits](https://devforum.roblox.com/t/updates-to-notification-rate-limits/3007106) |
+
+> **Re-verified 2026-10-01 (iteration 3).** Four rows above changed and are corrected in
+> place; the derivations they feed did not change materially. The MemoryStore request
+> quota is `1000 + 120 × CCU`, not `100 × CCU`. The DataStore per-server figure was not
+> "~60/min" — that is only the constant term. The per-experience and per-key throughput
+> limits were missing entirely and are the ones that actually bind. The 500 MB + 1 MB
+> storage limit is confirmed against the primary doc and is measured on the *compressed*
+> size of the latest version of each key. Full audit trail in
+> [`10-RESEARCH-NOTES.md`](10-RESEARCH-NOTES.md) §6.2.
 
 **The one that shapes everything: MemoryStore's quota is tiny and universe-wide.** At
 1 000 CCU it is ~1.2 MB *total*. Treat MemoryStore as a coordination cache, never as
@@ -154,6 +166,29 @@ lock this duplicates stock.
   write** and push the payload to the `recov` queue. Losing a session is survivable;
   overwriting a newer save is not.
 
+### 7.1 What iteration 3 learned building it
+
+**Releasing a lock is a `RemoveAsync`, not an `UpdateAsync` returning `nil`.**
+Returning `nil` from a MemoryStore transform *aborts the update*; it does not delete
+the key. The first implementation read as "transform the lock into nothing" and in
+fact never released anything, so every lock sat until its 90-second TTL expired and a
+player who rejoined quickly was locked out of their own post. There is no atomic
+compare-and-delete in the API, so ownership is checked against the token the adapter
+itself issued and the delete is unconditional after that. The residual race — our lock
+expires, another server takes it, we then remove theirs — costs a redundant
+acquisition, never a double write, because `savePost` re-checks ownership.
+
+**`holdsLock` must not cost a request.** Reading the lock before every save spent one
+MemoryStore request per session to learn something the adapter already knew. The
+refresh on the `slow` slot is the authority; between refreshes the locally recorded
+token is the answer, and it is never staler than one refresh interval.
+
+**No lock service means no lock, not no game.** If MemoryStore is throttled or over
+quota, `acquireLock` degrades to running unlocked and counts it
+(`stats.unlockedSessions`), per [`01-ARCHITECTURE.md`](01-ARCHITECTURE.md) §8. The
+alternative — refusing every join while the index is unavailable — turns a degraded
+side system into a total outage.
+
 ## 8. Retry policy
 
 All adapter calls use the same policy. Implement once in `DataStoreAdapter`.
@@ -202,15 +237,36 @@ Notification targeting is derived at **logout**, not by scanning.
 
 ## 11. Testing persistence without Roblox
 
-Iteration 3 must ship an in-memory fake implementing the exact adapter interface,
-including:
+Iteration 3 shipped this. [`tools/tests/fake-platform.lua`](../tools/tests/fake-platform.lua)
+is a fake **DataModel**, not a fake adapter: it implements `DataStoreService`,
+`MemoryStoreService`, `Players`, `RunService` and `PolicyService`, and the **real**
+`DataStoreAdapter` and `MemoryAdapter` run against it unmodified. Faking the adapter
+would have meant faking exactly the code that needed testing — the retry
+classification, the budget deferral, the `UpdateAsync` transforms, the lock protocol.
 
-- injected failures at a configurable rate,
-- `DataUpdateConflict` simulation on concurrent `UpdateAsync`,
-- quota exhaustion,
-- budget starvation,
-- lock contention between two simulated servers.
+It models:
 
-The session harness then runs the full join → resolve → save → rejoin cycle against the
-fake and asserts the economy invariants of doc 04 §9 across a simulated 30-day,
-200-session lifetime. That test is what will catch the duplication bug before players do.
+- request counts per type, and the per-server per-minute budgets
+  (`60 + numPlayers × 40`, list `5 + numPlayers × 2`), with `UpdateAsync` decrementing
+  both read and write;
+- deterministic failure injection using the **error strings Roblox actually
+  produces** — `DataUpdateConflict`, `TotalRequestsOverLimit`, `TotalMemoryOverLimit`,
+  `RequestThrottled` — because the adapter classifies by matching them;
+- a virtual clock, so the real backoff schedule (0, 0.5, 1.5, 4, 9 s) is exercised at
+  full speed and a 30-day lifetime runs in 16 seconds;
+- MemoryStore hash maps and a queue with TTL expiry on the same clock.
+
+It deliberately does **not** model real concurrency: two "servers" are two adapter
+instances over one backend, interleaved explicitly by the test. Real threads would make
+the suite nondeterministic, which is the one thing it may not be.
+
+[`tools/tests/session-tests.lua`](../tools/tests/session-tests.lua) runs 14 scenarios
+and 72 assertions: cold start, round trip, **a failed read must never look like a new
+player**, `DataUpdateConflict` retry, quota errors failing fast, MemoryStore
+degradation, two-server lock contention, at-most-once delivery, the Ledger never being
+empty, the notification path being disabled, chunk-plan purity, cadence accounting, the
+30-day/200-session measurement, and `BindToClose`.
+
+It found three real defects on its first green run; they are tabulated in
+[`03-ASYNC-SOCIAL.md`](03-ASYNC-SOCIAL.md) §6.3. Two of them silently destroyed player
+history and neither was findable by reading the code.

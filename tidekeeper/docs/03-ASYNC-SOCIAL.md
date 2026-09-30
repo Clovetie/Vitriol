@@ -31,6 +31,14 @@ turn-based asynchronous multiplayer (Studio Beta October 2026, full release by e
 2026). Being the flagship use of a brand-new platform affordance is a discovery
 advantage that does not come around often.
 
+> **Checked 2026-10-01 (iteration 3): it has not shipped yet.** The RDC commitment and
+> its dates are confirmed, and the Studio Beta is due this month, but as of today
+> `ExperienceNotificationService` still has exactly three members and no announcement
+> exists. See [`10-RESEARCH-NOTES.md`](10-RESEARCH-NOTES.md) §6.1. The discovery
+> advantage is real but it is **upside, not a dependency** — §10 below and risk R5 both
+> say the game must be fully playable with zero notifications, and iteration 3's session
+> harness proves it by running the whole 30-day lifetime with the notifier switched off.
+
 ## 3. The Drifter
 
 A Drifter is the compact, serialisable snapshot of a player as a *visitor*. It is built
@@ -177,7 +185,45 @@ Per player session the exchange costs:
 | deliver receipts | batched into the post save | leave |
 
 **5 requests per session.** A 30-player server cycling every 12 minutes costs ~150
-requests / 12 min = ~12/min. Far inside budget.
+requests / 12 min = ~12/min. Far inside budget — and the budget is larger than doc 05
+originally said: the default per-server write limit is `60 + numPlayers × 40`, so a
+30-player server has 1 260 writes/min, and the per-experience ceiling at 1 000 CCU is
+`300 + 1000 × 20` = 20 300 writes/min shared with Open Cloud (verified 2026-10-01,
+[`10-RESEARCH-NOTES.md`](10-RESEARCH-NOTES.md) §6.2).
+
+Iteration 3 measured this rather than asserting it. `tidekeeper-session-test.js` runs
+the real adapters and services against a fake DataModel
+([`tools/tests/fake-platform.lua`](../tools/tests/fake-platform.lua)) and counts every
+request: **200 sessions across 8 posts over 30 days of virtual time** cost 1 129
+DataStore and 1 048 MemoryStore requests, i.e.
+
+> **5.64 DataStore and 5.24 MemoryStore requests per session.**
+
+The DataStore figure is the design target of 5, plus the cold-start and
+receipt-drain paths. The MemoryStore figure is **2.6× what the table above
+implies**, and the difference is instructive rather than cosmetic: the table counts
+one index read at join, but a returning player's claim walks backwards through the
+epochs it missed, and each epoch is its own index key. The fix applied was to charge
+index probes against the same per-claim request budget as the DataStore claims
+(`ExchangeService:claim`, `maxRequests`), which capped it; the remaining cost is the
+session lock (acquire + release) and the index write at logout.
+
+The suite fails the build if the DataStore mean exceeds 8 or the MemoryStore mean
+exceeds 6. Those are ceilings, not targets — the numbers above are the targets, and a
+regression that stays under the ceiling still shows up in the printed report.
+
+Three real defects were found by this measurement and are fixed:
+
+| Defect | Symptom | Cause |
+| --- | --- | --- |
+| Locks were never released | A player who rejoined within 90 s was locked out of their own post | `MemoryStore:UpdateAsync` returning `nil` **aborts** the transform; it does not delete the key. Release is now `RemoveAsync`. |
+| 27 Drifters delivered twice per simulated month | Real visitors silently duplicated into two different histories | Same cause, in `claimDrifters`: an emptied shard returned `nil`, which cancelled the removal while the caller kept the records. An emptied shard is now written back as an empty list. |
+| MemoryStore unavailable blocked every join | Nobody could play when the index was throttled | `acquireLock` refused rather than degrading. It now runs unlocked and records it, per [`01-ARCHITECTURE.md`](01-ARCHITECTURE.md) §8. |
+
+Neither of the first two is findable by reading the code, by a unit test of the
+adapter in isolation, or in Studio without waiting for the exact race. Both are
+one-line consequences of an API detail, and both destroy player history silently. This
+is the argument for the session harness in one paragraph.
 
 ## 7. Receipts — closing the loop
 
@@ -263,6 +309,13 @@ upside, not as a dependency.
   explicitly to enable "async turn based play", including resetting the daily cap when
   the user visits and allowing an additional silent notification
   ([Creator Roadmap](https://create.roblox.com/updates/roadmap)).
+- **As shipped today** (verified 2026-10-01), sending is
+  `OpenCloud.V2.UserNotification.createUserNotification(userId, payload)` from a Creator
+  Store Luau package, and the body is **not free text**: it is a `messageId` naming a
+  ≤ 99-character notification string authored in the Creator Dashboard, plus named
+  parameters. Delivery is not guaranteed — reach is weighted by engagement. Roblox also
+  forbids gating gameplay on notifications
+  ([docs](https://create.roblox.com/docs/production/promotion/experience-notifications)).
 
 **Policy:** exactly one notification per player per day, chosen by priority, and it must
 be *worth it*:

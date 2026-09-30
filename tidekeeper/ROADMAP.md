@@ -57,31 +57,41 @@ which straddles the 18 µs budget and therefore **proves nothing**. The budget i
 iteration-3 task, measured in Studio via the MCP `execute_luau` tool (doc 09 §3). The
 harness number is a regression tripwire, not a verdict.
 
-## Iteration 3 — the server exists ⬜
+## Iteration 3 — the server exists ✅
 
 | Deliverable | Status |
 | --- | --- |
-| **First task:** verify the shipped async-notification API and correct doc 10 §6 | ⬜ |
-| `Adapters/{DataStore,Memory,Notify,Policy}Adapter` | ⬜ |
-| `Services/{Cadence,Player,Post,Exchange,Ledger,Notify,Showcase}Service` | ⬜ |
-| `Bootstrap`, `Main`, `RemoteHandlers/*`, `Diagnostics/{Profiler,BudgetMeter}` | ⬜ |
-| `Shared/{Remotes,NetContract}` | ⬜ |
-| In-memory fake persistence with injected failures (doc 05 §11) | ⬜ |
-| `tools/tidekeeper-session-test.js` — 30-day / 200-session simulated lifetime | ⬜ |
-| Economy invariants green across that lifetime | ⬜ |
-| Measured request cost vs. the 5/session budget | ⬜ |
-| `fixture-blobs/` + migration tests | ⬜ |
+| **First task:** verify the shipped async-notification API and correct doc 10 §6 | ✅ it has **not** shipped; doc 10 §6.1 |
+| `Adapters/{DataStore,Memory,Notify,Policy}Adapter` | ✅ |
+| `Services/{Cadence,Player,Post,Exchange,Ledger,Notify,Showcase}Service` | ✅ |
+| `Bootstrap`, `Main`, `RemoteHandlers/*`, `Diagnostics/{Profiler,BudgetMeter}` | ✅ |
+| `Shared/{Remotes,NetContract,ReceiptCodec}`, `Config/NotifyConfig` | ✅ |
+| Fake platform with injected failures (doc 05 §11) | ✅ a fake **DataModel**, not a fake adapter — 705 lines |
+| `tools/tidekeeper-session-test.js` — 30-day / 200-session simulated lifetime | ✅ 14 scenarios, 72 assertions |
+| Economy invariants green across that lifetime | ✅ `Post.checkInvariants` after every chunk |
+| Measured request cost vs. the 5/session budget | ✅ **5.64 DataStore, 5.24 MemoryStore** per session |
+| Determinism scan extended, never weakened | ✅ 8 rules → 12; three of them stricter replacements |
+| `tools/lib/harness.js` extracted, smoke test unchanged at 858 | ✅ |
+| `fixture-blobs/` + migration tests | ⬜ **deferred to it4** — folded into OD16, which needs schema v2 anyway |
+
+**Three defects found by the harness, all fixed** (doc 03 §6.3): locks were never
+released, 27 Drifters per simulated month were delivered twice, and a MemoryStore
+outage blocked every join. The first two were the same platform fact — returning `nil`
+from an `UpdateAsync` transform aborts the update, it does not delete the key.
 
 ## Iteration 4 — it plays ⬜
 
 | Deliverable | Status |
 | --- | --- |
-| `ClientMain`, six controllers, six screens | ⬜ |
+| `Client/` layer: bootstrap + six views, all integer-driven | ⬜ |
+| `Client/Strings` — every word the player reads, keyed by template id | ⬜ |
 | The Ledger replay, re-running the real `Visit.resolve` | ⬜ |
 | ≥ 40 Ledger prose templates | ⬜ |
-| RDC 2026 UI feature flags + fallbacks | ⬜ |
-| Studio MCP connection; Explorer tree built by script | ⬜ |
-| `execute_luau` verification: buffer/base64, MemoryStore, `Tide.height` cost | ⬜ |
+| **OD16: `S.publishedAt` in PostCodec v2, with a real migration through `Shared/Version`** | ⬜ |
+| Migration test: load a v1 blob, assert it upgrades | ⬜ |
+| Localisation-coverage test: every template id and slot arity renders | ⬜ |
+| Studio MCP connection; `execute_luau` settles **OD12** | ⬜ |
+| `execute_luau` verification: buffer/base64 round trip, MemoryStore, `Tide.height` cost | ⬜ |
 | Playtest with console output + screenshots | ⬜ |
 | **R1: the Ledger in front of five real humans** | ⬜ |
 
@@ -118,14 +128,16 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD4 | Do Echoes read as dishonest? (doc 03 §8) | it5 | Playtest; the Ledger marker must be prominent |
 | OD5 | Is `warmth` ever public? (doc 03 §12, doc 08 §9) | it5 | No, aggregate colour only. Reopen only with a policy review |
 | OD6 | Can a player see whose Drifter it was? (doc 03 §12) | it4 | Display name only, no link, no join |
-| OD7 | Does the daily notification cap really reset on visit? (doc 10 §1.2) | it3 | Verify against shipped docs; design for 1/day regardless |
+| OD7 | Does the daily notification cap really reset on visit? (doc 10 §1.2) | ~~it3~~ | **Moot for now (doc 10 §6.1): the API has not shipped.** The shipped docs describe a flat 1/user/day static throttle and that is what `NotifyService` enforces |
 | OD8 | Does Scene Generator ship in 2026? (doc 09 §2) | it5 | Assume no; hand-build contingency is the plan of record |
-| OD9 | Do MemoryStore keys count toward the memory quota? (doc 10 §6) | it3 | Size assuming they do |
+| OD9 | Do MemoryStore keys count toward the memory quota? (doc 10 §6) | ~~it3~~ | **Answered (doc 10 §6.2): documented as counting for sorted maps, unstated for hash maps.** `MemoryAdapter` charges for them |
 | OD10 | Offline-play reconciliation policy (doc 04 §11) | it5 | Last-write-wins on post, union on ledger, conflict noted |
 | OD11 | Rewarded Video Ads at all? (doc 13 §4) | post-it5 | Not at launch; the tone is fragile |
-| OD12 | Is `Visit.resolve` actually inside 18 µs in Luau? | it3 | Unknown. Measure in Studio before tuning anything |
-| OD13 | Arrival scheduling is window-width dependent (see below) | it3 | `ExchangeService` must deliver each Drifter to exactly one resolve |
-| OD14 | Should `warmth` feed the price a Drifter will accept, not just the prose? | it5 | Currently prose-only. Playtest first |
+| OD12 | Is `Visit.resolve` actually inside 18 µs in Luau? | **it4** | **Still unknown after two iterations.** No Studio was reachable in it2 or it3. Measure with MCP `execute_luau`; do not estimate |
+| OD13 | Arrival scheduling is window-width dependent (see below) | ~~it3~~ | **Closed.** `CadenceService.planChunks` and `chunkForDrifter` are pure; at-most-once is asserted by session scenario 8 |
+| OD14 | Should `warmth` feed the price a Drifter will accept, not just the prose? | it4 | Currently prose-only. Settle before the client makes it visible |
+| OD15 | DataStore compresses values itself; does our base64 packing still pay? (doc 10 §6.2) | it4 | Binary packing is not compression, but base64 inflates 33 %. Sizes are far inside budget — measure, do not redesign |
+| OD16 | `S.publishedAt` is not persisted, so one-Drifter-per-epoch holds only per server (doc 10 §6.4) | it4 | Add it in schema v2 with a migration. `Shared/Version.luau` exists for this and has never been exercised |
 
 ### OD13 in full — the one non-commuting property
 
@@ -141,20 +153,34 @@ to exactly one resolve. But it makes *at-most-once delivery* a hard requirement 
 `ExchangeService`, not a nicety, and a retry that re-delivers a batch would corrupt
 history rather than duplicate it.
 
-## Validation snapshot — end of iteration 2
+## Validation snapshot — end of iteration 3
 
 Full command output is pasted in [`HANDOFF.md`](HANDOFF.md) §2.
 
 | Check | Real output |
 | --- | --- |
-| `tidekeeper-doc-gate.js` | **148/148** checks passed |
-| `tidekeeper-quality-gate.js` | **10/11** passed, 1 not applicable yet (session harness, iteration 3) |
-| `check-syntax.js` | all **25** Luau files parsed |
-| `tidekeeper-determinism-scan.js` | **clean** — 25 files, 5 288 lines, 8 rules |
+| `tidekeeper-quality-gate.js` | **11/11** checks passed |
+| `tidekeeper-doc-gate.js` | **159/159** checks passed |
+| `check-syntax.js` | all **48** Luau files parsed |
+| `tidekeeper-determinism-scan.js` | **clean** — 48 files, 10 594 lines, **12** rules, 5 explicit allowances |
 | `tidekeeper-smoke-test.js` | **858 passed, 0 failed**, 3/3 static proofs |
-| `find-dead-config.js` | 5 keys unreferenced, all reserved for iterations 3–4 (listed in HANDOFF §5) |
+| `tidekeeper-session-test.js` | **72 passed, 0 failed** — 14 scenarios against a fake DataModel |
+| `find-dead-config.js` | **no dead keys** — the five reserved keys are now consumed or display-only |
+| Measured platform cost | **5.64 DataStore / 5.24 MemoryStore requests per session** over 200 sessions, 8 posts, 30 virtual days |
+| Gameplay code | 48 modules, 10 546 lines, layers L0–L4 |
+| Verification level claimed | **L3 — runs against a simulated platform** (doc 09 §4) |
+
+### Iteration-2 snapshot, kept for the record
+
+| Check | Real output |
+| --- | --- |
+| `tidekeeper-doc-gate.js` | 148/148 |
+| `tidekeeper-quality-gate.js` | 10/11 passed, 1 not applicable yet |
+| `check-syntax.js` | all 25 Luau files parsed |
+| `tidekeeper-determinism-scan.js` | clean — 25 files, 5 288 lines, 8 rules |
+| `tidekeeper-smoke-test.js` | 858 passed, 0 failed |
 | Gameplay code | 25 modules, 5 263 lines, layers L0/L2 only |
-| Verification level claimed | **L2 — executed in a Lua VM outside Roblox** (doc 09 §4) |
+| Verification level claimed | L2 — executed in a Lua VM outside Roblox |
 
 ### Iteration-1 snapshot, kept for the record
 

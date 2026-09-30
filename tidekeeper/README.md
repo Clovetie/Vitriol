@@ -3,15 +3,20 @@
 A Roblox cozy trading game about a **tidal island post**, a **sea that rises and falls on
 a real clock**, and **visitors who are real players you will never be online with**.
 
-> **This repository folder is at the end of iteration 2.** It contains the complete
-> research, the complete design, its own copy of the tooling, and **the pure simulation
-> core**: 25 Luau modules under `code/ReplicatedStorage/Tidekeeper/`, exercised by 858
-> executed assertions with 0 failures.
+> **This repository folder is at the end of iteration 3.** It contains the complete
+> research, the complete design, its own copy of the tooling, the pure simulation core,
+> and **the whole server**: 48 Luau modules and 10 546 lines, exercised by 858 pure
+> assertions and 72 session assertions, 0 failures.
 >
-> Verification level: **L2 — executed in a Lua VM outside Roblox.** Nothing has run
-> inside Roblox Studio yet, no DataStore has been touched, and the 18 µs performance
-> budget is explicitly *not* verified. [`HANDOFF.md`](HANDOFF.md) §3 lists everything
-> that is unproven; start there.
+> A simulated month — 200 sessions across 8 posts and 30 virtual days, run against a
+> fake Roblox DataModel — costs a measured **5.64 DataStore and 5.24 MemoryStore
+> requests per session**, and found three defects, two of which silently destroyed
+> player history.
+>
+> Verification level: **L3 — runs against a simulated platform.** Nothing has run
+> inside Roblox Studio yet, no real DataStore has been touched, and the 18 µs
+> performance budget is still explicitly *not* verified.
+> [`HANDOFF.md`](HANDOFF.md) §3 lists everything that is unproven; start there.
 
 ---
 
@@ -87,8 +92,13 @@ in [`docs/10-RESEARCH-NOTES.md`](docs/10-RESEARCH-NOTES.md).
 ```
 tidekeeper/
   docs/     14 design documents — the iteration-1 deliverable
-  code/     empty; iterations 2+ fill it, mirroring the Explorer tree
+  code/     48 Luau modules mirroring the Studio Explorer tree
+    ReplicatedStorage/Tidekeeper/{Config,Lib,Shared,Domain}   pure, L0–L2
+    ServerStorage/Tidekeeper/{Adapters,Services}              L1 and L3
+    ServerScriptService/Tidekeeper/{RemoteHandlers,Diagnostics} + Main.server.luau
   tools/    forked, TIDEKEEPER-specific analysis and gate tooling
+    lib/harness.js        the shared fengari harness
+    tests/                pure-tests.lua, fake-platform.lua, session-tests.lua
   ROADMAP.md
   HANDOFF.md
 ```
@@ -107,11 +117,14 @@ Studio Explorer tree ([`docs/01-ARCHITECTURE.md`](docs/01-ARCHITECTURE.md) §2).
 ```bash
 npm --prefix tidekeeper/tools install     # once (luaparse, fengari)
 
-# The gate. Right now it runs the doc gate and reports that code/ is empty.
+# The one command. 11 checks, about two minutes.
 node tidekeeper/tools/tidekeeper-quality-gate.js
 
 # Individual reports:
-node tidekeeper/tools/tidekeeper-doc-gate.js
+node tidekeeper/tools/tidekeeper-doc-gate.js          # 163 documentation checks
+node tidekeeper/tools/tidekeeper-determinism-scan.js  # 12 static rules
+node tidekeeper/tools/tidekeeper-smoke-test.js        # 858 pure assertions
+node tidekeeper/tools/tidekeeper-session-test.js      # 72 server assertions + cost report
 node tidekeeper/tools/check-syntax.js tidekeeper/code
 node tidekeeper/tools/metrics.js --src tidekeeper/code
 node tidekeeper/tools/hot-loop-scan.js --src tidekeeper/code
@@ -119,5 +132,12 @@ node tidekeeper/tools/call-graph.js --src tidekeeper/code
 node tidekeeper/tools/find-dead-config.js --src tidekeeper/code
 ```
 
-See [`tools/README.md`](tools/README.md). Iteration 2 adds
-`tidekeeper-smoke-test.js`; iteration 3 adds `tidekeeper-session-test.js`.
+`npm --prefix tidekeeper/tools run gate | docs | check | determinism | smoke | session`
+are the same things, shorter.
+
+The gate is **enforcing**, not advisory: the doc gate, the determinism scan, the syntax
+check, both test suites, the separation check and a clean-worktree check all fail the
+build. Whatever iteration 4 adds, it may scope a rule to the layers where it is a real
+defect — it may not weaken one.
+
+See [`tools/README.md`](tools/README.md) for what each tool checks and why.

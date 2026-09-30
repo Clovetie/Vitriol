@@ -39,7 +39,7 @@ const MAX_CAPTURE = 200000;
  * constant on purpose: a gate that infers how far along the project is will
  * eventually infer wrongly and let a missing harness through.
  */
-const CURRENT_ITERATION = 2;
+const CURRENT_ITERATION = 3;
 
 function die(message) {
 	console.error(`tidekeeper-quality-gate: ${message}`);
