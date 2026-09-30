@@ -1,0 +1,22 @@
+{
+	"name": "tidekeeper-tools",
+	"private": true,
+	"description": "Local tooling for the TIDEKEEPER Roblox project. A fork of the repository's analysis tooling, scoped to tidekeeper/.",
+	"scripts": {
+		"gate": "node tidekeeper-quality-gate.js",
+		"docs": "node tidekeeper-doc-gate.js",
+		"check": "node check-syntax.js ../code",
+		"metrics": "node metrics.js --src ../code",
+		"call-graph": "node call-graph.js --src ../code",
+		"hot-loop": "node hot-loop-scan.js --src ../code",
+		"dead-config": "node find-dead-config.js --src ../code",
+		"smoke": "node tidekeeper-smoke-test.js",
+		"session": "node tidekeeper-session-test.js"
+	},
+	"dependencies": {
+		"luaparse": "0.3.1"
+	},
+	"devDependencies": {
+		"fengari": "^0.1.5"
+	}
+}

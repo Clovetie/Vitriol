@@ -9,6 +9,13 @@ creature** that hunts by vibration, scent and memory — and **learns your habit
 > the design; the modules under `code/` mirror the Explorer tree and are the source
 > of truth.
 
+> **This repository also hosts a second, unrelated game.**
+> [`tidekeeper/`](tidekeeper/README.md) is **TIDEKEEPER**, a cozy asynchronous trading
+> game, at the end of its own iteration 1 (research + design + forked tooling, no code
+> yet). The two projects share a repository and nothing else: neither tree may
+> reference the other, and each has its own `docs/`, `code/`, `tools/`, `ROADMAP.md`
+> and `HANDOFF.md`. Everything below this line is about VITRIOL only.
+
 ---
 
 ## Read in this order

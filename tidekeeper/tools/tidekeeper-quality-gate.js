@@ -1,0 +1,223 @@
+#!/usr/bin/env node
+"use strict";
+
+/**
+ * TIDEKEEPER quality gate — one deterministic pre-commit/CI command.
+ *
+ * It orchestrates this folder's tools rather than replacing them, and it degrades
+ * honestly across iterations:
+ *
+ *   iteration 1  code/ is empty  -> runs the doc gate; source checks report "skipped
+ *                                   (no source)"; the gate passes.
+ *   iteration 2+ code/ has Luau  -> syntax, metrics, hot-loop, call-graph and
+ *                                   dead-config become enforcing, and the smoke test
+ *                                   is REQUIRED to exist and pass.
+ *   iteration 3+ session harness -> also required once it exists.
+ *
+ * It never invents a pass. A tool that is missing when it is required is a failure,
+ * not a skip.
+ *
+ * Usage:
+ *   node tidekeeper/tools/tidekeeper-quality-gate.js
+ *   node tidekeeper/tools/tidekeeper-quality-gate.js --src tidekeeper/code \
+ *        --report tidekeeper/tools/reports/gate.json
+ */
+
+const fs = require("fs");
+const path = require("path");
+const { spawnSync } = require("child_process");
+
+const TOOLS = __dirname;
+const GAME = path.resolve(TOOLS, "..");
+const REPO = path.resolve(GAME, "..");
+const NODE = process.execPath;
+const MAX_CAPTURE = 200000;
+
+function die(message) {
+	console.error(`tidekeeper-quality-gate: ${message}`);
+	process.exit(2);
+}
+
+function parseArgs(argv) {
+	const out = { src: path.join(GAME, "code"), report: null, quiet: false };
+	for (let i = 2; i < argv.length; i += 1) {
+		const arg = argv[i];
+		if (arg === "--src") out.src = path.resolve(process.cwd(), argv[++i]);
+		else if (arg === "--report") out.report = path.resolve(process.cwd(), argv[++i]);
+		else if (arg === "--quiet") out.quiet = true;
+		else if (arg === "--help") {
+			console.log(
+				"Usage: node tidekeeper/tools/tidekeeper-quality-gate.js [--src tidekeeper/code] [--report path] [--quiet]"
+			);
+			process.exit(0);
+		} else die(`unknown argument ${arg}`);
+	}
+	return out;
+}
+
+const args = parseArgs(process.argv);
+const rel = (p) => path.relative(REPO, p).replace(/\\/g, "/");
+
+/** Count .luau/.lua files under the source root. */
+function countSource(root) {
+	if (!fs.existsSync(root)) return 0;
+	let n = 0;
+	const walk = (dir) => {
+		for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+			const full = path.join(dir, e.name);
+			if (e.isDirectory()) walk(full);
+			else if (/\.luau?$/.test(e.name)) n += 1;
+		}
+	};
+	walk(root);
+	return n;
+}
+
+const sourceCount = countSource(args.src);
+const hasSource = sourceCount > 0;
+
+function clip(s) {
+	if (s.length <= MAX_CAPTURE) return s;
+	return `${s.slice(0, MAX_CAPTURE)}\n...[truncated ${s.length - MAX_CAPTURE} bytes]`;
+}
+
+const results = [];
+
+function run(name, scriptRelative, extraArgs, options) {
+	const opts = options || {};
+	const script = path.join(TOOLS, scriptRelative);
+	const entry = { name, command: null, status: null, exitCode: null, stdout: "", stderr: "" };
+
+	if (!fs.existsSync(script)) {
+		if (opts.requiredFrom && hasSource) {
+			entry.status = "FAIL";
+			entry.stderr = `${scriptRelative} does not exist yet, and it is required from iteration ${opts.requiredFrom} onward (source tree is non-empty).`;
+		} else {
+			entry.status = "PENDING";
+			entry.stderr = `${scriptRelative} not present yet (expected in iteration ${opts.requiredFrom || "?"}).`;
+		}
+		results.push(entry);
+		return entry;
+	}
+
+	if (opts.needsSource && !hasSource) {
+		entry.status = "SKIP";
+		entry.stderr = "no Luau source under the source root yet";
+		results.push(entry);
+		return entry;
+	}
+
+	const argv = [script, ...extraArgs];
+	entry.command = ["node", rel(script), ...extraArgs].join(" ");
+	const r = spawnSync(NODE, argv, { cwd: REPO, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+	entry.exitCode = r.status;
+	entry.stdout = clip(r.stdout || "");
+	entry.stderr = clip(r.stderr || "");
+	entry.status = r.status === 0 ? "PASS" : "FAIL";
+	results.push(entry);
+	return entry;
+}
+
+// ---------------------------------------------------------------- the checks
+
+// 1. Documents. Always enforcing — they are the project's source of truth.
+run("doc-gate", "tidekeeper-doc-gate.js", []);
+
+// 2. Separation from the sibling game. Always enforcing.
+(function separation() {
+	const entry = { name: "separation", command: "internal", status: "PASS", exitCode: 0, stdout: "", stderr: "" };
+	const offenders = [];
+	const walk = (dir) => {
+		if (!fs.existsSync(dir)) return;
+		for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (e.name === "node_modules" || e.name === "reports" || e.name === ".git") continue;
+			const full = path.join(dir, e.name);
+			if (e.isDirectory()) { walk(full); continue; }
+			if (!/\.(luau?|js|md|json)$/.test(e.name)) continue;
+			const text = fs.readFileSync(full, "utf8");
+			// A dependency on the sibling tree: a require/import/path reaching out of
+			// tidekeeper/ into the VITRIOL code or tools trees.
+			const bad = text.match(/(?:require|from|src|path)\s*[=:(]?\s*["'`][^"'`]*\.\.\/\.\.\/(?:code|tools)\//g);
+			if (bad) offenders.push(`${rel(full)}: ${bad.join(", ")}`);
+			if (/\bVitriol\b/.test(text) && !/sibling|VITRIOL tree|reference implementation|different game|Separation|do not import/i.test(text)) {
+				offenders.push(`${rel(full)}: references Vitriol outside an explicit separation note`);
+			}
+		}
+	};
+	walk(GAME);
+	if (offenders.length) {
+		entry.status = "FAIL";
+		entry.exitCode = 1;
+		entry.stderr = offenders.join("\n");
+	} else {
+		entry.stdout = "no dependency on the VITRIOL tree";
+	}
+	results.push(entry);
+})();
+
+// 3. Source checks. Skip cleanly while code/ is empty.
+run("check-syntax", "check-syntax.js", [rel(args.src)], { needsSource: true });
+run("metrics", "metrics.js", ["--src", rel(args.src)], { needsSource: true });
+run("hot-loop-scan", "hot-loop-scan.js", ["--src", rel(args.src)], { needsSource: true });
+run("call-graph", "call-graph.js", ["--src", rel(args.src)], { needsSource: true });
+run("find-dead-config", "find-dead-config.js", ["--src", rel(args.src)], { needsSource: true });
+
+// 4. Harnesses. Pending until their iteration; required once source exists.
+run("smoke-test", "tidekeeper-smoke-test.js", [], { requiredFrom: 2 });
+run("session-test", "tidekeeper-session-test.js", [], { requiredFrom: 3 });
+
+// 5. Whitespace hygiene in the working tree.
+(function diffCheck() {
+	const r = spawnSync("git", ["diff", "--check"], { cwd: REPO, encoding: "utf8" });
+	results.push({
+		name: "git-diff-check",
+		command: "git diff --check",
+		status: r.status === 0 ? "PASS" : "FAIL",
+		exitCode: r.status,
+		stdout: clip(r.stdout || ""),
+		stderr: clip(r.stderr || ""),
+	});
+})();
+
+// ---------------------------------------------------------------- the report
+
+const passed = results.filter((r) => r.status === "PASS").length;
+const failed = results.filter((r) => r.status === "FAIL");
+const skipped = results.filter((r) => r.status === "SKIP" || r.status === "PENDING");
+
+if (!args.quiet) {
+	console.log(`TIDEKEEPER quality gate — source root ${rel(args.src)} (${sourceCount} Luau file(s))\n`);
+	for (const r of results) {
+		const mark = { PASS: "  ok ", FAIL: "FAIL ", SKIP: "skip ", PENDING: "wait " }[r.status];
+		const first = (r.stdout || r.stderr || "").trim().split("\n").filter(Boolean).pop() || "";
+		console.log(`${mark} ${r.name.padEnd(18)} ${first.slice(0, 96)}`);
+	}
+	if (failed.length) {
+		console.log("");
+		for (const r of failed) {
+			console.log(`--- ${r.name} (${r.command || "internal"})`);
+			if (r.stdout) console.log(r.stdout);
+			if (r.stderr) console.error(r.stderr);
+		}
+	}
+}
+
+if (args.report) {
+	fs.mkdirSync(path.dirname(args.report), { recursive: true });
+	fs.writeFileSync(
+		args.report,
+		JSON.stringify(
+			{ generatedAt: new Date().toISOString(), sourceRoot: rel(args.src), sourceCount, results },
+			null,
+			2
+		)
+	);
+}
+
+const total = results.length;
+console.log(
+	`\nTIDEKEEPER quality gate: ${passed}/${total} checks passed` +
+		(skipped.length ? `, ${skipped.length} not applicable yet` : "") +
+		(failed.length ? `, ${failed.length} FAILED` : "")
+);
+process.exit(failed.length ? 1 : 0);

@@ -12,3 +12,7 @@ evaluation-report.json
 # Editor / OS
 .DS_Store
 *.swp
+
+# TIDEKEEPER tooling (see tidekeeper/tools/README.md)
+tidekeeper/tools/node_modules/
+tidekeeper/tools/reports/
