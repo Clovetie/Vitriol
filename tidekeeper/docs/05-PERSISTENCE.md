@@ -81,7 +81,7 @@ only for the `Meta` key, which is human-edited.
 ```
 offset size field         notes
   0     1   v             schema version
-  1     8   id            (userId<<24) | epochLow  -- globally unique
+  1     8   id            owner*8192 + (epoch mod 8192)  -- see the note below
   9     8   owner         userId
  17     4   epoch         int32
  21     1   current       0..4
@@ -102,6 +102,23 @@ offset size field         notes
 
 `checksum` is not security — it is corruption detection across a store that has been
 migrated. A bad checksum drops the Drifter silently and increments a counter.
+
+> **Corrected in iteration 2 — the `id` construction.** This document originally
+> specified `id = (userId << 24) | epochLow`. **That is not representable.** Roblox user
+> ids already exceed 2^32; shifting one left by 24 produces a value above 2^53, which a
+> Luau `number` (an IEEE-754 double) cannot hold exactly. The id would silently round,
+> and two different Drifters would collide with no error anywhere.
+>
+> The shipped construction is `id = owner * 8192 + (epoch mod 8192)`
+> (`GameConfig.DRIFTER_ID_EPOCH_SPAN = 8192`, `OWNER_ID_MAX = 2^40`):
+>
+> - exact for every owner below 2^40, which is ~200× the largest user id in existence;
+> - still 8 bytes on the wire, so the record stays 68 bytes;
+> - unique per owner for 8192 consecutive epochs (~5.8 years), and Drifters expire after
+>   seven days.
+>
+> The visitor ring in the post blob packs `(owner, epoch)` the same way, into a u48.
+> `DrifterCodec.makeId` refuses an out-of-range owner rather than rounding.
 
 ## 5. Receipt wire format — 28 bytes
 

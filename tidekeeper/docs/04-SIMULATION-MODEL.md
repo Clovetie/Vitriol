@@ -103,11 +103,18 @@ Visit.resolve(S, D, ctx, rng) -> (ΔS, LedgerEntry, Receipt)
    ```
    score(item) = w_t * cosine(item.tasteVec, D.taste)
                + w_w * (item.id ∈ D.wants and 1 or 0)
-               + w_p * pricePressure(item.price, D.budget, D.taste[2])
+               + w_p * pricePressure(item.price, item.baseValue, D.taste[DEAR])
                + w_r * rng:normal(0, 0.12)          -- the only randomness
    ```
    Weights in `EconomyConfig`. The noise term is small and seeded; it exists so two
    identical visits do not read as scripted.
+
+   > **Clarified in iteration 2.** This line originally read `D.taste[2]`, using doc 03
+   > §5's **0-based** axis numbering. Lua arrays are 1-based, so the cheap/dear axis is
+   > index **3**, and the shipped code reads `DrifterConfig.AXIS_DEAR`. It is written
+   > `D.taste[DEAR]` here so the ambiguity cannot come back. Whenever this document
+   > names a taste axis by number, it means the 0-based numbering of doc 03 §5;
+   > **code always uses the named constant.**
 5. **Purchase.** Greedy by score while budget remains and `maxItems` (from class) is not
    exceeded.
 6. **Barter.** If `D.cargo` is non-empty and orders accept barter, form a *claim*, not a

@@ -1,294 +1,404 @@
-# Handoff — TIDEKEEPER, iteration 1 (2026-09-30 UTC)
+# Handoff — TIDEKEEPER, end of iteration 2
 
-Everything in this file was produced by running a command in this repository or by a
-web search performed on 2026-09-30. Where a claim is unverified it says so.
+**State:** the pure core exists, runs, and is tested. 25 Luau modules, 5 263 lines,
+layers L0 (`Lib`) and L2 (`Domain`) only, plus `Config` and the `Shared` wire formats.
+858 executed assertions, 0 failures. Nothing in `code/` touches `game`, a service, an
+`Instance`, or the clock.
 
----
+**Verification level claimed: L2** — *executed in a Lua VM outside Roblox*
+(doc 09 §4). Not L3, not L5. Nothing here has run inside Roblox Studio, no DataStore
+has been touched, and the 18 µs performance budget is **not** verified. See §3.
 
-## 0. Prompt for the next agent
+**Read in this order:**
 
-```
-You are iteration 2 of the TIDEKEEPER project, a Roblox async cozy-trading game that
-lives in `tidekeeper/` in this repository. Iteration 1 produced the complete design;
-your job is to implement the pure layers and prove them.
-
-BRANCH: work only on your session's fixed branch. Never switch or create branches.
-
-SEPARATION (hard rule): TIDEKEEPER is a different game from VITRIOL, which lives in
-`/code`, `/docs` and `/tools` at the repository root. You may not read, modify,
-reference or require anything from the VITRIOL tree, and you may not modify its docs
-or tooling. Everything you write goes under `tidekeeper/`.
-
-READ FIRST, in this order:
-  tidekeeper/README.md
-  tidekeeper/docs/00-VISION.md          pillars, loop, scope, forbidden list
-  tidekeeper/docs/01-ARCHITECTURE.md    layering, Explorer tree, cadence, budgets
-  tidekeeper/docs/02-TIDE-AND-TIME.md   the shared clock — implement EXACTLY as specified
-  tidekeeper/docs/04-SIMULATION-MODEL.md resolve-on-read, determinism rules, test contract
-  tidekeeper/docs/06-ECONOMY-PROGRESSION.md standing orders language, economy maths
-  tidekeeper/docs/05-PERSISTENCE.md §4-6 wire formats you must encode/decode
-  tidekeeper/ROADMAP.md                 open decisions
-
-BUILD (Explorer-first; mirror the tree in `tidekeeper/code/`, one file per module, each
-with a header comment stating its Studio path — there is NO Rojo project and you must
-not create one):
-
-  L0  ReplicatedStorage/Tidekeeper/Lib/
-        Tide      exactly doc 02 §9; pure; no os.time inside; zero allocation in height()
-        RNG       seeded, splittable, deterministic; NEVER wrap math.random
-        Hash      fixed documented 32-bit mix; it is part of the save format
-        MathExt, Tables (pool, sortedPairs, deep freeze), Signal, Codec, Schema
-  L2  ReplicatedStorage/Tidekeeper/Domain/
-        Post, Drifter, Orders, Visit, Resolve, Ledger, Almanac, Standing
-  Shared/
-        DrifterCodec, PostCodec, Version      (codecs only; no service access)
-  Config/
-        GameConfig, TideConfig, EconomyConfig, DrifterConfig, OrdersConfig
-        (FindsConfig may be a small representative subset in this iteration — annotate it)
-
-DO NOT BUILD: any service, adapter, remote, client code, DataStore/MemoryStore call, or
-anything that yields. No Instance access anywhere. No `game`, no services, no os.time()
-in L0/L2 — time is always an argument.
-
-DETERMINISM IS THE POINT. Re-read doc 04 §5 and obey every rule. In particular:
-  - no math.random anywhere
-  - no pairs() iteration where order affects output
-  - all money and stock are integers
-  - Visit.resolve arrival order sorted by Hash.mix(drifterId, epoch)
-
-TEST HARNESS: create `tidekeeper/tools/tidekeeper-smoke-test.js` following the pattern of
-the sibling project's harness (fengari Lua VM loading the REAL modules — read
-`tools/vitriol-smoke-test.js` as a reference implementation only; do not import it).
-The gate at `tidekeeper/tools/tidekeeper-quality-gate.js` already expects it and will
-start failing as soon as you add a Luau file, which is intentional.
-
-REQUIRED ASSERTIONS (doc 04 §8): >= 300 total, including all 12 tide vectors from
-doc 02 §8 and both determinism proofs from doc 04 §5.1. Also assert every economy
-invariant in doc 04 §9 that is provable without persistence.
-
-ALSO ADD: `tidekeeper/tools/tidekeeper-determinism-scan.js` per tools/README §5.
-
-BENCHMARK and report: median and p99 wall time of Visit.resolve, and allocation count
-in the steady path. Budget is 18 us median (doc 04 §6). If you miss it, say so and say
-by how much — do not quietly move the budget.
-
-BEFORE SAYING DONE, run and paste the REAL output of:
-  node tidekeeper/tools/tidekeeper-smoke-test.js
-  node tidekeeper/tools/check-syntax.js tidekeeper/code
-  node tidekeeper/tools/metrics.js --src tidekeeper/code
-  node tidekeeper/tools/hot-loop-scan.js --src tidekeeper/code
-  node tidekeeper/tools/call-graph.js --src tidekeeper/code
-  node tidekeeper/tools/find-dead-config.js --src tidekeeper/code
-  node tidekeeper/tools/tidekeeper-quality-gate.js
-
-Claim verification level L2 and nothing higher (doc 09 §4). You have no Studio and no
-engine; do not claim buffer behaviour, DataStore behaviour, or performance on real
-hardware.
-
-FINALLY: update tidekeeper/ROADMAP.md honestly, and rewrite tidekeeper/HANDOFF.md using
-the template in docs/12-ITERATION-PROMPTS.md, including the copy-paste prompt for
-iteration 3. If you run low on budget, commit the honest partial result and write the
-handoff rather than claiming completion.
-```
+| # | File | Why |
+| --- | --- | --- |
+| 1 | this file | what happened, what is true, what to do next |
+| 2 | [`ROADMAP.md`](ROADMAP.md) | tracker, the validation snapshot, open decisions OD1–OD14 |
+| 3 | [`code/README.md`](code/README.md) | the Explorer tree and the eight rules for files in it |
+| 4 | [`docs/01-ARCHITECTURE.md`](docs/01-ARCHITECTURE.md) | layering and budgets — iteration 3 lives at L1 and L3 |
+| 5 | [`docs/05-PERSISTENCE.md`](docs/05-PERSISTENCE.md) | key map, wire formats, locking, retries |
+| 6 | [`docs/03-ASYNC-SOCIAL.md`](docs/03-ASYNC-SOCIAL.md) | the Drifter Exchange, which is iteration 3's hardest problem |
+| 7 | [`tools/README.md`](tools/README.md) | §5 and §5b: the determinism scan, and what the harness has to fake |
 
 ---
 
-## 1. Verification level claimed
+## 1. What was built
 
-**None.** This iteration produced documentation and tooling, not code. Nothing here has
-been executed inside the Roblox engine and no gameplay behaviour has been demonstrated.
-The verification ladder in [`docs/09-AI-BUILD-PIPELINE.md`](docs/09-AI-BUILD-PIPELINE.md)
-§4 starts at L1 in iteration 2.
+```
+code/ReplicatedStorage/Tidekeeper/
+  Config/   GameConfig TideConfig EconomyConfig DrifterConfig OrdersConfig FindsConfig
+  Lib/      MathExt Hash RNG Tables Signal Codec Schema Tide
+  Shared/   Version DrifterCodec PostCodec
+  Domain/   Standing Almanac Drifter Post Orders Ledger Visit Resolve
+tools/
+  tidekeeper-smoke-test.js         858 assertions against the real modules
+  tidekeeper-determinism-scan.js   8 static rules, enforcing
+  tests/pure-tests.lua             the suite
+```
 
-What *has* been verified is the internal consistency of the design, by a tool that can
-fail — see §2.
+The three modules worth reading first, because everything else serves them:
+
+- **`Domain/Resolve.luau`** — `Resolve.run(S, now, inbound, work) -> (S', entries, receipts, info)`.
+  Pure, total, deterministic, bounded at 27 tide epochs. Deep-copies `S` on entry, so a
+  resolve can be run a thousand times from the same input and compared byte for byte.
+  `now` is an argument; the module cannot learn the time.
+- **`Domain/Visit.luau`** — one Drifter, one post, one outcome, in eight stages. Fills a
+  *delta*; `Visit.apply` is the only thing that mutates the post. That split is what
+  makes the conservation invariant checkable and what will let the client replay a visit
+  against a read-only mirror in iteration 4.
+- **`Lib/Tide.luau`** — the shared clock. Three constituents unrolled to scalars,
+  allocation-free `height`, analytic `velocity`, and a bisecting `nextStateChange` that
+  returns an exact integer second.
+
+### Three findings from iteration 2
+
+**1. Writing the spec down is not the same as computing it.** Executing doc 02 §8's
+twelve tide test vectors found that **three of them were wrong** — not marginally, but
+by 4.27 studs, by 6 events, and by 3 studs. Each was "reasoned about" rather than
+computed. Two of the five documentation corrections below are the same species. The doc
+gate now re-derives those three vectors in JavaScript from the §2.2 constants, so the
+same class of error cannot recur silently, and the Lua harness asserts them
+independently: two implementations, written from the constants, agreeing to 1e-9.
+
+**2. The test environment was lying, and would have kept lying.** fengari's integer
+subtype is **32 bits wide with silent wraparound** (`luaconf.LUA_MAXINTEGER === 2147483647`).
+Luau has no integer subtype at all — every number is a double. Running the real codecs
+under fengari's defaults produced a suite that reported **841 passing assertions**, of
+which every single one involving a value above 2³¹ was meaningless: `255 * 16777216`
+evaluated to `-16777216` and the u32 round-trip test "passed" its way to `-1`. The fix
+was to make the harness match Luau rather than Lua 5.3 — rewrite integer literals to
+floats, force `math.floor` and friends to return floats — and it is documented at length
+in `tools/README.md` §5b because **any future harness for this project has to do the
+same thing**.
+
+**3. A static rule caught what 858 dynamic assertions could not.** The determinism scan's
+first run flagged `local workspace = work or Resolve.newWorkspace()` — a local shadowing
+the Roblox global `workspace` inside a module whose entire value proposition is that it
+never touches Roblox. No test could have failed on that; it is correct Lua and correct
+behaviour. It is also exactly how platform surface creeps back into a pure layer two
+iterations later. The rule stays.
 
 ---
 
-## 2. What is actually true
+## 2. Commands and their real output
 
-Real, pasted output.
+Every command below was run from the repository root at the end of iteration 2, and the
+output is pasted verbatim.
 
-```
-$ node tidekeeper/tools/tidekeeper-doc-gate.js
-note: checked 38 relative Markdown links
-note: tide: epoch=22357s, spring=26.8, neap=13.2, beat=14.767d, cap=6.99d
-note: checked 5 iteration prompts
-TIDEKEEPER doc gate: 137/137 checks passed
-```
+### `node tidekeeper/tools/tidekeeper-quality-gate.js`
 
 ```
-$ node tidekeeper/tools/tidekeeper-quality-gate.js
-TIDEKEEPER quality gate — source root tidekeeper/code (0 Luau file(s))
+TIDEKEEPER quality gate — iteration 2, source root tidekeeper/code (25 Luau file(s))
 
-  ok  doc-gate           TIDEKEEPER doc gate: 137/137 checks passed
+  ok  doc-gate           TIDEKEEPER doc gate: 148/148 checks passed
   ok  separation         no dependency on the VITRIOL tree
- skip check-syntax       no Luau source under the source root yet
- skip metrics            no Luau source under the source root yet
- skip hot-loop-scan      no Luau source under the source root yet
- skip call-graph         no Luau source under the source root yet
- skip find-dead-config   no Luau source under the source root yet
- wait smoke-test         tidekeeper-smoke-test.js not present yet (expected in iteration 2).
- wait session-test       tidekeeper-session-test.js not present yet (expected in iteration 3).
+  ok  check-syntax       All 25 Luau file(s) parsed successfully.
+  ok  metrics              39  code/ReplicatedStorage/Tidekeeper/Shared/PostCodec.luau
+  ok  hot-loop-scan         1  table.sort
+  ok  call-graph           Version.classify  <- PostCodec
+  ok  find-dead-config     ✓ no dead keys
+  ok  determinism-scan   clean
+  ok  smoke-test         TIDEKEEPER smoke test: 858 passed, 0 failed, 0 static proof(s) failed
+wait  session-test       tidekeeper-session-test.js not present yet (expected in iteration 3; this is iteration 2).
   ok  git-diff-check
 
-TIDEKEEPER quality gate: 3/10 checks passed, 7 not applicable yet
+TIDEKEEPER quality gate: 10/11 checks passed, 1 not applicable yet
 ```
 
-The doc gate independently recomputes the tide arithmetic from the constants table
-rather than trusting the prose, and it checks that the Drifter byte layout is contiguous
-and totals 68 bytes. It found four real errors in the drafts (see §5).
+The gate now carries a hand-edited `CURRENT_ITERATION` constant. **Iteration 3 must bump
+it to 3**, which is what turns `session-test` from `wait` into a hard requirement.
 
----
-
-## 3. What was built
+### `node tidekeeper/tools/tidekeeper-doc-gate.js`
 
 ```
-tidekeeper/
-  README.md                       entry point, separation contract, the three findings
-  ROADMAP.md                      iteration tracker + 11 open decisions with owners
-  HANDOFF.md                      this file
-  code/README.md                  the Explorer-tree contract; no code yet, by design
-  docs/00-VISION.md               pitch, 5 pillars, core loop, progression, scope, titles
-  docs/01-ARCHITECTURE.md         4 layers, full Explorer tree, authority table,
-                                  7 remotes, 5 cadence slots, budgets, failure policy
-  docs/02-TIDE-AND-TIME.md        3-harmonic tide, exact constants, 5 states, epochs,
-                                  forward search, trust boundary, 12 test vectors
-  docs/03-ASYNC-SOCIAL.md         the Drifter Exchange: 68-byte record, 4 classes,
-                                  8-axis taste, two-tier storage, receipts, fairness,
-                                  liquidity targets, notifications, the Chart
-  docs/04-SIMULATION-MODEL.md     resolve-on-read, the epoch step, Visit.resolve,
-                                  prose generation, 10 determinism rules, chunking,
-                                  7 economy invariants, migration, offline play
-  docs/05-PERSISTENCE.md          12 platform limits, key map, 6 KB post budget,
-                                  wire formats, session locking, retries, reaping
-  docs/06-ECONOMY-PROGRESSION.md  3 currencies, 5 Currents, pricing, passive caps,
-                                  the standing-order language, 200 finds, pacing table
-  docs/07-WORLD-AND-CONTENT.md    island, 4 zones, the Bar, content inventory,
-                                  art direction, audio, seasons
-  docs/08-CLIENT-UX-MOBILE.md     6 screens, the first 60 seconds, the Ledger,
-                                  mobile rules, RDC 2026 UI usage, accessibility
-  docs/09-AI-BUILD-PIPELINE.md    2026 survey of Roblox generative/vibe-coding AI,
-                                  per-iteration usage, 7 rules, the verification ladder
-  docs/10-RESEARCH-NOTES.md       40+ sourced facts with confidence levels,
-                                  the three findings, 8 known unknowns
-  docs/11-HUMAN-AUTHORED.md       briefs for island, water, audio, meshes, prose,
-                                  the R1 playtest, the Studio-only checklist
-  docs/12-ITERATION-PROMPTS.md    full prompts for it2–it6+, handoff template, 10 rules
-  docs/13-RISKS-AND-COMPLIANCE.md 3 risk-removing decisions, safety table,
-                                  15-risk register, monetisation, pre-launch checklist
-  tools/tidekeeper-doc-gate.js    NEW — validates the design documents
-  tools/tidekeeper-quality-gate.js NEW — the single gate; degrades honestly
-  tools/README.md                 what is here, what it2/it3 must add
-  tools/package.json
-  tools/{check-syntax,metrics,call-graph,hot-loop-scan,find-dead-config}.js
-  tools/lib/{paths,luau,luau-transform,evaluate}.js
-  tools/{selene,stylua}.toml
+note: checked 45 relative Markdown links
+note: tide: epoch=22357s, spring=26.8, neap=13.2, beat=14.767d, cap=6.99d
+note: tide measured: +T_M2 height=11.232754, LOW entries/30d=52, daily range 15.97..29.73
+note: checked 5 iteration prompts
+TIDEKEEPER doc gate: 148/148 checks passed
 ```
 
-**No `.luau` file exists anywhere under `tidekeeper/`.** That was the agreed scope.
+### `node tidekeeper/tools/tidekeeper-determinism-scan.js`
+
+```
+TIDEKEEPER determinism scan — 25 file(s), 5288 line(s) under tidekeeper/code
+
+  ok  math.random            0 violation(s)
+  ok  clock                  0 violation(s)
+  ok  datetime               0 violation(s)
+  ok  services               0 violation(s)
+  ok  scheduler              0 violation(s)
+  ok  coroutine              0 violation(s)
+  ok  unordered-iteration    0 violation(s)
+  ok  layering               0 violation(s)
+
+clean
+```
+
+### `node tidekeeper/tools/check-syntax.js tidekeeper/code`
+
+```
+All 25 Luau file(s) parsed successfully.
+```
+
+No known-failure allowlist. Iteration 1 dropped the sibling project's, and the rule
+"`bit32.*` only, no native `&` `|` `~`" is what keeps it dropped.
+
+### `node tidekeeper/tools/tidekeeper-smoke-test.js`
+
+```
+=== assertions by section ===
+  MathExt          28        Version          18        Visit           113
+  Hash             21        DrifterCodec     40        PostCodec        36
+  RNG              28        Standing         38        Resolve          64
+  Tables           33        Almanac          23        determinism      13
+  Signal           14        Post             53        economy          46
+  Codec            86        Orders          100        benchmark         2
+  Schema           25        Ledger           28
+  Tide             49
+
+--- static proofs (source inspection, not the VM) ---
+  ok  Visit.resolve body located  [241 lines]
+  ok  Visit.resolve contains no table constructor  [0 occurrence(s) of '{']
+  ok  Visit.resolve calls no allocating helper  [none]
+
+harness wall time: 79703 ms
+TIDEKEEPER smoke test: 858 passed, 0 failed, 0 static proof(s) failed
+```
+
+Against doc 04 §8's per-area minimums: Tide ≥30 → **49**; RNG ≥20 → **28**;
+Codec ≥40 → **86**; Orders ≥50 → **100**; Visit ≥80 → **113**; Resolve ≥40 → **64**;
+determinism ≥10 → **13**; economy ≥30 → **46**. Total ≥300 → **858**.
+
+Measured blob sizes, printed by the suite:
+
+```
+post blob size: 289 bytes (fixture)
+MAXIMAL post blob: 3312 bytes, budget 6144 (base64: 4416 bytes)
+post blob after a busy 27-epoch week: 526 bytes
+a 200-record drifter shard: 13607 bytes (13.29 KB)
+```
+
+The maximal post — 160 store entries, 24 shelves, a full 48-entry visitor ring, 64
+claims and a 1 024-byte orders program — is **3 312 bytes against the 6 KB budget**, and
+**4 416 bytes base64**, comfortably inside a 32 KB MemoryStore value. The 13.29 KB warm
+shard matches doc 03 §6 exactly.
 
 ---
 
-## 4. Decisions taken
+## 3. What is *not* verified, stated plainly
 
-| # | Decision | Reasoning | Documented in |
-| --- | --- | --- | --- |
-| 1 | The game is an **async cozy trading sim** with a real-clock tide | Attacks the cold-start failure mode structurally, and is the flagship use of the async-notification system Roblox ships in Oct 2026 | 00 §4 |
-| 2 | **Every visitor is a real player, delayed** | The one mechanic no other Roblox game has; makes a 3-CCU server feel populated | 03 §1–2 |
-| 3 | The tide is a **pure function of UTC time**, never stored or replicated | Zero bytes, zero remotes, and it makes offline replay and exact notification scheduling possible | 02 §1 |
-| 4 | **Resolve-on-read**, never simulate an absent player | Cost scales with sessions, not population × time; Luau Execution cannot do the alternative | 04 §1 |
-| 5 | MemoryStore holds an **index only**; the Drifter pool is in DataStore | The quota is `64 KB + 1.2 KB × users` universe-wide — ~1.2 MB at 1 000 CCU | 03 §6, 10 §3 |
-| 6 | Drifter = **68 bytes**, Receipt = 28 bytes, post blob ≤ 6 KB | Everything downstream is sized from these | 05 §3–5 |
-| 7 | **No paid random items, ever** | Removes the entire regulated-monetisation surface of Roblox's May 2026 clarification | 13 §1 D1 |
-| 8 | **No free text anywhere**; letters are fixed phrases | The dominant safety risk in a player-contact game | 13 §1 D2, 08 §9 |
-| 9 | **No Robux-for-item peer trading**; barter is a claim, not a transfer | ToS compliance, and it removes the duplication exploit class | 13 §1 D2, 03 §9 |
-| 10 | `PolicyService` wired from day one anyway | ~30 lines now; expensive to retrofit | 13 §1 D3 |
-| 11 | Standing decays to a **band floor**, never to zero | Absence must never erase an achievement; returning players are the most valuable | 06 §2 |
-| 12 | Offline Drifter cache lives in a **second DataStore key**, not the post blob | Keeps the hot path at ~3.1 KB and one request | 05 §3 |
-| 13 | Ledger prose is **template + slots**, never runtime-LLM | Determinism, offline play, cost, moderation, and it is translatable without a migration | 04 §4.1, 09 §3 |
-| 14 | **12-player servers** | Async presence means a small server costs nothing socially and buys a lot of performance | 07 §1 |
-| 15 | Tooling is **forked**, not shared, with the sibling project | Two games must be able to change their gates independently | tools/README |
-| 16 | Iterations 2–3 use **no Studio and no generative asset tooling** | Those tools are strong at assets and weak at systems; front-load systems | 09 §2 |
-| 17 | Shipping title deferred to it5 | It is a live-search-data decision, not a taste decision | 00 §10, OD1 |
+| Claim | Status |
+| --- | --- |
+| `Visit.resolve` fits 18 µs median / 50 µs p99 | **NOT VERIFIED.** See below. |
+| Anything behaves this way inside Roblox Studio | not verified — nothing has run there |
+| DataStore / MemoryStore behaviour, quotas, throttling | not verified — no adapter exists yet |
+| The async notification API | not verified — **iteration 3's first task** |
+| The game is fun | not verified and not provable here — iteration 4's R1 playtest |
 
----
+**The benchmark.** `Visit.resolve` measures **1.73 ms median, 2.36 ms p99** in fengari.
+The same harness clocks 1e6 integer additions at ~94 ms, i.e. ~94 ns per addition
+against Luau's ~1–2 ns. Dividing through puts the true figure somewhere in a 20–60 µs
+band, which straddles the budget and therefore settles nothing. The harness prints this
+verdict itself rather than letting a reader infer a pass. **Measure it in Studio in
+iteration 3** via the MCP `execute_luau` tool (doc 09 §3), before tuning anything.
 
-## 5. Where the docs were wrong
-
-The doc gate caught four real errors in the drafts. All are fixed; they are recorded
-because they are evidence the gate is worth running.
-
-1. **Warm shard size was wrong.** The draft stated 13.6 KB for 200 × 68 B. The real
-   figure is 13.3 KB (13 600 bytes). The downstream "live pool" figure was corrected
-   from ~8.7 MB to ~8.5 MB. Cause: dividing bytes by 1 000 instead of 1 024 in one place
-   and not the other.
-2. **A broken cross-document link** — `docs/00-VISION.md` linked to `../ROADMAP.md`
-   before `tidekeeper/ROADMAP.md` existed, which would have resolved to the *VITRIOL*
-   roadmap. Exactly the kind of accidental coupling the separation rule exists to stop.
-3. **The iteration 6+ prompt omitted the branch and separation rules.** Every other
-   prompt had them. Added.
-4. **A stray non-ASCII character** ("synodic半") in `02-TIDE-AND-TIME.md` §2, from a
-   drafting slip.
-
-Two further things worth flagging to iteration 2:
-
-5. **The 27-epoch catch-up cap is 6.99 days, not exactly 7.** `27 × 22 357 s = 603 639 s`.
-   The docs say "≈ 7 days" and the gate tolerates ≥ 6.9 d. Do not "fix" this by changing
-   the epoch length — the epoch is `T_M2 / 2` and that is load-bearing. If a full 7 days
-   is ever required, the cap becomes 28.
-6. **The spring/neap beat computes to 14.767 days**, not the 14.765 quoted from the real
-   -world figure. The gate tolerates ±0.02 d. The difference is because `T_M2` is
-   rounded to whole seconds. Harmless; documented here so nobody "corrects" it later.
+**The zero-allocation claim** is supported by two proofs and neither is a heap profiler:
+statically, the body of `Visit.resolve` extracted from the real source contains no `{`,
+no `..`, and no allocating helper; dynamically, 3 000 visits replace none of the 13
+buffers in the reused context. fengari does not implement `lua_gc`, so
+`collectgarbage("count")` is unavailable — this was the honest alternative to inventing
+a number.
 
 ---
 
-## 6. What is NOT verified
+## 4. Where the documents were wrong
 
-Explicitly, so no later iteration mistakes this document for evidence.
+Five corrections, all made in the documents themselves with a marked note explaining the
+error, and all now asserted by a test or by the doc gate.
 
-- **No Luau has been written, parsed, or executed.** Every module signature in the docs
-  is a specification, not an implementation.
-- **No Roblox engine behaviour.** In particular: `buffer` + base64 round-tripping a 6 KB
-  blob through a real DataStore, real MemoryStore `UpdateAsync` contention, real
-  `BindToClose` timing, and whether the RDC 2026 orthographic camera and UI blur behave
-  as announced.
-- **The 18 µs `Visit.resolve` budget is an estimate**, not a measurement.
-- **The exact API of the async-notification system is unknown.** It entered Studio Beta
-  in October 2026 and this design was written from the announcement, not from shipped
-  documentation. **Iteration 3's first task is to verify it.**
-- **Whether the concept is fun.** Risk R1. The Ledger has not been in front of a human.
-  This is the largest unmitigated risk in the project and iteration 4 owns it.
-- **Market figures** in `docs/10-RESEARCH-NOTES.md` §4 are mostly secondary reporting and
-  are marked 🟡. The retention benchmarks in 4.8 are a single developer's anecdote,
-  directionally useful and not authoritative.
-- **Whether MemoryStore keys count toward the memory quota.** DevForum consensus says no
-  for sorted maps; it is unverified, and the design is sized as though they do.
+| # | Doc | Was | Is | Why the original was wrong |
+| --- | --- | --- | --- | --- |
+| 1 | 02 §8 | `height(EPOCH + T_M2)` "within 0.9 of 15.5" | `11.232754472632912` (4.267 away) | after one M2 period S2 and K1 have both drifted; only M2 returned to phase |
+| 2 | 02 §8 | `LOW` entries over 30 d ∈ [55, 65] | **52** | assumed ~2 LOW windows per M2 cycle; the −6 threshold is only crossed on the bigger swings |
+| 3 | 02 §8 | spring/neap daily range ≈26.8 / ≈13.2 | **29.73 / 15.97** | computed `2*(A_M2 ± A_S2)` and forgot K1's 2.1 amplitude entirely |
+| 4 | 05 §4 | `id = (userId << 24) \| epochLow` | `id = owner * 8192 + (epoch mod 8192)` | **not representable.** User ids exceed 2³², shifted by 24 that is > 2⁵³, and a Luau double would silently round two Drifters onto the same id |
+| 5 | 06 §2 | 11 000 Standing falls to "~4 700" in a fortnight | **5 798** | ~4 700 is decay toward zero; decay is toward the *band floor*, and the per-epoch `floor()` fixes the exact value |
 
----
+Plus two clarifications, not errors:
 
-## 7. Open questions handed forward
-
-| # | Question | Recommendation | Owner |
-| --- | --- | --- | --- |
-| Q1 | Does the shipped async-notification API match the announcement? | **Verify before writing NotifyService.** Design for 1/day/user regardless; the game must be fully playable with notifications off. | it3 |
-| Q2 | Is `Visit.resolve` really ≤ 18 µs in Luau? | Benchmark in it2 headlessly, then confirm in-engine with MCP `execute_luau` in it4. If it is 3× over, chunk to 2 epochs/tick rather than cutting features. | it2/it4 |
-| Q3 | Does the Ledger land emotionally? (R1) | Prototype it *before* building it5's content. Five players, ten minutes, unprompted. If nobody mentions a visitor by name, the concept needs rework. | it4 |
-| Q4 | Do Echoes read as dishonest when the population is small? (R4, OD4) | Make the Ledger marker prominent and playtest the < 200 DAU case explicitly. Seed Drifters being *characters* is the hedge. | it5 |
-| Q5 | Is the standing-order language expressive enough to be interesting, and simple enough for a child? | The live preview panel (doc 06 §5.5) is the mitigation and it is only possible because the resolver is pure. Do not compromise the purity to save time in it2. | it2/it4 |
-| Q6 | Geographic or thematic Currents? (OD2) | Thematic, with a geographic bias in shard selection, so timezone overlap improves without fragmenting identity. | it5 |
-| Q7 | Will the DataStore shared request budget bite during reaping? | Reapers are already rate-limited to one shard per slow tick. Instrument `BudgetMeter` in it3 and watch it. | it3 |
-| Q8 | Does Scene Generator ship in time to blockout the island? (OD8) | Assume no. The hand-built contingency in doc 11 §2 is the plan of record. | it5 |
+- **06 §3** wrote `pricePressure(p, budget, dearTaste)` but the body never used `budget`
+  — it uses the find's base value. The shipped signature is
+  `Visit.pricePressure(price, baseValue, dearTaste)`.
+- **04 §4** wrote `D.taste[2]` using doc 03 §5's **0-based** axis numbering. Lua is
+  1-based, so the cheap/dear axis is index **3**. The doc now says `D.taste[DEAR]` and
+  the code uses `DrifterConfig.AXIS_DEAR`. Rule going forward: prose may use 0-based axis
+  numbers; **code always uses the named constant.**
 
 ---
 
-## 8. A note on scope discipline
+## 5. Decisions iteration 2 made that iteration 3 inherits
 
-The forbidden list in `docs/01-ARCHITECTURE.md` §10 and `docs/00-VISION.md` §8 is
-binding on every iteration: no combat, no real-time co-presence mechanics, no second
-scheduler, no client authority, no free text, no paid random items, no Rojo project,
-and no reference to the VITRIOL tree.
+| # | Decision | Reason |
+| --- | --- | --- |
+| D1 | `--!nonstrict` on every module | `--!strict` fights the table-driven config shapes for no runtime benefit |
+| D2 | **`bit32.*` only — never `&`, `\|`, `~`** | `check-syntax.js` parses Lua 5.1, where those are syntax errors, and there is no allowlist |
+| D3 | `Post.store` is a **sorted array** of `{id, qty}` with binary search, never a `[id] = qty` map | `pairs` order is unspecified and the resolver iterates stock; a map would make the simulation non-deterministic |
+| D4 | `Resolve.run` deep-copies `S`; `Visit.resolve` writes into a pre-allocated context | one copy per *session*, not per visit; this is what makes the 1 000-run replay proof possible |
+| D5 | `Visit.resolve` returns a delta; `Visit.apply` is the only mutator | makes conservation checkable and lets the client replay against a read-only mirror |
+| D6 | `RNG:normal` is **Bates-4**, not Box–Muller | Box–Muller needs `log` and `cos`, whose last bit is libm-dependent, and this value decides whether a player got paid |
+| D7 | Arrival epoch = `firstEpoch + (Hash.mix(id, salt, 7) mod epochCount)`, overflow spills forward then is **dropped and counted** | a silent drop is an invisible economy leak |
+| D8 | Nested config tables are **arrays of arrays**, never named sub-keys | `find-dead-config.js` only collects keys at brace depth ≤ 2 |
+| D9 | `S.sold` is a second 32-byte bitset beside `S.almanac` | "first one you ever sold" cannot be derived from "ever held" — everything on a shelf was held |
+| D10 | Barter forms a **claim** on `S.claims`, bounded at 64, never a transfer | doc 03 §9; an unbounded queue is a way for a griefer to make a post fail to save |
+| D11 | The quality gate carries a hand-edited `CURRENT_ITERATION` | a gate that infers how far along the project is will eventually infer wrongly |
 
-The failure mode this project is most likely to die of is not technical. It is an
-iteration deciding that the async loop would be "better with a bit of real-time
-multiplayer". It would not be. The async loop is the entire reason this game exists.
+### Config keys deliberately left unreferenced
+
+`find-dead-config.js` reports five. All are reserved, none are dead:
+
+| Key | Wanted by |
+| --- | --- |
+| `GameConfig.EPOCHS_PER_RESOLVE_TICK` | iteration 3, `CadenceService` chunking |
+| `GameConfig.MAX_RESIDENT_DRIFTERS` | iteration 3, `ExchangeService` warm shard |
+| `GameConfig.RECEIPT_BLOB_BYTES` | iteration 3, `ReceiptCodec` |
+| `FindsConfig.GROUP_NAMES` | iteration 4, UI |
+| `FindsConfig.ZONE_COUNT` | iteration 3, beachcombing |
+
+If iteration 3 does not consume the first three, delete them rather than let the list rot.
+
+### The one non-commuting property — read this before writing `ExchangeService`
+
+A Drifter's arrival epoch depends on **the width of the window being resolved**
+(`mod epochCount`). Consequences, both pinned by assertions so they cannot change
+silently:
+
+- with **no** inbound Drifters, resolving 1 epoch then 2 more is byte-identical to
+  resolving 3 at once — decay, spoilage, comb maturation and passive income all commute;
+- with inbound Drifters, feeding the **same list** to two windows is **not** the same run.
+
+That is correct — in the live game the exchange hands each Drifter to exactly one
+resolve — but it makes **at-most-once delivery a hard requirement** on `ExchangeService`.
+A retry that re-delivers a batch corrupts history rather than duplicating it. Design the
+claim/ack protocol for that from the start.
+
+---
+
+## 6. Open questions for iteration 3
+
+1. **What is the shipped async-notification API?** The whole design assumes something
+   exists. Verify before designing `NotifyService` (see the prompt below). OD7.
+2. **Do MemoryStore keys count toward the memory quota?** Size assuming they do. OD9.
+3. **Is `Visit.resolve` actually inside 18 µs in Luau?** Unknown. OD12.
+4. **Is one `RunService` connection enough** once resolve is chunked at ≤4 epochs/tick
+   and 8 posts may be resolving at once? Doc 01 §5 says yes; measure it.
+5. **What happens when two servers resolve the same post?** Doc 05 §7 specifies a 90 s
+   MemoryStore session lock. The fake-persistence layer must simulate losing that race.
+
+---
+
+## 7. Prompt for iteration 3
+
+Copy the block below verbatim.
+
+```
+You are iteration 3 of TIDEKEEPER, a Roblox game living in `tidekeeper/` inside a
+repository it shares with an unrelated game called VITRIOL.
+
+BRANCH: work only on your session's fixed branch. Never create or push another.
+SEPARATION: never read from or write to the VITRIOL tree at /code, /docs, /tools, or
+/README.md, /ROADMAP.md, /HANDOFF.md. Everything you touch is under tidekeeper/.
+The quality gate greps every file under tidekeeper/ for the word "Vitriol" and fails.
+
+READ IN THIS ORDER: tidekeeper/HANDOFF.md, tidekeeper/ROADMAP.md,
+tidekeeper/code/README.md, tidekeeper/tools/README.md (§5 and §5b especially),
+then docs 01, 03, 05, 13.
+
+Iteration 2 delivered the pure core: 25 modules, 858 passing assertions, verification
+level L2. Your job is persistence, the Drifter Exchange, and the server services.
+
+FIRST TASK, BEFORE ANY CODE — use web search, do not guess:
+  (a) Verify the SHIPPED async/turn-based notification API. Roblox's turn-based
+      notification system entered Studio Beta around October 2026 and Developer Push
+      Notification Support was on the late-2026 roadmap (doc 10 §1.1-1.3). Find what
+      actually shipped, with a date and a link, write it into docs/10-RESEARCH-NOTES.md
+      §6, and design NotifyService against reality. The game must remain fully playable
+      with zero notifications.
+  (b) Re-verify the DataStore and MemoryStore quota numbers in doc 10 §3. They were
+      correct in September 2026; confirm they still are, and correct the docs if not.
+  (c) Check whether Roblox Studio's MCP server API has changed (doc 09 §2). Iteration 4
+      depends on it.
+
+THEN BUILD:
+  L1  ServerStorage/Tidekeeper/Adapters/
+        DataStoreAdapter   retry policy doc 05 §8, budget guard, session lock doc 05 §7
+        MemoryAdapter      hash map + queue, sharded, quota-aware, degrades never blocks
+        NotifyAdapter      per the API you verified in (a)
+        PolicyAdapter      doc 13 §3 — wire it even though nothing depends on it yet
+  L3  ServerStorage/Tidekeeper/Services/
+        CadenceService     THE single RunService connection, slots per doc 01 §5
+        PlayerService PostService ExchangeService LedgerService NotifyService
+        ShowcaseService
+      ServerStorage/Tidekeeper/Bootstrap
+      ServerScriptService/Tidekeeper/Main, RemoteHandlers/*, Diagnostics/{Profiler,BudgetMeter}
+      ReplicatedStorage/Tidekeeper/Shared/Remotes, NetContract
+      ReplicatedStorage/Tidekeeper/Shared/ReceiptCodec  (28 B, doc 05 §5)
+
+  Plus the in-memory fake persistence layer of doc 05 §11, with INJECTED FAILURES:
+  DataUpdateConflict, quota exhaustion, request-budget starvation, throttling, and
+  two-server session-lock contention.
+
+HARD RULES — these are inherited and non-negotiable:
+  - Exactly ONE RunService connection in the entire game, in CadenceService.
+  - Only adapters may yield. Only adapters may touch DataStore/MemoryStore/Http.
+  - Nothing under Lib/ or Domain/ may gain a dependency on anything you write.
+    tidekeeper-determinism-scan.js enforces the layer ordering; do not weaken it.
+  - bit32.* only; no native & | ~ anywhere. There is no known-failure allowlist.
+  - No pairs() in Domain/. Prefer sorted iteration everywhere a result is persisted.
+  - Remotes are created in exactly one file and validated by NetContract.
+  - No remote accepts free text (doc 13 §2).
+  - Resolve runs chunked: <= 4 epochs/tick, <= 27 epochs total (doc 01 §5).
+  - ExchangeService MUST deliver each Drifter to exactly one resolve. See HANDOFF §5,
+    "the one non-commuting property" — at-most-once is a correctness requirement, not
+    an optimisation, and a retried batch corrupts history.
+
+BUILD tidekeeper/tools/tidekeeper-session-test.js: boot the server against a virtual
+DataModel and the fake stores, and run a SIMULATED 30-DAY, 200-SESSION LIFETIME across
+at least 8 posts exchanging real Drifters through the real ExchangeService. Assert every
+economy invariant in doc 04 §9 at every step. This test is the point of the iteration.
+Reuse tidekeeper-smoke-test.js's harness scaffolding — in particular floatifyNumbers and
+the bit32 shim, documented in tools/README.md §5b. Without them fengari's 32-bit integer
+subtype will silently wrap every value above 2^31 and the suite will pass while being
+wrong; iteration 2 hit exactly this and it cost real time.
+
+ALSO:
+  - Bump CURRENT_ITERATION to 3 in tidekeeper-quality-gate.js. This makes the session
+    test a hard requirement, which is the point.
+  - Measure Visit.resolve in Studio via the MCP execute_luau tool and settle OD12.
+    If you cannot reach Studio, say so plainly and leave OD12 open — do not estimate.
+  - Either consume or delete GameConfig.EPOCHS_PER_RESOLVE_TICK,
+    GameConfig.MAX_RESIDENT_DRIFTERS and GameConfig.RECEIPT_BLOB_BYTES (HANDOFF §5).
+
+REPORT, with real numbers and real pasted output:
+  - measured DataStore/MemoryStore request cost per session vs. the 5/session budget
+    (doc 03 §6.3);
+  - measured MemoryStore footprint vs. the 64 KB + 1.2 KB x users quota (doc 05 §1);
+  - what every injected failure did to the economy invariants.
+
+Claim L3 — "runs against a simulated platform". Do NOT claim real DataStore or
+MemoryStore behaviour, and do not claim a Studio measurement you did not take. If
+something is unverified, say so in a table like HANDOFF §3.
+
+These commands must all pass, and their real output must be pasted into HANDOFF.md:
+  node tidekeeper/tools/tidekeeper-quality-gate.js
+  node tidekeeper/tools/tidekeeper-doc-gate.js
+  node tidekeeper/tools/tidekeeper-determinism-scan.js
+  node tidekeeper/tools/check-syntax.js tidekeeper/code
+  node tidekeeper/tools/tidekeeper-smoke-test.js
+  node tidekeeper/tools/tidekeeper-session-test.js
+
+Finally: update ROADMAP.md (iteration 3 row, validation snapshot, open decisions),
+rewrite HANDOFF.md in this file's shape, and write the iteration 4 prompt into it.
+Use web search wherever a fact about the platform matters. Ask if you have questions.
+```

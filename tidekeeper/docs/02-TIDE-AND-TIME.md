@@ -75,8 +75,12 @@ dry.
 
 Derived, for the docs and the UI:
 
-- **Spring range** = `2*(A_M2 + A_S2)` = **26.8 studs**
-- **Neap range** = `2*(A_M2 − A_S2)` = **13.2 studs**
+- **Spring range** = `2*(A_M2 + A_S2)` = **26.8 studs** — *semidiurnal component only.*
+- **Neap range** = `2*(A_M2 − A_S2)` = **13.2 studs** — *semidiurnal component only.*
+
+K1's 2.1-stud diurnal amplitude adds to both. The figures a player actually sees,
+measured over 60 days in iteration 2's harness, are a **29.73** stud spring range and a
+**15.97** stud neap range. §8's test vectors use the measured numbers.
 - **Spring/neap period** ≈ **14.765 days**
 - **Mean low-water interval** ≈ **12 h 25 min**
 
@@ -200,6 +204,17 @@ Tide state is trivially forgeable client-side, so:
 Iteration 2's harness must assert all of these. They are computed from the constants in
 §2.2 and are the contract.
 
+> **Corrected in iteration 2.** Three of the twelve rows below were wrong when this
+> document was written: they were reasoned about rather than computed. The §2.2
+> constants are the contract, so the constants won and the table was fixed. The
+> corrections, all now asserted in `tools/tests/pure-tests.lua`:
+>
+> | Row | Was | Is | Why the original was wrong |
+> | --- | --- | --- | --- |
+> | `TideHeight(EPOCH + T_M2)` | "within 0.9 of 15.5" | `11.2327544726` (4.267 away) | after one M2 period, S2 and K1 have both drifted; only M2 has returned to phase |
+> | `LOW` entries over 30 days | `∈ [55, 65]` | **52** | the estimate assumed roughly two LOW windows per M2 cycle; the −6 threshold is only crossed on the bigger swings |
+> | spring / neap daily range | `≈26.8` / `≈13.2` | `29.73` / `15.97` | the estimate computed `2*(A_M2 ± A_S2)` and forgot K1's 2.1 amplitude entirely |
+
 | Input | Expected | Tolerance |
 | --- | --- | --- |
 | `TideHeight(EPOCH)` | `15.5` | 1e-9 |
@@ -207,13 +222,13 @@ Iteration 2's harness must assert all of these. They are computed from the const
 | `TideEpoch(EPOCH)` | `0` | exact |
 | `TideEpoch(EPOCH + 22356)` | `0` | exact |
 | `TideEpoch(EPOCH + 22357)` | `1` | exact |
-| `TideHeight(EPOCH + T_M2)` — one M2 period on | within `0.9` of `TideHeight(EPOCH)` | — |
+| `TideHeight(EPOCH + T_M2)` — one M2 period on | `11.232754472632912` | 1e-9 |
 | `TideHeight(t)` for any `t` | `∈ [-15.5, 15.5]` | — |
 | mean of `TideHeight` over 30 days at 60 s steps | `0.0` | 0.05 |
-| count of `LOW` entries over 30 days | `∈ [55, 65]` | — |
+| count of `LOW` entries over 30 days | `∈ [50, 54]` (measured: **52**) | — |
 | `NextStateChange(t, 7d)` | never `nil` for any `t` | — |
 | determinism | `TideHeight(t)` bit-identical across 10 000 repeated calls | exact |
-| spring/neap | max daily range over 60 days peaks `≈26.8`, troughs `≈13.2` | 0.2 |
+| spring/neap | max daily range over 60 days peaks `≈29.73`, troughs `≈15.97` | 0.3 |
 
 ## 9. Module surface (for iteration 2)
 

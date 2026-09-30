@@ -34,18 +34,28 @@ repository and nothing else.
 | `tools/tidekeeper-quality-gate.js` — new, degrades honestly while `code/` is empty | ✅ |
 | Gameplay code | ⬜ **deliberately none — iteration 2** |
 
-## Iteration 2 — the pure core ⬜
+## Iteration 2 — the pure core ✅
 
 | Deliverable | Status |
 | --- | --- |
-| `Lib/{Tide,RNG,Hash,MathExt,Tables,Signal,Codec,Schema}` | ⬜ |
-| `Domain/{Post,Drifter,Orders,Visit,Resolve,Ledger,Almanac,Standing}` | ⬜ |
-| `Shared/{DrifterCodec,PostCodec,Version}` | ⬜ |
-| `Config/{Game,Tide,Economy,Drifter,Orders}Config` | ⬜ |
-| `tools/tidekeeper-smoke-test.js`, ≥ 300 executed assertions | ⬜ |
-| Both determinism proofs (doc 04 §5.1) green | ⬜ |
-| `Visit.resolve` benchmarked against the 18 µs budget | ⬜ |
-| `tools/tidekeeper-determinism-scan.js` (tools/README §5) | ⬜ |
+| `Lib/{Tide,RNG,Hash,MathExt,Tables,Signal,Codec,Schema}` | ✅ 8 modules |
+| `Domain/{Post,Drifter,Orders,Visit,Resolve,Ledger,Almanac,Standing}` | ✅ 8 modules |
+| `Shared/{DrifterCodec,PostCodec,Version}` | ✅ 3 modules |
+| `Config/{Game,Tide,Economy,Drifter,Orders}Config` + `FindsConfig` | ✅ 6 modules |
+| `tools/tidekeeper-smoke-test.js`, ≥ 300 executed assertions | ✅ **858**, 0 failed |
+| Both determinism proofs (doc 04 §5.1) green | ✅ plus a third, on the clamped path |
+| `Visit.resolve` benchmarked against the 18 µs budget | 🟨 measured, **not verified** — see below |
+| `tools/tidekeeper-determinism-scan.js` (tools/README §5) | ✅ 8 rules, clean |
+| Zero-allocation claim for `Visit.resolve` | ✅ two proofs, neither a heap profiler |
+| Doc corrections found by executing the spec | ✅ 5 (docs 02, 04, 05, 06) |
+
+**The benchmark caveat, stated plainly.** `Visit.resolve` runs at a **1.73 ms median /
+2.36 ms p99** inside fengari. fengari is a Lua interpreter written in JavaScript; the
+same harness measures 1e6 integer additions at ~94 ms, i.e. ~94 ns per addition against
+Luau's ~1–2 ns. Dividing through puts the real figure somewhere in the 20–60 µs band —
+which straddles the 18 µs budget and therefore **proves nothing**. The budget is an
+iteration-3 task, measured in Studio via the MCP `execute_luau` tool (doc 09 §3). The
+harness number is a regression tripwire, not a verdict.
 
 ## Iteration 3 — the server exists ⬜
 
@@ -113,12 +123,44 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD9 | Do MemoryStore keys count toward the memory quota? (doc 10 §6) | it3 | Size assuming they do |
 | OD10 | Offline-play reconciliation policy (doc 04 §11) | it5 | Last-write-wins on post, union on ledger, conflict noted |
 | OD11 | Rewarded Video Ads at all? (doc 13 §4) | post-it5 | Not at launch; the tone is fragile |
+| OD12 | Is `Visit.resolve` actually inside 18 µs in Luau? | it3 | Unknown. Measure in Studio before tuning anything |
+| OD13 | Arrival scheduling is window-width dependent (see below) | it3 | `ExchangeService` must deliver each Drifter to exactly one resolve |
+| OD14 | Should `warmth` feed the price a Drifter will accept, not just the prose? | it5 | Currently prose-only. Playtest first |
 
-## Validation snapshot — end of iteration 1
+### OD13 in full — the one non-commuting property
+
+Iteration 2 found and **pinned** a property that iteration 3 must respect. A Drifter's
+arrival epoch is `firstEpoch + (Hash.mix(id, salt, 7) mod epochCount)`. `epochCount` is
+the width of the window being resolved, so feeding the *same* inbound list to a 1-epoch
+resolve and then a 2-epoch resolve does **not** produce the state of a single 3-epoch
+resolve. With no inbound drifters the resolver commutes exactly (asserted); with inbound
+drifters it does not (also asserted, as a negative test, so it cannot silently change).
+
+This is correct behaviour, not a bug: in the live game the exchange hands each Drifter
+to exactly one resolve. But it makes *at-most-once delivery* a hard requirement on
+`ExchangeService`, not a nicety, and a retry that re-delivers a batch would corrupt
+history rather than duplicate it.
+
+## Validation snapshot — end of iteration 2
+
+Full command output is pasted in [`HANDOFF.md`](HANDOFF.md) §2.
 
 | Check | Real output |
 | --- | --- |
-| `tidekeeper-doc-gate.js` | see `HANDOFF.md` §2 |
-| `tidekeeper-quality-gate.js` | see `HANDOFF.md` §2 |
+| `tidekeeper-doc-gate.js` | **148/148** checks passed |
+| `tidekeeper-quality-gate.js` | **10/11** passed, 1 not applicable yet (session harness, iteration 3) |
+| `check-syntax.js` | all **25** Luau files parsed |
+| `tidekeeper-determinism-scan.js` | **clean** — 25 files, 5 288 lines, 8 rules |
+| `tidekeeper-smoke-test.js` | **858 passed, 0 failed**, 3/3 static proofs |
+| `find-dead-config.js` | 5 keys unreferenced, all reserved for iterations 3–4 (listed in HANDOFF §5) |
+| Gameplay code | 25 modules, 5 263 lines, layers L0/L2 only |
+| Verification level claimed | **L2 — executed in a Lua VM outside Roblox** (doc 09 §4) |
+
+### Iteration-1 snapshot, kept for the record
+
+| Check | Real output |
+| --- | --- |
+| `tidekeeper-doc-gate.js` | 137/137 |
+| `tidekeeper-quality-gate.js` | 3 pass, 7 N/A, 0 fail |
 | Gameplay code | none — deliberately |
-| Verification level claimed | **none** (docs only; see doc 09 §4) |
+| Verification level claimed | none (docs only) |

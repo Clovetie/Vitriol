@@ -39,8 +39,13 @@ it. This means a two-week absence costs you progress but never *erases* an achie
 the single most important retention decision in the whole economy.
 
 Decay: `2.5% of (current − bandFloor)` per tide epoch, i.e. ~9.4%/day. A player at
-11 000 in a band whose floor is 4 000 falls to ~4 700 in a fortnight. Painful, recoverable,
-never catastrophic.
+11 000 in a band whose floor is 4 000 falls to **5 798** after a fortnight (54 epochs).
+Painful, recoverable, never catastrophic.
+
+> **Corrected in iteration 2.** This paragraph originally said "~4 700", which is what
+> you get if you decay toward zero. Decaying toward the band floor leaves
+> `4000 + 7000 × 0.975^54 = 5 790`, and the integer `floor()` inside the per-epoch step
+> makes the exact shipped answer **5 798**. Asserted in `tools/tests/pure-tests.lua`.
 
 ## 3. Price and value
 
@@ -48,11 +53,16 @@ Every find has a **base value** `V` and a **taste vector**. The price *you* set 
 lever.
 
 ```
-pricePressure(p, budget, dearTaste) =
+pricePressure(p, V, dearTaste) =
     let r = p / V                                -- your markup
     let ideal = 1.0 + 0.006 * dearTaste          -- dear-tasting drifters expect markup
     return clamp(1.6 - 2.2 * |r - ideal|, -1, 1)
 ```
+
+> **Corrected in iteration 2.** The signature was written `pricePressure(p, budget,
+> dearTaste)`, but the body never uses `budget` — it uses the find's base value `V`.
+> The shipped function is `Visit.pricePressure(price, baseValue, dearTaste)`. Budget is
+> applied in the purchase stage, where it belongs.
 
 - Price at exactly `V` and you sell to almost anyone, for almost nothing.
 - Price at 1.6×`V` and only Glass Road buyers bite, but each is worth four Shallows sales.

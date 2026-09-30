@@ -173,6 +173,89 @@ if (fs.existsSync(tidePath)) {
 		const capDays = (27 * epochSeconds) / 86400;
 		check("27-epoch cap covers 7 days", capDays >= 6.9, `27 epochs = ${capDays.toFixed(2)} days`);
 		notes.push(`tide: epoch=${epochSeconds}s, spring=${spring.toFixed(1)}, neap=${neap.toFixed(1)}, beat=${beatDays.toFixed(3)}d, cap=${capDays.toFixed(2)}d`);
+
+		// ------------------------------------------------- 3b. measured vectors
+		//
+		// Added in iteration 2, after three of §8's twelve test vectors turned out
+		// to be reasoned-about rather than computed. This block RE-DERIVES them in
+		// JavaScript straight from the §2.2 constants and asserts the document
+		// states the answer. A doc gate that only checks internal consistency
+		// would have passed all three wrong rows; this one would not have.
+		const TWO_PI = Math.PI * 2;
+		const heightAt = (t) => {
+			const s = t - EPOCH;
+			return (
+				Z0 +
+				A_M2 * Math.cos((TWO_PI * s) / T_M2) +
+				A_S2 * Math.cos((TWO_PI * s) / T_S2) +
+				A_K1 * Math.cos((TWO_PI * s) / T_K1)
+			);
+		};
+		const velocityAt = (t) => {
+			const s = t - EPOCH;
+			return (
+				(-A_M2 * TWO_PI * Math.sin((TWO_PI * s) / T_M2)) / T_M2 +
+				(-A_S2 * TWO_PI * Math.sin((TWO_PI * s) / T_S2)) / T_S2 +
+				(-A_K1 * TWO_PI * Math.sin((TWO_PI * s) / T_K1)) / T_K1
+			);
+		};
+		const stateAt = (t) => {
+			const h = heightAt(t);
+			if (h < -6) return "LOW";
+			if (h > 8) return "HIGH";
+			if (h >= 2) return "SLACK";
+			return velocityAt(t) < 0 ? "EBB" : "FLOOD";
+		};
+
+		const afterOneM2 = heightAt(EPOCH + T_M2);
+		check(
+			"TideHeight(EPOCH + T_M2) vector matches the constants",
+			tide.includes(afterOneM2.toPrecision(17).replace(/0+$/, "")) || tide.includes(String(afterOneM2)),
+			`constants give ${afterOneM2}, which the document does not state`
+		);
+
+		let lowEntries = 0;
+		let wasLow = false;
+		let dayLo = Infinity;
+		let dayHi = -Infinity;
+		let rangeMax = -Infinity;
+		let rangeMin = Infinity;
+		for (let step = 0; step < 86400; step += 1) {
+			const t = EPOCH + step * 60;
+			const h = heightAt(t);
+			if (step < 43200) {
+				const isLow = stateAt(t) === "LOW";
+				if (isLow && !wasLow) lowEntries += 1;
+				wasLow = isLow;
+			}
+			if (h < dayLo) dayLo = h;
+			if (h > dayHi) dayHi = h;
+			if ((step + 1) % 1440 === 0) {
+				const range = dayHi - dayLo;
+				if (range > rangeMax) rangeMax = range;
+				if (range < rangeMin) rangeMin = range;
+				dayLo = Infinity;
+				dayHi = -Infinity;
+			}
+		}
+		check(
+			"LOW-entry count vector matches the constants",
+			tide.includes(`**${lowEntries}**`),
+			`constants give ${lowEntries} LOW entries over 30 days, which the document does not state`
+		);
+		check(
+			"spring daily-range vector matches the constants",
+			tide.includes(rangeMax.toFixed(2)),
+			`constants give a ${rangeMax.toFixed(2)} stud spring range, which the document does not state`
+		);
+		check(
+			"neap daily-range vector matches the constants",
+			tide.includes(rangeMin.toFixed(2)),
+			`constants give a ${rangeMin.toFixed(2)} stud neap range, which the document does not state`
+		);
+		notes.push(
+			`tide measured: +T_M2 height=${afterOneM2.toFixed(6)}, LOW entries/30d=${lowEntries}, daily range ${rangeMin.toFixed(2)}..${rangeMax.toFixed(2)}`
+		);
 	}
 }
 

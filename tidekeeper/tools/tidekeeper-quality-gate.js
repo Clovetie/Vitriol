@@ -9,9 +9,9 @@
  *
  *   iteration 1  code/ is empty  -> runs the doc gate; source checks report "skipped
  *                                   (no source)"; the gate passes.
- *   iteration 2+ code/ has Luau  -> syntax, metrics, hot-loop, call-graph and
- *                                   dead-config become enforcing, and the smoke test
- *                                   is REQUIRED to exist and pass.
+ *   iteration 2+ code/ has Luau  -> syntax, metrics, hot-loop, call-graph,
+ *                                   dead-config and the determinism scan run, and
+ *                                   the smoke test is REQUIRED to exist and pass.
  *   iteration 3+ session harness -> also required once it exists.
  *
  * It never invents a pass. A tool that is missing when it is required is a failure,
@@ -33,21 +33,30 @@ const REPO = path.resolve(GAME, "..");
 const NODE = process.execPath;
 const MAX_CAPTURE = 200000;
 
+/**
+ * The ratchet. Each iteration bumps this by one, which is what turns that
+ * iteration's harness from "pending" into "required". It is a hand-edited
+ * constant on purpose: a gate that infers how far along the project is will
+ * eventually infer wrongly and let a missing harness through.
+ */
+const CURRENT_ITERATION = 2;
+
 function die(message) {
 	console.error(`tidekeeper-quality-gate: ${message}`);
 	process.exit(2);
 }
 
 function parseArgs(argv) {
-	const out = { src: path.join(GAME, "code"), report: null, quiet: false };
+	const out = { src: path.join(GAME, "code"), report: null, quiet: false, iteration: CURRENT_ITERATION };
 	for (let i = 2; i < argv.length; i += 1) {
 		const arg = argv[i];
 		if (arg === "--src") out.src = path.resolve(process.cwd(), argv[++i]);
 		else if (arg === "--report") out.report = path.resolve(process.cwd(), argv[++i]);
 		else if (arg === "--quiet") out.quiet = true;
+		else if (arg === "--iteration") out.iteration = Number(argv[++i]);
 		else if (arg === "--help") {
 			console.log(
-				"Usage: node tidekeeper/tools/tidekeeper-quality-gate.js [--src tidekeeper/code] [--report path] [--quiet]"
+				"Usage: node tidekeeper/tools/tidekeeper-quality-gate.js [--src tidekeeper/code] [--report path] [--iteration N] [--quiet]"
 			);
 			process.exit(0);
 		} else die(`unknown argument ${arg}`);
@@ -89,12 +98,12 @@ function run(name, scriptRelative, extraArgs, options) {
 	const entry = { name, command: null, status: null, exitCode: null, stdout: "", stderr: "" };
 
 	if (!fs.existsSync(script)) {
-		if (opts.requiredFrom && hasSource) {
+		if (opts.requiredFrom && hasSource && args.iteration >= opts.requiredFrom) {
 			entry.status = "FAIL";
-			entry.stderr = `${scriptRelative} does not exist yet, and it is required from iteration ${opts.requiredFrom} onward (source tree is non-empty).`;
+			entry.stderr = `${scriptRelative} does not exist, and it is required from iteration ${opts.requiredFrom} onward (this is iteration ${args.iteration}).`;
 		} else {
 			entry.status = "PENDING";
-			entry.stderr = `${scriptRelative} not present yet (expected in iteration ${opts.requiredFrom || "?"}).`;
+			entry.stderr = `${scriptRelative} not present yet (expected in iteration ${opts.requiredFrom || "?"}; this is iteration ${args.iteration}).`;
 		}
 		results.push(entry);
 		return entry;
@@ -161,6 +170,9 @@ run("metrics", "metrics.js", ["--src", rel(args.src)], { needsSource: true });
 run("hot-loop-scan", "hot-loop-scan.js", ["--src", rel(args.src)], { needsSource: true });
 run("call-graph", "call-graph.js", ["--src", rel(args.src)], { needsSource: true });
 run("find-dead-config", "find-dead-config.js", ["--src", rel(args.src)], { needsSource: true });
+// Unlike the four scans above (which report and exit 0), this one exits
+// non-zero on a hit, so it genuinely gates. Determinism is the product.
+run("determinism-scan", "tidekeeper-determinism-scan.js", ["--src", rel(args.src)], { needsSource: true });
 
 // 4. Harnesses. Pending until their iteration; required once source exists.
 run("smoke-test", "tidekeeper-smoke-test.js", [], { requiredFrom: 2 });
@@ -186,7 +198,7 @@ const failed = results.filter((r) => r.status === "FAIL");
 const skipped = results.filter((r) => r.status === "SKIP" || r.status === "PENDING");
 
 if (!args.quiet) {
-	console.log(`TIDEKEEPER quality gate — source root ${rel(args.src)} (${sourceCount} Luau file(s))\n`);
+	console.log(`TIDEKEEPER quality gate — iteration ${args.iteration}, source root ${rel(args.src)} (${sourceCount} Luau file(s))\n`);
 	for (const r of results) {
 		const mark = { PASS: "  ok ", FAIL: "FAIL ", SKIP: "skip ", PENDING: "wait " }[r.status];
 		const first = (r.stdout || r.stderr || "").trim().split("\n").filter(Boolean).pop() || "";

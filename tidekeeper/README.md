@@ -3,9 +3,15 @@
 A Roblox cozy trading game about a **tidal island post**, a **sea that rises and falls on
 a real clock**, and **visitors who are real players you will never be online with**.
 
-> **This repository folder is at the end of iteration 1.** It contains the complete
-> research, the complete design, its own copy of the tooling, and copy-paste prompts for
-> iterations 2–5. **There is no gameplay code yet, and that is the deliverable.**
+> **This repository folder is at the end of iteration 2.** It contains the complete
+> research, the complete design, its own copy of the tooling, and **the pure simulation
+> core**: 25 Luau modules under `code/ReplicatedStorage/Tidekeeper/`, exercised by 858
+> executed assertions with 0 failures.
+>
+> Verification level: **L2 — executed in a Lua VM outside Roblox.** Nothing has run
+> inside Roblox Studio yet, no DataStore has been touched, and the 18 µs performance
+> budget is explicitly *not* verified. [`HANDOFF.md`](HANDOFF.md) §3 lists everything
+> that is unproven; start there.
 
 ---
 

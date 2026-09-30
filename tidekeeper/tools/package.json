@@ -10,6 +10,7 @@
 		"call-graph": "node call-graph.js --src ../code",
 		"hot-loop": "node hot-loop-scan.js --src ../code",
 		"dead-config": "node find-dead-config.js --src ../code",
+		"determinism": "node tidekeeper-determinism-scan.js",
 		"smoke": "node tidekeeper-smoke-test.js",
 		"session": "node tidekeeper-session-test.js"
 	},
