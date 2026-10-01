@@ -333,6 +333,58 @@ for (const file of collectMarkdown(DOCS)) {
 	);
 }
 
+// ------------------------------------------- live claims vs. live tool output
+//
+// Iteration 4 shipped a handoff that told the next agent to go and fix the
+// `single-connection` check, in a document that three sections earlier showed
+// that check already passing. The fix had landed AFTER that section was
+// written and nothing re-read it. A prose-only doc gate cannot catch that: the
+// sentence was well-formed, correctly cross-referenced, and false.
+//
+// So the gate now runs the scan and compares the DOCUMENTS against its real
+// output. A claim about a number a tool prints has to agree with the tool.
+{
+	const { execSync } = require("child_process");
+	let scanOut = "";
+	try {
+		scanOut = execSync(`node ${path.join(ROOT, "tools", "tidekeeper-determinism-scan.js")}`, {
+			cwd: path.resolve(ROOT, ".."),
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+	} catch (e) {
+		scanOut = (e.stdout || "") + (e.stderr || "");
+	}
+
+	const m = scanOut.match(/(\d+)\s*\/\s*(\d+)\s+RunService connection/);
+	check("determinism scan reports a connection count", m !== null, m ? m[0] : "no count line found");
+
+	if (m) {
+		const actual = `${m[1]}/${m[2]}`;
+		notes.push(`scan reports ${actual} RunService connections`);
+
+		// Any doc that states a connection count must state the real one. The
+		// regex deliberately ignores past-tense narrative ("reported 1/2"),
+		// which is history and must stay readable; it only catches the
+		// present-tense claim "reports N/M".
+		for (const f of ["HANDOFF.md", "ROADMAP.md"]) {
+			const text = read(path.join(ROOT, f));
+			const claims = [...text.matchAll(/report[s]\s+\*{0,2}(\d+\s*\/\s*\d+)\*{0,2}/g)]
+				.map((c) => c[1].replace(/\s+/g, ""));
+			const wrong = claims.filter((c) => c !== actual);
+			check(
+				`${f} states the real connection count`,
+				wrong.length === 0,
+				wrong.length ? `claims ${wrong.join(", ")} but the scan reports ${actual}` : `${claims.length} claim(s), all ${actual}`
+			);
+		}
+	}
+
+	// The scan must actually be clean -- a doc that describes a clean scan
+	// while the scan is dirty is the same failure in the other direction.
+	check("determinism scan is clean", /\bclean\b/.test(scanOut), scanOut.trim().split("\n").pop() || "");
+}
+
 // -------------------------------------------------------------------- report
 const argv = process.argv.slice(2);
 const jsonIdx = argv.indexOf("--json");

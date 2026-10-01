@@ -89,7 +89,7 @@ Two consequences, both load-bearing:
 ```
 TIDEKEEPER quality gate — iteration 4, source root tidekeeper/code (57 Luau file(s))
 
-  ok  doc-gate           TIDEKEEPER doc gate: 169/169 checks passed
+  ok  doc-gate           TIDEKEEPER doc gate: 173/173 checks passed
   ok  separation         no dependency on the VITRIOL tree
   ok  check-syntax       All 57 Luau file(s) parsed successfully.
   ok  metrics              53  code/ReplicatedStorage/Tidekeeper/Domain/Resolve.luau
@@ -104,6 +104,21 @@ TIDEKEEPER quality gate — iteration 4, source root tidekeeper/code (57 Luau fi
 
 TIDEKEEPER quality gate: 12/12 checks passed
 ```
+
+**Two of these are environment-dependent and will not reproduce on a clean checkout
+without a step.** `tools/node_modules/` and `tools/bin/luau` are both gitignored, and
+both vanish on a fresh clone:
+
+```bash
+cd tidekeeper/tools && npm install          # fengari + luaparse; without it every
+                                            # Lua-running check dies with MODULE_NOT_FOUND
+# and, for the benchmark only, see tools/bin/README.md (four minutes)
+```
+
+Without the binary the gate reports `skip luau-bench` and **11/12 checks passed, 1 not
+applicable yet** — which is the correct output, not a failure. It used to render that
+skip as a plain `ok` with a stray help line, making a benchmark that never ran look
+identical to one that passed; fixed this iteration.
 
 ### `node tidekeeper/tools/tidekeeper-luau-bench.js`
 
@@ -277,7 +292,12 @@ Full table in [`ROADMAP.md`](ROADMAP.md). The ones that will actually bite:
   deleting `floatifyNumbers`, the `bit32` shim and the `%d`→`%.0f` rewrite outright, and
   with them a whole class of "the harness disagrees with the game" bug.
 - **OD18 — adopt LibMP** for the client frame budget, sampled on a fraction of sessions.
-- **The `single-connection` check reports 1/2 and should report 2/2.** See §5.2.
+- **Static checks only see the calling conventions they were written against.**
+  `single-connection` now reports 2/2 (§5.2) — but it is a regex over source text, so
+  it would still miss a connection made through a variable, a table of handlers, or a
+  helper function. It is a tripwire, not a proof. If iteration 5 adds a scheduler by
+  any indirect route, the check will stay green and be wrong. The same caveat applies
+  to every rule in the determinism scan.
 - **Studio, finally.** The MCP ecosystem is far richer than doc 09 §2 recorded (doc 10
   §7.3): 68-tool servers with `execute_luau`, `start_playtest`, screenshots and Open
   Cloud passthrough. All of them need a running Studio process. If one is available in
@@ -287,5 +307,11 @@ Full table in [`ROADMAP.md`](ROADMAP.md). The ones that will actually bite:
 
 ## 7. Prompt for iteration 5
 
-See [`docs/12-ITERATION-PROMPTS.md`](docs/12-ITERATION-PROMPTS.md) §5 for the copy-paste
-prompt.
+See [`docs/12-ITERATION-PROMPTS.md`](docs/12-ITERATION-PROMPTS.md), heading
+**"Prompt — Iteration 5: it ships"**, for the copy-paste prompt. It was rewritten at
+the end of iteration 4 and now opens with a mandatory triage step, because iterations
+2, 3 and 4 each planned around Studio being available and each had to re-plan.
+
+(That file's prompts are headed by name, not numbered. An earlier version of this line
+said "§5", which in that document resolves to *"5. Where the docs were wrong"* in the
+handoff template — a different thing entirely.)

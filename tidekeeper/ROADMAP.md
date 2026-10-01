@@ -168,8 +168,8 @@ Full command output is pasted in [`HANDOFF.md`](HANDOFF.md) §2.
 
 | Check | Real output |
 | --- | --- |
-| `tidekeeper-quality-gate.js` | **12/12** checks passed |
-| `tidekeeper-doc-gate.js` | **169/169** checks passed |
+| `tidekeeper-quality-gate.js` | **12/12** checks passed (11/12 + 1 skip without a local `luau` binary) |
+| `tidekeeper-doc-gate.js` | **173/173** checks passed |
 | `check-syntax.js` | all **57** Luau files parsed |
 | `tidekeeper-determinism-scan.js` | **clean** — 57 files, **13** rules, 5 explicit allowances, **2/2** RunService connections |
 | `tidekeeper-smoke-test.js` | **888 passed, 0 failed**, 3/3 static proofs |

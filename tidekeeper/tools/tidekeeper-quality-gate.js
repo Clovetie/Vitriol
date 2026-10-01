@@ -123,6 +123,25 @@ function run(name, scriptRelative, extraArgs, options) {
 	entry.stdout = clip(r.stdout || "");
 	entry.stderr = clip(r.stderr || "");
 	entry.status = r.status === 0 ? "PASS" : "FAIL";
+
+	// A tool may exit 0 and still not have DONE anything -- the Luau bench
+	// does exactly that when no `luau` binary is present, which is the right
+	// behaviour (the gate should not go red on a machine that has not built
+	// one) but the wrong REPORT. Rendered as a plain `ok` with whatever its
+	// last stdout line happened to be, a skip is indistinguishable from a
+	// pass, and "the check that measures performance quietly stopped
+	// measuring performance" is precisely the kind of thing a gate exists to
+	// make visible.
+	// (Matched anywhere on the line, not line-initial: the bench prints
+	// "TIDEKEEPER Luau bench: SKIPPED - ...". A first version of this anchored
+	// at ^ and silently never fired, which is the same bug this block exists
+	// to catch, one level up.)
+	if (entry.status === "PASS" && /\bSKIPPED\b/.test(entry.stdout)) {
+		entry.status = "SKIP";
+		const line = (entry.stdout.match(/^.*\bSKIPPED\b.*$/m) || [""])[0];
+		entry.stderr = line.trim() || "the tool reported SKIPPED";
+	}
+
 	results.push(entry);
 	return entry;
 }
@@ -206,7 +225,14 @@ if (!args.quiet) {
 	console.log(`TIDEKEEPER quality gate — iteration ${args.iteration}, source root ${rel(args.src)} (${sourceCount} Luau file(s))\n`);
 	for (const r of results) {
 		const mark = { PASS: "  ok ", FAIL: "FAIL ", SKIP: "skip ", PENDING: "wait " }[r.status];
-		const first = (r.stdout || r.stderr || "").trim().split("\n").filter(Boolean).pop() || "";
+		// For a skip, show WHY it skipped. Taking the last stdout line gave
+		// "Or point TIDEKEEPER_LUAU at an existing binary." -- a help string,
+		// stripped of the fact that the benchmark did not run.
+		const summarySource =
+			r.status === "SKIP" || r.status === "PENDING"
+				? r.stderr || r.stdout || ""
+				: r.stdout || r.stderr || "";
+		const first = summarySource.trim().split("\n").filter(Boolean).pop() || "";
 		console.log(`${mark} ${r.name.padEnd(18)} ${first.slice(0, 96)}`);
 	}
 	if (failed.length) {
