@@ -801,7 +801,133 @@ FINISH BY.
   - Committing and pushing to your branch.
 ```
 
-## Prompt — Iteration 11+: contingency and live
+## Prompt — Iteration 11: level seven, and the things only Studio can tell us
+
+```
+You are iteration 11 of TIDEKEEPER, a Roblox game being built inside the
+Clovetie/Vitriol repository. Work only on your session's fixed branch. Never
+touch the VITRIOL tree: TIDEKEEPER is entirely inside tidekeeper/.
+
+START HERE, IN THIS ORDER.
+
+1.  git fetch && git reset --hard origin/<your branch>. The working tree is
+    reset to the session base between turns, so the previous iteration's
+    commits exist only on the remote.
+2.  cd tidekeeper/tools && npm install
+3.  Build Luau 0.700 into tidekeeper/tools/bin/luau (about 3-4 minutes):
+      git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau
+      make -C /tmp/luau config=release luau -j$(nproc)
+      cp /tmp/luau/luau tidekeeper/tools/bin/luau
+4.  node tidekeeper/tools/tidekeeper-quality-gate.js
+    It must print 18/18 before you change anything. If it does not, fixing
+    that IS your iteration.
+5.  Read tidekeeper/HANDOFF.md, then docs/10-RESEARCH-NOTES.md sections 12
+    and 13 -- the ladder of dead features and what it has cost to find each
+    level -- before you plan anything.
+
+YOUR FIRST JOB: LEVEL SEVEN.
+
+Ten iterations; six levels of dead feature; every one green on every check
+that existed the day before it was found:
+
+  1  member-scan        a field READ that is never written
+  2  dead-write-scan    a field WRITTEN that is never read
+  3  orphan-scan        a FUNCTION defined that is never called
+  4  orphan-scan (D44)  an ALLOWLIST ENTRY gone stale
+  5  remote-scan        a REMOTE one side never speaks
+  6  dead-content-scan  a STRING a player can never see
+
+Find level seven before you build anything. The candidate I would bet on,
+and could not get to in iteration 10:
+
+  - A TEST THAT CANNOT FAIL. A session scenario that asserts only on values
+    it computed itself, or whose assertion is tautological (eq(x, x)), or
+    that is inside a conditional that never runs. There are now 554 session
+    assertions and 1201 smoke assertions; if even a handful are vacuous, the
+    suite's authority is overstated by exactly that much and nobody knows
+    which ones. A mutation-style check is the honest version: perturb a
+    constant, confirm some test notices. Start with the cheap static form
+    (an assertion whose expected value is derived from the same expression
+    as the actual) and only then consider mutation.
+
+Others, if you find a better one:
+  - A config key whose reader exists but is itself never called.
+  - A cadence job registered but whose body can never do work.
+  - A persisted blob field that migrates correctly and is read by nothing
+    (dead-write-scan only covers S/S2/state/post).
+  - A Ledger template that is reachable in code but that no realistic game
+    state can actually produce.
+
+Whatever you pick, prove it with a NEGATIVE CONTROL: break the real thing on
+purpose, show the scan failing with exactly the expected message, restore,
+show it clean. Paste both runs. Then wire it in as check 19 with
+requiredFrom 11.
+
+A WARNING FROM ITERATION 10. The dead-content scan was written, and was
+wrong within the hour: a refactor in the same commit introduced a lookup
+table and the scan called four live labels dead. A scan written against
+today's code encodes today's idioms. Before you trust yours, run it against
+a deliberately UNUSUAL but legitimate way of writing the same thing.
+
+THEN, THE SCHEDULED WORK.
+
+  a. The screens are real now but thin. ChartView and AlmanacView were born
+     in iteration 10 and have no interaction -- the almanac pages but nothing
+     calls AlmanacView with page 2, and the chart shows locks but cannot be
+     used to choose a current. Check the orphan allowlist for presentation
+     helpers still parked there and retire what you honestly can. Remember
+     that when an entry stops being an orphan the scan FAILS on the stale
+     entry: that is D44 working, so remove the entry in the same commit.
+
+  b. OD15 is the oldest open question: is base64 packing still paying for
+     itself, given DataStore compresses values itself? It is cheap to
+     answer now -- the fixtures exist, the codec is pure, and you can
+     measure it in the Luau harness rather than guessing. Close it either
+     way, with numbers.
+
+  c. Look hard at the dispatch and letters path end to end. Iteration 7 gave
+     drifters 120 letters, iteration 9 gave the client a letter picker, and
+     iteration 10 found that the screen had been offering a superseded
+     12-line phrase table the whole time. That area has produced a defect in
+     three consecutive iterations. Read it as a whole rather than trusting
+     that the last fix finished the job.
+
+RULES THAT HAVE NOT CHANGED.
+
+  - Determinism (doc 04 section 5) is not negotiable.
+  - No free text over the wire. Ids only. NetContract.hasNoStringFields is
+    the proof and it must keep being called.
+  - The server owns prices (D46). The client displays, never computes.
+  - A client payload builder is validated through the server's own
+    NetContract.accept, never round-tripped against itself (D45).
+  - Every allowlist entry is verified in both directions (D44).
+  - Content is reachable or it does not exist (D48).
+  - Paste real tool output. Never paraphrase it.
+  - A partial honest result beats a complete claimed one. Always.
+
+ON THE BENCH. Best-of-3, every sample printed. Contention only inflates, so
+the minimum is the estimate. Do NOT raise the 18 us budget to make something
+pass; if the median genuinely moves, that is a regression -- find it.
+
+ON STUDIO. L4 and L5 have been blocked since iteration 4 and this is now the
+single largest gap in what the project can claim: no Instance has ever been
+created, no DataStore call has ever been real, no frame has ever been drawn.
+If you have Studio access, that is worth more than anything else on this
+list -- do it first and say exactly what changed. If you do not, say so
+plainly in the handoff rather than letting L3.5 drift into sounding like
+"it works".
+
+FINISH BY.
+
+  - Running the full gate and pasting it (19/19 if you added the scan).
+  - Updating the docs you invalidated, ROADMAP.md, and HANDOFF.md to the
+    template in docs/12-ITERATION-PROMPTS.md.
+  - Writing the iteration-12 prompt into docs/12-ITERATION-PROMPTS.md and
+    extending the doc gate's prompt loop to cover it.
+  - Committing and pushing to your branch.
+```
+
+## Prompt — Iteration 12+: contingency and live
 
 ## The handoff template
 

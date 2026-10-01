@@ -245,8 +245,11 @@ Two reapers, both idempotent, both rate-limited:
    **IO** tick maximum, on one leaseholding server. A shard deleted twice is harmless,
    and most shards were never written at all (a shard exists only if a drifter hashed
    into it).
-2. **Ledger reaper** — deletes ledger pages older than 180 days on the owner's own load,
-   costing nothing extra.
+2. **Ledger reaper** — written in iteration 10, and it costs nothing extra because it
+   runs where the information already is. `allocLedgerPage` keeps the player's page
+   list; when a new page pushes the list past `LEDGER_PAGES_KEPT` (32) the oldest
+   numbers fall out of the index and are handed straight back to the caller, which
+   deletes exactly those keys. No scan, no probe, no schedule.
 
 Never run a reaper from Open Cloud during peak hours: since 2026-07-29 it competes with
 live servers for the same request budget.
@@ -273,8 +276,35 @@ whereas twenty servers reaping blind during an outage makes the outage worse.
 
 Counters: `shardsReaped`, `reapLeasesWon`, `reapLeasesLost`.
 
-The **ledger reaper is still not written**, and ledger history is still write-only
-(**OD22**) — see the roadmap.
+**Status, iteration 10 — ledger history is readable, and the ledger reaper exists
+(OD22 closed).** See §9.2.
+
+## 9.2 Ledger pages: numbering, reading, retention (OD22)
+
+Entries evicted past `MAX_LEDGER_RESIDENT` (200) are archived to pages. Until
+iteration 10 `loadLedgerPage` was **called by nothing**, so everything older than the
+most recent 200 entries was written to DataStore and unreadable forever. The Ledger
+carries this game's whole argument — doc 00's first pillar is *absence is content* —
+so a Ledger that quietly forgets is the game failing at the one thing it is for.
+
+**There was no way to read it back even in principle.** A page key was
+`l:<userId>:<epoch>` and nothing recorded *which* epochs had pages, so a reader would
+have had to probe ~700 keys to cover the retention window.
+
+**And the epoch was not a safe key.** `saveLedgerPage` overwrites. Two servers
+flushing a page for the same player inside one 6.2-hour epoch — an ordinary server
+hop — silently destroyed one of the two pages.
+
+| concern | how it works now |
+| --- | --- |
+| numbering | `allocLedgerPage` takes the next number from a counter in one index key per player, in a single `UpdateAsync`. Atomic, so it is also the cross-server fix |
+| ordering | allocate **first**, then write the page. A failed allocation writes nothing, so no page is ever orphaned under a number the index does not know |
+| index | `li:<userId>` → `{next, pages}`. One read lists a player's whole archive |
+| retention | `LEDGER_PAGES_KEPT = 32`. Numbers falling out of the window come back from the allocation and their keys are deleted there and then |
+| reading | `LedgerService:history(userId, cursor)` → `(entries, nextCursor, total)` |
+| cursor | counts **back from the newest** page: 0 is the most recent. A cursor counted from the oldest would slide under a reader every time a page was reaped |
+| a hole | a page in the index that will not load reports empty but **keeps the cursor moving**, so one unreadable page cannot hide every older page behind it |
+| cost | one index read + one page read per call, which is why `RF_History` is throttled to 2 burst / 10 per minute. Paging is a deliberate tap, not a scroll |
 
 ## 9.1 The failed-save recovery queue
 

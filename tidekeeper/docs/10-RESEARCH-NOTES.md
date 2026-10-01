@@ -575,6 +575,7 @@ in the seam between two correct modules.**
 | 3 | `orphan-scan` | an exported function nobody calls |
 | 4 | `orphan-scan`, both directions | an **allowlist entry** that has gone stale |
 | 5 | `remote-scan` | a **remote** one side never speaks |
+| 6 | `dead-content-scan` | a **string** a player can never see |
 
 Level 5 is the one that caught the biggest hole: five of six client → server remotes
 had a complete server half and zero client callers (doc 08 §8.4). Every level found
@@ -606,6 +607,66 @@ The bench is now **best-of-3**, printing every sample. This is not a weakened bu
 the budget is untouched. Contention can only ever make code measure *slower*; there is
 no load that makes it faster. So the minimum across attempts is the best available
 estimate of the true cost, and the spread is printed so a reader can judge it.
+
+## 13. Iteration-10 pass — level six, and the limits of one stripper
+
+Nothing was fetched. As with iterations 7, 8 and 9, the defects were in the project's
+own code.
+
+### 13.1 Level six is about the player, not the code
+
+The first five scans are all about code: a field, a field, a function, an allowlist
+entry, a remote. **Level six is the first one about the thing the player actually
+experiences.** TIDEKEEPER is content-heavy — 200 finds, 180 Ledger sentences, 120
+letters, 51 UI labels — and a label nothing renders is invisible in exactly the way
+the previous five defects were: it parses, it is well-formed, it is ready to be
+localised, and no human being will ever read it.
+
+18 of 51 UI labels were dead, including the entire navigation bar. Full table in
+doc 08 §8.5.
+
+**The general rule, now six-for-six:** a check that inspects one module at a time
+cannot see a feature that is dead in the seam between two correct modules — and the
+seam does not have to be between two pieces of *code*. `Strings.UI` and the views
+were each perfectly well-formed. The defect lived in the absence of a reference
+between them.
+
+### 13.2 The iteration-9 parsing lesson needed generalising, not repeating
+
+Iteration 9 established: **parse data from raw text, detect usage in stripped text** —
+because `strip()` blanks string literals (so the remote names vanish), while raw text
+lets a comment mentioning `RF_Arrange` masquerade as a call.
+
+That rule could not be reused here, because the thing being *detected* is itself a
+string literal: `Format.label("LEDGER_TITLE")`. Stripping erases every call site;
+scanning raw text would count the scan's own header comment — which names several
+labels while explaining them — as proof that they are used, hiding the exact defect
+the scan exists to find.
+
+So the real lesson is one level up: **blank whatever can lie to you, and keep
+whatever carries meaning.** For remotes that meant blanking strings and comments; for
+content it means blanking comments and keeping strings. `tidekeeper-dead-content-scan.js`
+carries `stripComments()`, which tracks string literals in order to step *over* them
+intact and blanks only comments.
+
+### 13.3 A detector that was too strict, caught by its own subject
+
+The first version matched only the direct `Format.label("KEY")` form. The OD23 work,
+done in the same iteration, introduced a lookup table:
+
+```lua
+local STATUS_LABEL = { [NetContract.E_REJECTED] = "ERR_REJECTED", ... }
+```
+
+...which is better code than a chain of `if`s — and the scan immediately reported
+four live labels as dead. Indirect naming is legitimate, so the scan now counts any
+`SHOUTY_SNAKE` string literal equal to a key. The keys are unique and comments are
+already blanked, so a literal that equals a key and is not a reference is not a
+realistic accident.
+
+Worth recording as a general hazard: **a scan written against today's code will
+encode today's idioms.** This one was wrong within an hour of being written, by a
+refactor in the same commit.
 
 ## 9. Known unknowns
 

@@ -279,6 +279,57 @@ unfinished. See doc 09 §7.
 Letter **ids** cross the wire, never player text — the same rule the dispatch spec
 enforces with `hasNoStringFields`.
 
+### 8.5 Eighteen labels no player could read — iteration 10
+
+The client could act (§8.4), and most of it still could not be *seen*. The
+dead-content scan — level six of the ladder, doc 10 §12 — found **18 of 51 UI labels
+dead on its first run**:
+
+| what was dead | what that meant |
+| --- | --- |
+| `TAB_WORLD`, `TAB_POST`, `TAB_CHART`, `TAB_ALMANAC` | the **entire navigation bar**. Six screens existed as constants and nothing could move between them |
+| `CHART_TITLE`, `CHART_LOCKED` | `SCREEN_CHART` had rendered nothing but a tide header since iteration 5 |
+| `ALMANAC_TITLE`, `ALMANAC_HELD` | likewise `SCREEN_ALMANAC` |
+| `UPGRADE_SHORT`, `UPGRADE_DONE` | written by iteration 9 and never wired |
+| `POST_SET_PRICE`, `ORDERS_ADD`, `ORDERS_FULL`, `DISPATCH_CARGO` | unlabelled controls on screens that otherwise worked |
+| `LEDGER_SKIP`, `LEDGER_GROUP_EPOCH` | no way out of the replay, and no heading on a group |
+| `ERR_BUSY` | an error nothing could raise |
+| `DISPATCH_PHRASE` | a leftover from the design that preceded letters |
+
+**Following the last one found a whole dead content table.** `Strings.PHRASE` — 12
+canned lines from before letters existed — was still being handed to the renderer by
+`DispatchView.build` and re-exported as `LedgerView.PHRASES`. Iteration 7 replaced
+phrases with 120 real letters and `letterId`; for three iterations afterwards the
+dispatch screen was still offering the player a choice the wire could no longer
+carry. Deleted, and `DispatchView` now offers `LetterView.categories()`.
+
+**What was built to make the rest true.** `ChartView` (the five Currents and which
+your tier has earned, reading `CURRENT_MIN_TIER` — the same array
+`ExchangeService:currentAllowed` reads, so the screen cannot quietly disagree with
+the server) and `AlmanacView` (200 finds, paged 50 at a time; an unheld find shows as
+a blank rather than its name, so the almanac stays a record of what you have seen
+instead of a checklist handed out at the start). Plus the tab bar, the group
+headings, the skip affordance and the missing control labels.
+
+The Ledger and Orders are deliberately **not** tabs: the Ledger is pushed in front of
+you when you arrive (§3), and Orders is reached from the Post because it is something
+you do *to* your post rather than a place you go.
+
+**`ERR_BUSY` now means something.** `ClientBootstrap:act` takes one action at a time.
+`invoke` yields on a RemoteFunction, so a second tap while the first is in flight
+would spend another sequence number and race the first reply into the snapshot. The
+server's rate limiter would have refused it eventually — as *"rejected"*, which is a
+confusing word for "you tapped twice".
+
+### 8.6 Reading the archive — iteration 10
+
+`LedgerView.archive(entries, names, reply)` reuses `build` rather than growing a
+second renderer that could drift from it, then strips what does not apply: an archive
+page has no unread badge and no replay runtime, because you are reading, not
+watching. `atEnd` comes from the server's `more` flag, so the screen can say *this is
+the oldest thing there is* instead of showing an empty list that reads as a loading
+failure. Paging details are in doc 05 §9.2.
+
 ## 9. Safety-shaped UX
 
 Because this game shows players to each other, the UX carries safety weight (doc 13).

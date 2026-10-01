@@ -254,13 +254,62 @@ safe direction. Doc 05 §9.
 
 ---
 
-## Iteration 10+ ⬜
+## Iteration 10 ✅ — the Ledger remembers, and 18 labels no player could read
 
-Close **OD22** (ledger history is still write-only) and **OD23** (status code 4 means
-two different things), build the screens the new verbs deserve, and the idea bank in
-doc 00 §9. Scope is defined by `HANDOFF.md`, not by this table.
+| Deliverable | Status |
+| --- | --- |
+| **`tidekeeper-dead-content-scan.js`** — gate check 18, level six of the ladder | ✅ |
+| **OD22 closed** — ledger history readable: page index, `RF_History`, client pager, 32-page retention | ✅ |
+| Page numbers allocated atomically, fixing a silent cross-server page overwrite | ✅ |
+| The ledger reaper, finally written — and it costs nothing extra | ✅ |
+| **OD23 closed** — one status enum in `NetContract`; `statusText` is a pure mapping again | ✅ |
+| `ChartView` and `AlmanacView` — two screens that had rendered nothing since iteration 5 | ✅ |
+| The navigation bar, which had never existed | ✅ |
+| `Strings.PHRASE` deleted — a superseded content table still wired to the renderer | ✅ |
+| `ERR_BUSY` given a meaning: one action in flight at a time | ✅ |
+| Session scenarios 24–26 | ✅ |
+
+**The find.** The first five scans are all about code. This one is about what the
+player experiences, and on its first run 18 of 51 UI labels were unreachable —
+including the **entire navigation bar**, and the furniture of two screens that had
+been rendering nothing but a tide header since iteration 5. Following the dead
+`DISPATCH_PHRASE` label uncovered `Strings.PHRASE`: 12 canned lines superseded by 120
+letters in iteration 7 and still handed to the renderer three iterations later.
+Doc 08 §8.5; the parsing lesson in doc 10 §13.
+
+**OD22.** `loadLedgerPage` was called by nothing, so everything past the most recent
+200 entries was archived and unreadable forever — the worst available bug for a game
+whose first pillar is *absence is content*. Underneath it, pages were keyed by epoch
+and `saveLedgerPage` overwrites, so two servers flushing in one epoch destroyed one
+of the two pages. Doc 05 §9.2.
 
 ---
+
+## Iteration 11+ ⬜
+
+Studio verification (L4/L5) remains the standing gap. Otherwise: the idea bank in
+doc 00 §9, and whatever level seven turns out to be. Scope is defined by `HANDOFF.md`,
+not by this table.
+
+---
+
+### Decisions D47–D49 (iteration 10)
+
+**D47 — a scan must blank whatever can lie to it and keep whatever carries meaning.**
+Iteration 9's rule ("parse from raw, detect in stripped") was the special case, not
+the principle: when the thing being detected *is* a string literal, stripping erases
+every call site and raw text lets comments vote. `dead-content-scan` carries
+`stripComments()` for exactly this. Doc 10 §13.2.
+
+**D48 — content is reachable or it does not exist.** A string, a prose row or a
+template that no code path can put in front of a player is not "content for later",
+it is a thing that will be translated, reviewed and paid for and never read. Both
+directions: a label nothing displays, and a `Format.label` naming a key that is not
+there (which renders as an empty string and counts a silent miss).
+
+**D49 — one action in flight at a time.** `invoke` yields, so a second tap races the
+first reply into the snapshot. Refusing locally with `ERR_BUSY` is both truthful and
+kinder than letting the server's rate limiter call it a rejection.
 
 ## Open decisions
 
@@ -288,8 +337,8 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD19 | Port `fake-platform.lua` to real Luau so fengari can be deleted entirely | it6+ | Only worth it if the shims start costing again. The cross-check between two VMs is currently an asset, not debt |
 | OD20 | The three dispatch fields are session-scoped, not persisted | it8 | Left as is, deliberately. A dispatch choice that does not survive a relog is a small loss; persisting it costs a schema field and a migration for something the player re-picks in one tap. Revisit only if telemetry shows players dispatching and relogging inside one epoch |
 | OD21 ✅ | `DataStoreAdapter:reapPoolShard` is never scheduled, so the drifter pool only grows | ~~it9~~ | **Closed (doc 05 §9).** `ExchangeService:reapTick` on the IO slot, one shard per tick, targeting `epoch - 28` — nothing can claim a key that old, because resolve clamps catch-up to 27. *Which* server was the real question: exactly one, by a `reap:<epoch>` MemoryStore lease via the new `MemoryAdapter:tryLease`. 320 keys per epoch deleted once rather than once per server; losers count `reapLeasesLost` and skip. If MemoryStore is unavailable **nobody** reaps — a missed reap is visible growth, twenty blind reapers during an outage is a quota fire. Proved by session scenario 23, including a negative control where removing the lease makes a second server duplicate 284 deletes |
-| **OD22** | **Ledger history is written and never read** | **it9** | `LedgerService:flushPending` archives pages via `saveLedgerPage`; `loadLedgerPage` is called by nothing and no remote asks for history. Every entry past `MAX_LEDGER_RESIDENT` (200) is currently unreadable forever. The Ledger is the surface carrying the game's whole emotional argument, so silently losing its history is worse than it sounds. Needs a remote, a client pager, and a decision on how far back to keep |
-| **OD23** | **Handler status code `4` means two different things** | **it10** | `PostHandler` returns 4 for `E_COOLDOWN`; `DispatchHandler` returns 4 for `E_ALREADY_OUT`. The client cannot translate a 4 without also knowing which remote answered, so `ClientBootstrap:statusText` now takes the remote name — correct, but it is covering for the contract rather than fixing it. The fix is one status enum owned by `NetContract`, with non-overlapping codes, which is a mechanical change across both handlers and their tests |
+| OD22 ✅ | Ledger history is written and never read | ~~it10~~ | **Closed (doc 05 §9.2).** `loadLedgerPage` had no caller and no way to be called: page keys were `l:<user>:<epoch>` and nothing recorded which epochs had pages. Pages are now numbered from an atomic counter in a per-player index key — which also fixed a silent data loss, since `saveLedgerPage` overwrites and two servers flushing inside one 6.2-hour epoch destroyed one of the two pages. `RF_History` (2 burst, 10/min) + `HistoryHandler` + a client pager whose cursor counts back from the newest page. Retention 32 pages, with the falling-out keys deleted as they fall — the ledger reaper, which costs nothing extra because it runs where the information already is |
+| OD23 ✅ | Handler status code `4` means two different things | ~~it10~~ | **Closed.** `NetContract` owns one enum; `E_ALREADY_OUT` moved from 4 to 5; all three handlers read it; `ClientBootstrap:statusText` lost its remote-name parameter and is a pure mapping again. Session scenario 26 walks every status and asserts each has a distinct, non-empty sentence that is not the offline message, and that an unknown code still degrades to offline — the right default for a client talking to a newer server |
 | OD16 | `S.publishedAt` is not persisted, so one-Drifter-per-epoch holds only per server (doc 10 §6.4) | ~~it4~~ | **Closed.** Schema v2 appends it at the blob tail with a real migration and a committed v1 fixture (doc 05 §6.1). Shipped a sentinel bug en route — see **D28** |
 
 ### OD13 in full — the one non-commuting property
