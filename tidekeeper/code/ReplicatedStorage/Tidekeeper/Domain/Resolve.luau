@@ -31,6 +31,7 @@ local Tide = require(script.Parent.Parent.Lib.Tide)
 local Post = require(script.Parent.Post)
 local Visit = require(script.Parent.Visit)
 local Ledger = require(script.Parent.Ledger)
+local Badges = require(script.Parent.Badges)
 local Standing = require(script.Parent.Standing)
 
 local Resolve = {}
@@ -170,6 +171,9 @@ function Resolve.run(S, now, inbound, work)
 		grantedUnits = 0,
 		perishedUnits = 0,
 		coinEarned = 0,
+		-- Always present, including on the no-op path, so a caller never has
+		-- to nil-check it.
+		badgesEarned = {},
 	}
 
 	local S2 = Tables.deepCopy(S)
@@ -286,6 +290,13 @@ function Resolve.run(S, now, inbound, work)
 		ctx.tide = Tide.stateForEpoch(e)
 		ctx.berthsUsed = 0
 
+		-- Lifetime tide counters (schema v3). `tidesElapsed` counts epochs
+		-- actually simulated, so a clamped long absence credits only the 27
+		-- epochs that were really played -- the same rule the rest of
+		-- catch-up follows.
+		S2.stats.tidesElapsed = (S2.stats.tidesElapsed or 0) + 1
+		Badges.noteTideState(S2, Tide.codeForEpoch(e))
+
 		local served = 0
 		local coinThisEpoch = 0
 		for k = 1, arrivals do
@@ -296,6 +307,12 @@ function Resolve.run(S, now, inbound, work)
 				error("Resolve: applying a visit delta failed: " .. tostring(message), 0)
 			end
 			Post.recordVisit(S2, d.owner, e)
+			-- A letter is "received" when the drifter carrying it actually
+			-- lands, not when it was written: an arrival that never happens
+			-- delivers nothing.
+			if d.letterId ~= nil and d.letterId > 0 then
+				S2.stats.lettersReceived = (S2.stats.lettersReceived or 0) + 1
+			end
 			for j = 1, delta.itemCount do
 				info.soldUnits = info.soldUnits + delta.itemQty[j]
 			end
@@ -330,6 +347,14 @@ function Resolve.run(S, now, inbound, work)
 	end
 
 	S2.resolvedAt = target
+
+	-- One pass over the badge table at the end of the whole resolve, not per
+	-- epoch: the thresholds only ever read monotone counters, so the answer
+	-- after the last epoch is the same as the union of the answers after each
+	-- one, for a fraction of the work. `info.badgesEarned` is the caller's
+	-- cue to say something about it.
+	info.badgesEarned = Badges.evaluate(S2)
+
 	return S2, entries, receipts, info
 end
 

@@ -249,6 +249,39 @@ Two reapers, both on the `slow` cadence slot, both idempotent, both rate-limited
 Never run a reaper from Open Cloud during peak hours: since 2026-07-29 it competes with
 live servers for the same request budget.
 
+**Status, iteration 8.** Neither reaper is scheduled. `DataStoreAdapter:reapPoolShard`
+exists, is correct, and is called by nothing (**OD21**); the ledger reaper is not
+written. The orphan scan found the first and now holds it with a reason, so it can no
+longer be mistaken for working. Pool keys carry a TTL, so this is growth rather than
+leakage, but it is a launch blocker against the 8.5 MB pool budget.
+
+## 9.1 The failed-save recovery queue
+
+When `savePost` abandons a write — a stale session lock, or an exhausted retry budget —
+the payload goes to a MemoryStore queue rather than being dropped. This is the last
+line of defence against losing a player's session.
+
+Through iteration 7 **nothing drained it**: `pushRecovery` was called, `popRecovery`
+was not, so the net caught the blob and let it expire. `PostService:sweepRecovery` now
+runs on an idle `slow` tick (only when this server owes no save, so a healthy server
+pays one MemoryStore read and nothing more).
+
+The guard is the part that matters. By the time a blob is retried, the server that took
+the lock may already have written something newer, so a blind restore would *cause* the
+loss the queue exists to prevent. Three outcomes per entry:
+
+| Situation | Action |
+| --- | --- |
+| The player is resident on this server | **Defer.** We hold the lock and will write something newer ourselves |
+| The stored post is newer than the blob | **Drop.** The entry is obsolete; acking it is the correct ending |
+| Otherwise | **Restore**, then ack |
+
+The restore is an `UpdateAsync` whose transform returns `nil` — which aborts the write
+without consuming a conflict — when the stored value wins. And because `ReadAsync`
+returns **one id for the whole batch**, the ack is all-or-nothing: if any entry in a
+batch was deferred or failed, the batch is left unacked and the 30 s invisibility
+window re-presents it to the next sweep. Slower, and it cannot lose a blob.
+
 ## 10. Open Cloud usage
 
 Exactly two sanctioned uses. Anything else needs a written decision in `ROADMAP.md`.

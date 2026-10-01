@@ -56,6 +56,7 @@ const PURE = {
 	Drifter: `${CODE}/Domain/Drifter.luau`,
 	Post: `${CODE}/Domain/Post.luau`,
 	Orders: `${CODE}/Domain/Orders.luau`,
+	Badges: `${CODE}/Domain/Badges.luau`,
 	Ledger: `${CODE}/Domain/Ledger.luau`,
 	Visit: `${CODE}/Domain/Visit.luau`,
 	Resolve: `${CODE}/Domain/Resolve.luau`,

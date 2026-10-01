@@ -1219,3 +1219,49 @@ do -- 19. THE FAILED-SAVE RECOVERY QUEUE ACTUALLY GETS DRAINED
 	local okPop, items = app.memory:popRecovery(8)
 	ok("the deferred entry is still on the queue", okPop and items ~= nil and #items >= 1)
 end
+
+do -- 20. A BADGE IS EARNED IN PLAY AND SURVIVES THE SAVE
+	-- The pure suite proves the bitmask and the thresholds. This proves the
+	-- part only the real server can: that a badge earned during a resolve is
+	-- written to the store and is still held after the player has been
+	-- evicted and loaded back from bytes.
+	--
+	-- doc 06 section 2 says an achievement is never revoked. A badge that is
+	-- correct in memory and absent after a relog would break that rule in the
+	-- only way a player would ever notice.
+	local Badges = TidekeeperRequire("Badges")
+	local GameConfig = TidekeeperRequire("GameConfig")
+
+	local app, env = newServer({ seed = 31337 })
+	local userId = 5150
+	env:addPlayer(userId)
+	settle(app, env, 200)
+
+	local S = app.posts:get(userId)
+	eq("a new post is at the current schema version", S.v, GameConfig.SCHEMA_VERSION)
+	eq("the current schema version is 3", GameConfig.SCHEMA_VERSION, 3)
+	eq("a new post holds no badges", Badges.count(S), 0)
+
+	-- Badge 1, First Light: one visitor served. Drive the lifetime counter
+	-- the way a visit would, then let the next resolve evaluate.
+	S.stats.served = 1
+	S.resolvedAt = S.resolvedAt - 40000
+	app.posts:queueResolve(userId)
+	settle(app, env, 300)
+
+	local after = app.posts:get(userId)
+	ok("the post survived the resolve", after ~= nil)
+	ok("First Light was earned during a real resolve", Badges.has(after, 1))
+
+	-- Out of memory and back in through the codec.
+	env:removePlayer(userId)
+	settle(app, env, 120)
+	ok("the player really was evicted", app.posts:get(userId) == nil)
+
+	env:addPlayer(userId)
+	settle(app, env, 200)
+	local reloaded = app.posts:get(userId)
+	ok("the post loaded back", reloaded ~= nil)
+	ok("the badge survived the save and the load", Badges.has(reloaded, 1))
+	ge("...and the lifetime counter came back too", reloaded.stats.served, 1)
+end

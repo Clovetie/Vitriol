@@ -147,6 +147,9 @@ const bundle = buildBundle({
 		FIXTURE_POST_V1: JSON.stringify(
 			fs.readFileSync(path.join(__dirname, "fixture-blobs", "post-v1.b64"), "utf8").trim()
 		),
+		FIXTURE_POST_V2: JSON.stringify(
+			fs.readFileSync(path.join(__dirname, "fixture-blobs", "post-v2.b64"), "utf8").trim()
+		),
 	},
 	tests: testSource,
 });

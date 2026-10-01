@@ -28,10 +28,14 @@
 --   u16  orderBytes + n x u8
 --   u8   ringCount + n x u48       owner*8192 + (epoch mod 8192)
 --   u8   claimCount + n x (u16 id, u16 qty, u64 fromOwner, i32 epoch)
---   u32  stats[6]
---   u32  publishedAt               v2 ONLY. (tide epoch of the last published
+--   u32  stats[6]                  v1/v2. v3 writes stats[12] -- see
+--                                  STAT_ORDER and STATS_BY_VERSION below.
+--   u32  publishedAt               v2+ ONLY. (tide epoch of the last published
 --                                  Drifter) + 1, so 0 means never. Epoch 0 is
 --                                  a real epoch. See OD16 / section 6.
+--   u8   badges[5]                 v3 ONLY. 40 achievement bits, id 1 = byte
+--                                  1 bit 0. Ids are persisted bit indices and
+--                                  are never renumbered (BadgesConfig).
 --   u32  checksum                  FNV-1a over everything before it
 --
 -- VERSION HISTORY
@@ -65,7 +69,34 @@ local CURRENTS = EconomyConfig.CURRENT_COUNT
 local RING_SPAN = GameConfig.DRIFTER_ID_EPOCH_SPAN
 local MAX_CLAIMS = 64
 
-PostCodec.STAT_ORDER = { "served", "refused", "partial", "missed", "noBerth", "coinEarned" }
+-- The lifetime counters, in wire order. APPEND ONLY: the index of a name is
+-- its position in every v3 blob ever written.
+--
+-- The first six are the original v1 set. The six added in v3 are the badge
+-- stats that could not be derived from state the post already holds --
+-- `visitorsServed` is `served` and `tierReached` is `S.tier`, so those cost
+-- nothing, but "how many letters has this player sent" is only knowable if
+-- somebody counts it. See Domain/Badges.statsOf for the full mapping.
+PostCodec.STAT_ORDER = {
+	"served",
+	"refused",
+	"partial",
+	"missed",
+	"noBerth",
+	"coinEarned",
+	-- v3
+	"lettersSent",
+	"lettersReceived",
+	"giftsGiven",
+	"driftersDispatched",
+	"tidesElapsed",
+	"tideStatesSeen", -- a 5-bit mask, not a count: Tide.CODE n -> bit n-1
+}
+
+-- How many of STAT_ORDER each schema version stores. A v1 or v2 blob stops
+-- after six, and the migration supplies zeroes for the rest.
+PostCodec.STATS_V1 = 6
+PostCodec.BADGE_BYTES = 5
 
 local function packRing(owner, epoch)
 	local low = epoch % RING_SPAN
@@ -164,7 +195,7 @@ function PostCodec.encode(S)
 
 	local stats = S.stats
 	for i = 1, #PostCodec.STAT_ORDER do
-		w:u32(stats[PostCodec.STAT_ORDER[i]])
+		w:u32(stats[PostCodec.STAT_ORDER[i]] or 0)
 	end
 
 	-- v2 tail. Stored as epoch + 1 so that the wire value 0 means "never
@@ -172,6 +203,15 @@ function PostCodec.encode(S)
 	-- (the first 6.2 hours after TideConfig.EPOCH). A sentinel that collides
 	-- with a legal value is a bug that only shows up on launch day.
 	w:u32((S.publishedAt ~= nil) and (S.publishedAt + 1) or 0)
+
+	-- v3 tail. Forty achievement bits. A bitmask rather than a list because
+	-- badges are never revoked and never reordered, so the set only ever
+	-- grows and a fixed five bytes is both smaller and cheaper to test than
+	-- any variable-length form.
+	local badges = S.badges
+	for i = 1, PostCodec.BADGE_BYTES do
+		w:u8((badges ~= nil and badges[i]) or 0)
+	end
 
 	w:u32(Hash.bytes(w.bytes, 1, w.n))
 
@@ -276,8 +316,11 @@ function PostCodec.decode(bytes)
 			S.claims[i] = { id = r:u16(), qty = r:u16(), fromOwner = r:u64(), epoch = r:i32() }
 		end
 
+		-- Read only as many counters as this blob's version wrote. The rest
+		-- are filled in by the v2 -> v3 migration, not invented here.
+		local statCount = (version >= 3) and #PostCodec.STAT_ORDER or PostCodec.STATS_V1
 		S.stats = {}
-		for i = 1, #PostCodec.STAT_ORDER do
+		for i = 1, statCount do
 			S.stats[PostCodec.STAT_ORDER[i]] = r:u32()
 		end
 
@@ -290,6 +333,13 @@ function PostCodec.decode(bytes)
 			local rawPublished = r:u32()
 			if rawPublished > 0 then
 				S.publishedAt = rawPublished - 1
+			end
+		end
+
+		if version >= 3 then
+			S.badges = {}
+			for i = 1, PostCodec.BADGE_BYTES do
+				S.badges[i] = r:u8()
 			end
 		end
 
@@ -329,6 +379,26 @@ function PostCodec.registerMigrations()
 		Version.register(1, 2, function(d)
 			d.publishedAt = nil
 			d.v = 2
+			return d
+		end)
+	end
+	if not Version.hasMigration(2) then
+		-- v2 -> v3: six new lifetime counters and the badge mask. All start
+		-- at zero, which is the honest answer -- we genuinely do not know how
+		-- many letters a pre-v3 player sent, and inventing a number would
+		-- hand out achievements nobody earned.
+		--
+		-- The one place that stings is `tidesElapsed`: a long-standing player
+		-- restarts that count at zero. Backfilling it from `resolvedAt` was
+		-- considered and rejected, because it would award the long-absence
+		-- badges to someone who had simply been away.
+		Version.register(2, 3, function(d)
+			d.stats = d.stats or {}
+			for i = PostCodec.STATS_V1 + 1, #PostCodec.STAT_ORDER do
+				d.stats[PostCodec.STAT_ORDER[i]] = 0
+			end
+			d.badges = { 0, 0, 0, 0, 0 }
+			d.v = 3
 			return d
 		end)
 	end

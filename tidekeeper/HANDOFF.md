@@ -1,274 +1,378 @@
-# Handoff — TIDEKEEPER, end of iteration 7
+# Handoff — TIDEKEEPER, end of iteration 8
 
 TIDEKEEPER is a cozy async island trading post for Roblox. The tide runs on a real
 clock, and every visitor who arrives while you are offline is a real player's
 drifter, delayed. It lives in `tidekeeper/`, entirely separate from VITRIOL, with
-its own copy of the tooling. 60 Luau files, 13 428 lines. **1 118 executed
-assertions across two suites, 0 failures**, and 925 of them run byte-for-byte in
+its own copy of the tooling. 61 Luau files, 13 931 lines. **1 417 executed
+assertions across two suites, 0 failures**, and 1 200 of them run byte-for-byte in
 both a real Luau 0.700 VM and fengari with identical results.
 
-**Iteration 7 in one line: four separate features were shipped and completely
-inert, and all 14 checks were green the entire time.**
+**Iteration 8 in one line: the last-resort safety net against losing a player's
+save had never once been read, and the proof of the game's main security invariant
+had never once run — with all fifteen checks green.**
 
 ---
 
-## 1. The four dead features
+## 1. Four more dead features
 
-Each was found the same way — by asking *what reads this?* — and each is the same
-shape as the iteration-6 remote bug: **two modules that are individually correct,
+The iteration-8 prompt said to spend the first hour hunting a fifth dead feature
+before building anything. That hour found four, and they are the same shape as the
+ones found in iterations 6 and 7: **two modules that are each individually correct,
 with the feature lost in the gap between them.**
 
-### 1.1 `RF_Dispatch` was decoration
+### 1.1 The failed-save recovery queue was write-only — fixed
 
-`DispatchHandler` recorded the player's choices on the post:
+`DataStoreAdapter:savePost` pushes the payload onto a MemoryStore queue whenever a
+write is abandoned, either because the session lock went stale or because the retry
+budget ran out. It is the last line of defence against a player losing a session.
 
-```lua
-S.dispatchedAt   = epoch
-S.dispatchLetter = payload.letterId
-S.dispatchCargo  = cargo
-```
+`popRecovery` and `ackRecovery` existed, were correct, and **were called by
+nothing**. The net caught the blob and dropped it on the floor; the entry sat in
+MemoryStore until its TTL expired. The comment directly above `pushRecovery` has
+read *"so the next join can retry it"* since iteration 4.
 
-`ExchangeService:buildDrifter`, which builds the outbound drifter at logout, read
-**none of them**. It recomputed cargo by walking the shelves in slot order and
-hard-coded `d.letterId = 0`. So: your cargo choice was silently replaced, and **no
-letter had ever reached another player**. That also made Ledger template 105 ("your
-drifter brought a note back") unreachable prose, and made `MAX_LETTER_ID = 96` a
-ceiling on a phrase list that did not exist.
+`PostService:sweepRecovery` now drains it on an idle `slow` tick — only when this
+server owes no save, so a healthy server pays one MemoryStore read and nothing more.
 
-### 1.2 No post could ever be promoted
+**The guard is the hard part, and it is the reason this took longer than writing
+the drain.** By the time a blob is retried, the server that took the lock may have
+written something newer; restoring blindly would *cause* the loss the queue exists
+to prevent. So:
 
-`S.tier` was set to `1` when a post was created, and **no code anywhere ever
-changed it** — the only other write in the project was `PostCodec` decoding what it
-had encoded. Every tier-gated system was therefore unreachable: 24 shelves at tier
-4, the four currents behind `CURRENT_MIN_TIER`, `PASSIVE_CAP_BY_TIER`, the
-6/10/16/24 order-rule limits, and the whole of doc 06 §7. There was no remote to
-buy a tier and no cost to pay for one.
+| Situation | Action |
+| --- | --- |
+| The player is resident on this server | **Defer** — we hold the lock and will write something newer ourselves |
+| The stored post is newer than the queued blob | **Drop** — the entry is obsolete; acking it is the correct ending |
+| Otherwise | **Restore**, then ack |
 
-### 1.3 Shelf density was a comment, not a rule
+Two details that are easy to get wrong and are now pinned by tests:
 
-`Post.setShelf` wrote to any slot inside the tier limit, while `clearShelf`
-compacts with `table.remove`. A gap was therefore possible — and `PostCodec` writes
-`#shelves` then indexes `1..n`, so **a gap makes the post unsaveable**: encode
-throws, the save fails, the session is lost. `PostHandler` passes a client-supplied
-slot straight in, so any client could place into slot 6 of an empty post and
-permanently break its own save. Remotely triggerable data loss, reachable by
-editing one number in a payload.
+* `DataStoreAdapter:restorePost` returns `nil` from its `UpdateAsync` transform when
+  the stored value wins, which **aborts the write**. This project has shipped that
+  behaviour as a *bug* twice; here it is exactly the semantics wanted.
+* `ReadAsync` returns **one id for the whole batch**, so the ack is all-or-nothing.
+  A batch containing anything deferred or failed is left unacked and the 30 s
+  invisibility window re-presents it. Slower, and it cannot lose a blob.
 
-### 1.4 `app.logger` could be nil
+### 1.2 The proof of the main security invariant never ran — fixed
 
-With `silent = true`, `Bootstrap` left `app.logger` nil, and **seven rejection
-paths across the remote handlers call it unconditionally**. Every validation
-failure would throw instead of returning `E_ILLEGAL` — the client gets an exception
-where it should get a status, and the one code path that only runs when something
-is already wrong is the one that breaks. `silent` now means "say nothing", not "be
-nil".
+doc 13 §2: no remote accepts a string field anywhere in its payload. Strings are the
+arbitrary-content surface — the thing that turns a trade remote into an unmoderated
+chat channel — so the contract is ids and numbers only.
 
----
+`NetContract.hasNoStringFields()` walks the specs and proves it. **Nothing called
+it**, while three separate comments in the codebase stated that the smoke test
+asserted it. It is now asserted for real, with a canary that poisons `SPECS` to
+prove the walker can actually fail rather than always returning true.
 
-## 2. The check that closes the other direction
+### 1.3 Ledger history is written and never read — documented, OD22
 
-`member-scan` (iteration 6) catches a field **read** that is never written.
-`tidekeeper-dead-write-scan.js` (new, 15th gate check) catches a field **written**
-to shared state that is never read. Between them both directions of the
-cross-module field contract are now closed.
+`LedgerService:flushPending` archives older entries into pages via `saveLedgerPage`.
+`loadLedgerPage` exists to read them back, is called by nothing, and no remote asks
+for history. **Every entry past `MAX_LEDGER_RESIDENT` (200) is archived and then
+unreadable forever.** One of the archiving comments even says the page key is
+"derivable from an entry's own epoch when reading history back" — the read path was
+designed and never built.
 
-It found exactly the two dead writes and nothing else — **26 fields checked, no
-false positives**. Scoped deliberately to the post/session state object: widening
-it to every table in the project would drown the signal, and a scan that cries wolf
-gets switched off and then protects nothing.
+Not fixed, because doing it properly needs a remote, a client pager and a retention
+decision. Allowlisted with a reason and raised as **OD22**, so it can no longer be
+mistaken for working.
 
-Session scenario 17 asserts the two halves of dispatch actually meet, and was
-verified by reverting `ExchangeService` to its broken form:
+### 1.4 The drifter pool is never reaped — documented, OD21
 
-```
-FAIL  the drifter carries the letter the player attached  -- got 0.0, expected 41.0
-FAIL  the drifter carries exactly the cargo the player chose  -- got 2, expected 1.0
-FAIL  ...and it is the right find  -- got 7.0, expected 3.0
-```
+`DataStoreAdapter:reapPoolShard` is correct and scheduled by nobody, so the pool only
+grows. Keys carry a TTL, so this is growth rather than a leak, but it is a launch
+blocker against the 8.5 MB budget. Raised as **OD21**.
 
 ---
 
-## 3. Progression, measured rather than invented
+## 2. The scan that finds this class of defect
 
-Added `EconomyConfig.TIER_COST`, `Post.promotionCost/canPromote/promote`,
-`NetContract.RF_Upgrade` (1 burst / 3 per minute) and `PostHandler.upgrade`. The
-upgrade payload carries nothing but a sequence number: the server knows the post,
-the post knows its tier, the cost is server config. There is nothing in it to forge.
+The member scan and the dead-write scan both check **fields**. A function that is
+defined, correct, unit-tested and never called is invisible to both — every module
+parses, type-checks and passes its tests, and the feature is simply missing from the
+seam.
 
-`tools/tests/economy-sim.lua` simulates 12 seeds × 70 days of a
-diligent-but-not-optimal player and reports the day each seed arrived:
+`tidekeeper-orphan-scan.js` is now **gate check 16**: 455 exported functions, each
+either called somewhere in the game or in the test suites, or on an allowlist with a
+written reason. Tests count as callers deliberately — a function exercised only by
+tests is staged, not dead — but it must then carry a reason saying what will call it,
+so "staged" cannot quietly become "forgotten".
 
-| Tier | Cost | p10 | **median** | p90 | doc 06 target |
-| --- | --- | --- | --- | --- | --- |
-| 2 | 320 | 3 | **3** | 5 | day 3 |
-| 3 | 3 400 | 14 | **17** | 20 | day 16 |
-| 4 | 15 500 | 49 | **50** | 55 | day 52 |
+**The allowlist is verified in both directions.** An orphan that is not on it fails
+the scan; an entry on it that is *no longer* an orphan also fails, so the list cannot
+rot into a pile of stale excuses. Same discipline as D39.
 
-All 12 seeds reach tier 4. **Three rounds of calibration were needed because
-promotion compounds** — each tier makes the next arrive sooner. The first costs were
-read off a curve measured with every post locked at tier 1, which was the only
-curve obtainable at the time, and put tier 4 at day 22 instead of 52. *A
-progression curve cannot be calibrated against a simulation that cannot progress.*
+The 27 allowlisted entries are grouped by *why*: deliberate library surface,
+diagnostics called from a console, teardown paths, UI payload builders blocked on a
+client that does not exist, the two `NotifyService` functions blocked on OD7, and the
+two compliance checks (`PolicyAdapter.mayTradePaidItems`,
+`mayOfferPaidRandomItems`) that are dormant only because nothing in the game takes
+money — if that ever changes, they **must** gate it.
 
-The sim takes ~2 minutes, so it is **not** in the gate. `pure-tests.lua` pins the
-three calibrated numbers and asserts the costs stay strictly increasing, so they
-cannot drift without someone re-running it.
+It immediately found dead code **in the badge module written in the same session** —
+two helpers defined and never used. They were deleted, not allowlisted.
 
----
+**The scans have now followed this defect up one level per iteration:**
 
-## 4. Content — every data-only line is now done and pinned
-
-| Content | Target | Status |
+| Iteration | Scan | Catches |
 | --- | --- | --- |
-| Finds | 200 | ✅ it6 |
-| Ledger prose variants | 180 | ✅ it6 |
-| Fixed-phrase letters | 120 | ✅ **it7** |
-| Seed Drifters (named) | 64 | ✅ **it7** |
-| Badges | 40 | ✅ **it7** (data; awarding is it8) |
+| 6 | `member-scan` | a field **read** that is never written |
+| 7 | `dead-write-scan` | a field **written** that is never read |
+| 8 | `orphan-scan` | a **function** defined that is never called |
 
-Two content defects found on the way:
-
-- **The 176 finds added in iteration 6 had no display names.** `Strings.FIND`
-  stopped at id 24, so every find above it rendered as "something the sea left".
-  The data shipped and the words did not. The coverage test now walks the real find
-  table instead of a sample.
-- **Seed Drifters were anonymous.** doc 03 §8 calls a Seed "a character, not a
-  statistic", but nothing supplied a name for their owner ids, so every one
-  rendered as **"Someone"** — and a session test claims 2 398 seed arrivals in a
-  simulated month. The Ledger, the one surface carrying this game's entire
-  emotional argument, was mostly a list of anonymous Someones. There are now 64
-  named characters, each leaning hard on one taste axis so they are legible over
-  time, and `Format.actorName` resolves them at the single point the Ledger asks.
-
-Letters are split the way finds are: `LettersConfig` holds the stable persisted ids
-and the server-side validation ceiling, `Strings.LETTER` holds the localisable
-copy. Every phrase is written to be harmless sent by a stranger, to a child, out of
-context — the rules are in the module header and adding a phrase means re-reading
-them. `MAX_LETTER_ID` is now derived from the content so it cannot drift again.
+Iteration 9's first job is to find the next level. The prompt lists candidates.
 
 ---
 
-## 5. Commands and their real output
+## 3. Badges are awarded — schema v3
+
+The 40 badges have existed as data since iteration 7 and nothing awarded them.
+
+* `S.stats` gained six lifetime counters (`lettersSent`, `lettersReceived`,
+  `giftsGiven`, `driftersDispatched`, `tidesElapsed`, and `tideStatesSeen`, which is
+  a 5-bit mask rather than a count — seeing LOW twice is not seeing two states).
+* `S.badges` is a 40-bit mask, five bytes. Badge id 1 is byte 1 bit 0; **ids are
+  persisted bit indices and are never renumbered.**
+* `SCHEMA_VERSION` is **3**, with a real `v2 -> v3` migration. New fields arrive
+  **zeroed, never backfilled** — we genuinely do not know how many letters a pre-v3
+  player sent, and guessing would hand out achievements nobody earned. `tidesElapsed`
+  is the one that stings: a long-standing player restarts that count at zero.
+  Backfilling it from `resolvedAt` was considered and rejected, because it would award
+  the long-absence badges to someone who had merely been away.
+* Six of the twelve badge stats are **derived** from state the post already holds
+  (`tierReached`, `shelvesUnlocked`, `almanacEntries`, `currentsUnlocked`, and the two
+  original counters), so they cost no bytes and cannot drift out of sync.
+* `Resolve.run` evaluates once at the end of the whole resolve, not per epoch: every
+  threshold reads a monotone counter, so the answers agree and it is a fraction of the
+  work. The newly earned ids come back as `info.badgesEarned`.
+
+### 3.1 Wiring it up exposed a defect in the data
+
+**A brand-new post immediately earned three badges.** `shelvesUnlocked` is
+`tier * 6`, so a tier-1 post starts with six shelves and walked straight past "Second
+Shelf" (threshold 2) and "Full House" (6); `currentsUnlocked` starts at 1 and walked
+past "Coldwater Regular" (1).
+
+The ladders had been written against the plain English of the badge names rather than
+against the values the stats can actually take — `shelvesUnlocked` only ever takes
+6/12/18/24, and `currentsUnlocked` only 1/3/4/5. Nothing noticed for an iteration
+because nothing had ever evaluated them.
+
+Ids 11–15 and 34–37 were repurposed. **That was safe only because no badge had ever
+been awarded to anybody**; from the first live award onwards, a row may have its name
+changed and nothing else. Two rules are now pinned by tests:
+
+1. a new post earns **nothing** — the first badge must cost the player an act;
+2. every threshold is a value its stat can actually **reach**.
+
+### 3.2 A real v2 fixture, captured at the last possible moment
+
+`tools/fixture-blobs/post-v2.b64` (238 bytes) was captured from a git worktree at
+commit `4e8b1a1` — the last code whose `PostCodec` still wrote v2 — **in the same
+session that raised `SCHEMA_VERSION` to 3**. That is the last moment it could be
+captured at all: once the encoder moves, old bytes can only be hand-forged, and a
+forged fixture proves nothing about what the old code really wrote. A round-trip test
+encodes and decodes with the *same* code and so agrees with itself by construction,
+including after a change that orphans every live save.
+
+The v1 fixture now migrates v1 → v2 → v3 and both are asserted field by field.
+
+---
+
+## 4. Commands and their real output
 
 ```
-$ node tidekeeper/tools/tidekeeper-quality-gate.js
-TIDEKEEPER quality gate — iteration 7, source root tidekeeper/code (60 Luau file(s))
+TIDEKEEPER quality gate — iteration 8, source root tidekeeper/code (61 Luau file(s))
 
-  ok  doc-gate           TIDEKEEPER doc gate: 171/171 checks passed
+  ok  doc-gate           TIDEKEEPER doc gate: 174/174 checks passed
   ok  separation         no dependency on the VITRIOL tree
-  ok  check-syntax       All 60 Luau file(s) parsed successfully.
-  ok  metrics              53  code/ReplicatedStorage/Tidekeeper/Domain/Resolve.luau
+  ok  check-syntax       All 61 Luau file(s) parsed successfully.
+  ok  metrics              58  code/ReplicatedStorage/Tidekeeper/Shared/PostCodec.luau
   ok  hot-loop-scan         1  :Clone (instance clone)
   ok  call-graph           ShowcaseService.new  <- Bootstrap
   ok  find-dead-config     ✓ no dead keys
-  ok  member-scan        clean — every cross-module member resolves (680 checked)
-  ok  dead-write-scan    clean — every field written to shared state is read somewhere (26 checked)
+  ok  member-scan        clean — every cross-module member resolves (695 checked)
+  ok  dead-write-scan    clean — every field written to shared state is read somewhere (27 checked)
+  ok  orphan-scan        clean — every exported function is called, or allowlisted with a reason (455 checked, 27 allowli
   ok  determinism-scan   clean
-  ok  smoke-test         TIDEKEEPER smoke test: 926 passed, 0 failed, 0 static proof(s) failed
-  ok  session-test       TIDEKEEPER session test: 193 passed, 0 failed
-  ok  luau-test          TIDEKEEPER Luau test: 925 passed, 0 failed, agrees with fengari
-  ok  luau-bench         TIDEKEEPER Luau bench: within budget
+  ok  smoke-test         TIDEKEEPER smoke test: 1201 passed, 0 failed, 0 static proof(s) failed
+  ok  session-test       TIDEKEEPER session test: 217 passed, 0 failed
+  ok  luau-test          TIDEKEEPER Luau test: 1200 passed, 0 failed, agrees with fengari
+  ok  luau-bench         TIDEKEEPER Luau bench: within budget (median 13.209 us, p99 21.269 us, catch-up 2391.4 us).
   ok  git-diff-check
 
-TIDEKEEPER quality gate: 15/15 checks passed
+TIDEKEEPER quality gate: 16/16 checks passed
 ```
 
-The scan reports 2/2 RunService connections.
-
-The economy sim is opt-in and not part of the gate:
+The sim is deliberately **not** in the gate (it takes about two minutes):
 
 ```
 node tidekeeper/tools/tidekeeper-session-test.js --tests tools/tests/economy-sim.lua
 ```
 
-**Prerequisites every turn** — the branch is reset to the session base between
-turns and neither `node_modules` nor `tools/bin/luau` survives:
+**Prerequisites each turn.** The working tree is reset to the session base between
+turns, so iteration 8's commits exist only on the remote:
 
 ```
-cd /home/user/Vitriol && git fetch && git reset --hard origin/arena/01a0f2ee-vitriol
+git fetch && git reset --hard origin/<branch>
 cd tidekeeper/tools && npm install
-git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau \
-  && make -C /tmp/luau config=release luau -j$(nproc) \
-  && cp /tmp/luau/luau tidekeeper/tools/bin/luau
+git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau
+make -C /tmp/luau config=release luau -j$(nproc)
+cp /tmp/luau/luau tidekeeper/tools/bin/luau
 ```
 
-Without the binary the gate shows 13 of 15 checks with 2 skips — correct output,
-not a failure.
+Without the Luau binary the gate shows 14/16 and two skips. That is correct, not a
+failure.
 
 ---
 
-## 6. What is *not* verified, stated plainly
+## 5. What is *not* verified, stated plainly
 
-- **Nothing has ever run in Roblox Studio.** Seven iterations. No DataModel, no
-  Instance, no replication, no real player. Everything below L3.5.
-- **No client code is verified.** No test constructs an Instance, so the entire
-  client layer — including `Main.client.luau`, still never executed — is unproven
-  by construction. This is a permanent, structural limit of the toolchain, not an
-  oversight to be fixed with more assertions.
-- **`RF_Upgrade` has no client caller.** The server path is tested end to end
-  through the real handler; nothing in the UI invokes it.
-- **The letter picker does not exist.** `DispatchView` builds a payload with a
-  letter id; nothing lets a player choose one. `LedgerView` now carries
-  `letterText`; nothing displays it.
-- **Badges are data only.** No stat is incremented and nothing is awarded.
-- The economy numbers come from one player model, stated in the sim's header. It is
-  the fast end of the distribution, not a prediction.
+**Studio has been unreachable for eight consecutive iterations.** No `DISPLAY`, no
+`rojo`, no `lune`, no `lute`. Nothing here has run inside Roblox.
 
----
-
-## 7. What iteration 7 was asked for and did not do
-
-- **Décor, meshes, tier structures, music, SFX** — all need an engine or a human.
-  doc 07 now marks them by what blocks them rather than naming an iteration.
-- **OD18 (LibMP)** — still blocked on Studio.
-- **OD19 (port `fake-platform.lua`, delete fengari)** — not needed; the shims are
-  not costing anything yet.
+* **Verification level claimed: L3.5** — real Luau 0.700 executing the real modules,
+  with a fake platform layer. Not L4 (Studio), not L5 (a live server).
+* The client has **never been rendered**. Its payload builders are exercised by tests
+  against the real server, and that is all.
+* Performance numbers come from the bench harness on this machine, not from a Roblox
+  server: median 13.2 µs against an 18 µs budget, p99 21.3 µs against 50 µs, full
+  catch-up 2.4 ms against 12 ms.
+* The recovery sweep is proven against `fake-platform.lua`'s MemoryStore queue, which
+  implements the batch-id semantics faithfully — but no real MemoryStore has ever been
+  called.
+* Nothing above L3.5 may be claimed without Studio.
 
 ---
 
-## 8. Decisions iteration 7 made
+## 6. What iteration 8 was asked for and did not do
 
-- **D37** — Content thresholds pin to the doc 07 target, and so do calibrated
-  economy constants. `pure-tests` asserts the three tier costs by value.
-- **D38** — A simulation used to calibrate a system must be able to exercise that
-  system. Calibrating progression against a tier-locked sim produced costs that
-  were wrong by a factor of two.
-- **D39** — Shared-state field contracts are checked in both directions:
-  `member-scan` for reads, `dead-write-scan` for writes.
-- **OD7 ✅ CLOSED — not available for v1.** Six iterations. Confirmed against the
-  per-version API dump: five v615 opt-in members, `CreateUserNotificationAsync`
-  still removed at v616, while the same page shows `Instance` changing at v734, so
-  the dump is current. R5 already requires the game to work with zero
-  notifications. Re-open only if the method reappears.
-- **OD14 ✅ CLOSED — no.** Warmth stays prose-only. Held three iterations for a
-  playtest that seven iterations without Studio make clearly distant; the reasoning
-  was never really empirical. Wiring warmth into price makes it a stat to farm and
-  turns every visitor into an optimisation problem, which contradicts doc 00's
-  pillars. Cheap to reverse if a playtest disagrees.
+* **Client UI for `RF_Upgrade`, the letter picker, and `letterText`.** Not built. The
+  dead-feature hunt found four things instead of the expected one, and fixing the
+  data-loss path and shipping badges with a schema migration consumed the iteration.
+  This is now the **headline task for iteration 9**, and the imbalance is real: the
+  server is well ahead of the client.
+* **OD21 and OD22** are raised and documented rather than closed.
+* `economy-sim.lua` was not re-run, because no income number moved: badges award no
+  coin and the recovery sweep touches no economy value.
 
 ---
 
-## 9. Open questions for iteration 8
+## 7. Decisions iteration 8 made
 
-| # | Question | Lean |
+* **D40** — a lifetime counter may be read by a badge; a balance may not. doc 06 says
+  an achievement is never revoked, so a badge may only ever read a quantity that
+  cannot go down. This is why `S.coin` is deliberately unreadable by the badge system.
+* **D41** — prefer a **derived** stat over a counted one. A counter incremented in one
+  place and read in another is precisely the shape of bug three scans now exist to
+  catch; six of the twelve badge stats are derived and therefore cannot drift.
+* **D42** — before changing the save schema, capture a fixture of the **outgoing**
+  version first, from the code that still writes it.
+* **D43** — a threshold must be a value its stat can reach, and must not already be
+  true at birth. Both are pinned by tests, not by review.
+* **D44** — an allowlist that silences a check must be verified in both directions,
+  or it becomes a place to hide findings.
+
+---
+
+## 8. Open questions for iteration 9
+
+| # | Question | Recommendation |
 | --- | --- | --- |
-| OD15 | Open | — |
-| OD18 | LibMP sampled profiling | Blocked on Studio |
-| OD19 | Port `fake-platform.lua`, delete fengari | Only if the shims start costing |
-| **new** | Badge stats need persisting → `SCHEMA_VERSION` 3 + migration | `Version.migrate` already exists for this |
+| **OD21** | The pool reaper is never scheduled | Schedule it, but decide *which* server reaps — every server reaping every shard is a quota fire. One shard per slow tick, jittered by `jobId`. |
+| **OD22** | Ledger history is archived and unreadable | Build it. The Ledger carries this game's entire emotional argument; silently losing its history is worse than it sounds. Needs a remote, a pager, and a retention answer. |
+| OD15 | Does base64 packing still pay? | Measure, do not redesign. Sizes are far inside budget. |
+| OD18 | LibMP for client frame budget | Still blocked on Studio. |
+| OD19 | Delete fengari | Not yet. The two-VM cross-check is an asset, not debt. |
+| OD20 | Dispatch fields are session-scoped | **Closed: leave as is.** A re-pick costs one tap; persisting costs a schema field. |
+| OD7 | Turn-based notifications | **Closed.** The send half of the API does not exist. Re-open only if `CreateUserNotificationAsync` reappears. |
 
 ---
 
-## 10. Prompt for iteration 8
+## 9. Prompt for iteration 9
 
-The copy-paste prompt is **doc 12, "Prompt — Iteration 8: make the new systems
-reachable by a player"**. In short: award the badges (12 lifetime stats, a schema
-bump and a migration — and returning `nil` from an `UpdateAsync` transform *aborts
-the write*, a bug this project has shipped twice); build the client UI for upgrade,
-the letter picker and the received letter; re-run the economy sim if any income
-number moves.
+```
+You are iteration 9 of TIDEKEEPER, a Roblox game being built inside the
+Clovetie/Vitriol repository. Work only on your session's fixed branch. Never
+touch the VITRIOL tree: TIDEKEEPER is entirely inside tidekeeper/.
 
-And before anything else: `git fetch && git reset --hard`, `npm install`, build
-Luau, run the gate, read it. Then go looking for the fifth dead feature — because
-there have been four, in two consecutive iterations, and every one of them lived in
-the gap between two modules that were each individually correct.
+START HERE, IN THIS ORDER.
+
+1.  git fetch && git reset --hard origin/<your branch>. The working tree is
+    reset to the session base between turns, so the previous iteration's
+    commits exist only on the remote.
+2.  cd tidekeeper/tools && npm install
+3.  Build Luau 0.700 into tidekeeper/tools/bin/luau (about 3-4 minutes):
+      git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau
+      make -C /tmp/luau config=release luau -j$(nproc)
+      cp /tmp/luau/luau tidekeeper/tools/bin/luau
+    Without it the gate shows 14 of 16 plus two skips. That is correct, not a
+    failure.
+4.  node tidekeeper/tools/tidekeeper-quality-gate.js  -- and READ it before
+    you write anything. It takes about three minutes.
+5.  Read tidekeeper/HANDOFF.md.
+
+THEN, BEFORE YOU BUILD ANYTHING, SPEND THE FIRST HOUR HUNTING DEAD FEATURES.
+
+Iterations 6, 7 and 8 each found features that were shipped and inert, every
+time with a fully green gate, every time in the seam between two modules that
+were each individually correct. Iteration 8 found four. The scans have climbed
+one level each time: member-scan (a field read, never written), dead-write-scan
+(written, never read), orphan-scan (a function defined, never called).
+
+So: find the fifth level. Ask what the three scans still cannot see. Some
+candidates, none of them checked yet:
+  * a remote that is bound but that no client code ever calls;
+  * a Ledger template id that no code path can ever produce;
+  * a config table whose keys are read but whose VALUES can never matter
+    (e.g. a weight that is always multiplied by zero);
+  * a branch that is unreachable because an earlier guard subsumes it;
+  * a stat that is incremented and never read by any badge, UI or report.
+If you find one, write the scan before the fix, and put it in the gate.
+
+YOUR MAIN WORK: THE CLIENT. The server is now well ahead of the client, which
+is the imbalance to correct.
+
+  a. RF_Upgrade has NO CALLER. Tier promotion works, is tested, and no player
+     can trigger it. Build the client path, including showing the cost and
+     refusing clearly when the player cannot pay.
+  b. The letter picker and the display of letterText. 120 letters exist and
+     nothing shows them.
+  c. The Ledger is the surface carrying this game's entire emotional argument
+     and it cannot show history: see OD22. loadLedgerPage exists and is called
+     by nothing, so every entry past MAX_LEDGER_RESIDENT (200) is archived and
+     then unreadable forever. This needs a remote, a pager and a decision on
+     how far back to keep.
+  d. Close OD21: schedule the pool reaper. Decide WHICH server reaps -- every
+     server reaping every shard is a quota fire.
+
+RULES THAT WILL BITE YOU, LEARNED THE EXPENSIVE WAY.
+
+  * Returning nil from an UpdateAsync transform ABORTS the write. That has
+    been shipped as a bug twice and used deliberately once (restorePost).
+    Know which one you are doing.
+  * Badge ids are persisted bit indices. From the first live award onwards,
+    only a row's NAME may change -- never its id, stat or threshold.
+  * Before changing the save schema, capture a fixture of the OUTGOING version
+    first, from the code that still writes it. See tools/fixture-blobs/README.
+    Once SCHEMA_VERSION moves, that blob can only be hand-forged, and a forged
+    fixture proves nothing.
+  * pure-tests.lua has section/notOk but NO ge. session-tests.lua has
+    eq/ge/le/ok and no notOk. Check before using one.
+  * newServer and settle live in tools/tests/session-prelude.lua. Import them.
+  * RF_Upgrade is rate-limited to 1 burst / 3 per minute; advance the clock
+    between attempts in tests or you will get E_REJECTED.
+  * Post.setShelf refuses slot > #S.shelves + 1. Fill densely or append.
+  * Do not paste raw tool output into a fenced block without stripping
+    trailing whitespace: git diff --check fails the gate on it.
+
+HONESTY RULES. Studio has been unreachable for eight consecutive iterations;
+assume it still is and say so plainly rather than claiming a verification level
+you did not reach. Nothing above L3.5 may be claimed without Studio. Paste real
+tool output; never paraphrase it. A partial honest result beats a complete
+claimed one.
+
+Finish with: a green gate (paste it), ROADMAP.md updated, HANDOFF.md rewritten,
+and the iteration 10 prompt written into docs/12-ITERATION-PROMPTS.md.
+```

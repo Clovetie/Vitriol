@@ -283,6 +283,15 @@ function ExchangeService:publish(S, now)
 	end
 	self.stats.published = self.stats.published + 1
 	S.publishedAt = epoch
+	-- Lifetime dispatch counters (schema v3). Incremented only after the
+	-- write landed: a drifter that failed to publish was not dispatched, and
+	-- a badge must never be earned by an error path.
+	if S.stats ~= nil then
+		S.stats.driftersDispatched = (S.stats.driftersDispatched or 0) + 1
+		if d.letterId ~= nil and d.letterId > 0 then
+			S.stats.lettersSent = (S.stats.lettersSent or 0) + 1
+		end
+	end
 	self.lastPublish[S.owner] = epoch
 	-- The index is best-effort. If MemoryStore is over quota the claim side
 	-- falls back to probing shards; it gets slower, never wrong.

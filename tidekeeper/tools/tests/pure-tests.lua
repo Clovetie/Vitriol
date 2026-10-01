@@ -95,6 +95,8 @@ local Resolve = TidekeeperRequire("Resolve")
 local GameConfig = TidekeeperRequire("GameConfig")
 local EconomyConfig = TidekeeperRequire("EconomyConfig")
 local NetContract = TidekeeperRequire("NetContract")
+local Badges = TidekeeperRequire("Badges")
+local BadgesConfig = TidekeeperRequire("BadgesConfig")
 local DrifterConfig = TidekeeperRequire("DrifterConfig")
 local OrdersConfig = TidekeeperRequire("OrdersConfig")
 local FindsConfig = TidekeeperRequire("FindsConfig")
@@ -879,7 +881,7 @@ Version.OLDEST_SUPPORTED = 1
 -- _reset() above wiped it, and every PostCodec test after this point needs
 -- the v1 -> v2 step to exist (OD16).
 PostCodec.registerMigrations()
-eq(Version.registeredCount(), 1, "the real v1 -> v2 migration is restored after the reset")
+eq(Version.registeredCount(), 2, "both real migrations (v1->v2, v2->v3) are restored after the reset")
 ok(Version.hasMigration(1), "PostCodec registered a migration from v1")
 
 -- ================================================================ DrifterCodec
@@ -1824,7 +1826,7 @@ eq(restored.claims[1].fromOwner, 4455667788, "a claim's owner round trips")
 --   2. a REAL v1 blob, captured before the field existed, still loads.
 -- Only the second one can fail in a way that matters to a live player.
 
-eq(Version.CURRENT, 2, "the current post schema is version 2")
+eq(Version.CURRENT, 3, "the current post schema is version 3")
 blobPost.publishedAt = 4242
 local v2Blob = PostCodec.encode(blobPost)
 local v2Back, v2Reason = PostCodec.decode(v2Blob)
@@ -1838,7 +1840,7 @@ blobPost.publishedAt = nil
 local neverBack = PostCodec.decode(PostCodec.encode(blobPost))
 eq(neverBack.publishedAt, nil, "never-published round trips as never")
 blobPost.publishedAt = 4242
-eq(v2Back.v, 2, "a v2 blob reports schema version 2")
+eq(v2Back.v, 3, "a freshly encoded blob reports schema version 3")
 eq(#v2Blob, #postBlob, "publishedAt costs exactly the 4 bytes the layout says")
 
 local v1Bytes = Codec.base64Decode(FIXTURE_POST_V1)
@@ -1847,7 +1849,7 @@ eq(#v1Bytes, 249, "the v1 fixture is the size it was captured at")
 local migrated, migReason, migWhy = PostCodec.decode(v1Bytes)
 eq(migReason, nil, "the captured v1 blob still decodes: " .. tostring(migWhy))
 ok(migrated ~= nil, "the v1 blob produced a state")
-eq(migrated.v, 2, "the v1 blob was migrated up to v2")
+eq(migrated.v, 3, "the v1 blob was migrated all the way up to v3")
 eq(migrated.publishedAt, nil, "a migrated v1 post has never published")
 -- Everything the v1 blob DID carry must survive the migration untouched.
 eq(migrated.postId, 1001, "postId survives the migration")
@@ -1864,7 +1866,7 @@ eq(#migrated.ring, 2, "the visitor ring survives the migration")
 -- A migrated post must be re-encodable at the new version, or the player is
 -- stuck reading a save they can never write back.
 local reBlob = PostCodec.encode(migrated)
-eq(reBlob[1], 2, "re-encoding a migrated post writes version 2")
+eq(reBlob[1], 3, "re-encoding a migrated post writes version 3")
 local reBack, reReason = PostCodec.decode(reBlob)
 eq(reReason, nil, "the re-encoded blob decodes")
 eq(reBack.coin, 123456, "coin survives the full v1 -> v2 -> bytes -> state trip")
@@ -2566,5 +2568,192 @@ eq(who, "RF_Canary", "...and names the offending remote")
 
 -- And it still passes after restoring, i.e. the test left nothing behind.
 ok(NetContract.hasNoStringFields(), "SPECS restored intact")
+
+end
+
+section("schema v3 and badges")
+do
+
+-- ------------------------------------------------------- the captured v2 blob
+-- The same argument as post-v1.b64: a round-trip test encodes and decodes
+-- with the SAME code and therefore agrees with itself by construction, even
+-- after a change that orphans every live save. Only a blob captured by the
+-- OLD encoder can prove the migration works.
+--
+-- post-v2.b64 was captured from commit 4e8b1a1, the last commit whose
+-- PostCodec still wrote v2, specifically because that ability disappears the
+-- moment SCHEMA_VERSION moves. Capturing it afterwards would have been
+-- impossible.
+local v2Raw = Codec.base64Decode(FIXTURE_POST_V2)
+eq(v2Raw[1], 2, "the fixture really is a version 2 blob")
+eq(#v2Raw, 238, "the v2 fixture is the size it was captured at")
+
+local up, upReason, upWhy = PostCodec.decode(v2Raw)
+eq(upReason, nil, "the captured v2 blob still decodes: " .. tostring(upWhy))
+ok(up ~= nil, "the v2 blob produced a state")
+eq(up.v, 3, "the v2 blob was migrated to v3")
+
+-- Everything v2 carried survives.
+eq(up.postId, 2002, "postId survives v2 -> v3")
+eq(up.owner, 4455667788, "owner survives v2 -> v3")
+eq(up.coin, 98765, "coin survives v2 -> v3")
+eq(up.renown, 1234, "renown survives v2 -> v3")
+eq(up.tier, 3, "tier survives v2 -> v3")
+eq(up.publishedAt, 4242, "publishedAt -- the field v2 added -- survives v2 -> v3")
+eq(up.stats.served, 777, "a v2 lifetime counter survives v2 -> v3")
+eq(up.stats.coinEarned, 98765, "coinEarned survives v2 -> v3")
+
+-- And the fields v3 adds arrive zeroed rather than invented. Backfilling
+-- these would hand out achievements nobody earned.
+eq(up.stats.lettersSent, 0, "a migrated post has sent no letters")
+eq(up.stats.lettersReceived, 0, "a migrated post has received no letters")
+eq(up.stats.giftsGiven, 0, "a migrated post has given no gifts")
+eq(up.stats.driftersDispatched, 0, "a migrated post has dispatched nothing")
+eq(up.stats.tidesElapsed, 0, "a migrated post starts its tide count at zero")
+eq(up.stats.tideStatesSeen, 0, "a migrated post has seen no tide states")
+eq(Badges.count(up), 0, "a migrated post holds no badges yet")
+
+-- A migrated post must be re-encodable, or the player can read a save they
+-- can never write back.
+local upBlob = PostCodec.encode(up)
+eq(upBlob[1], 3, "re-encoding a migrated v2 post writes version 3")
+local upBack, upBackReason = PostCodec.decode(upBlob)
+eq(upBackReason, nil, "the re-encoded v3 blob decodes")
+eq(upBack.coin, 98765, "coin survives the full v2 -> v3 -> bytes -> state trip")
+
+-- ------------------------------------------------------------ the bitmask
+local B = Post.new(99, 12345, 777, 1700000000)
+eq(Badges.count(B), 0, "a new post has no badges")
+ok(not Badges.has(B, 1), "...and does not hold badge 1")
+ok(Badges.award(B, 1), "awarding badge 1 reports that it was newly earned")
+ok(Badges.has(B, 1), "...and it is now held")
+ok(not Badges.award(B, 1), "awarding it twice reports no change")
+eq(Badges.count(B), 1, "...and does not double count")
+
+-- Every id must map to a distinct bit, including the last one. An off-by-one
+-- at the top of the range would silently alias two achievements.
+for id = 1, Badges.BADGE_COUNT do
+	Badges.award(B, id)
+end
+eq(Badges.count(B), Badges.BADGE_COUNT, "all " .. Badges.BADGE_COUNT .. " ids are distinct bits")
+ok(Badges.has(B, Badges.BADGE_COUNT), "the highest id is held")
+ok(not Badges.has(B, Badges.BADGE_COUNT + 1), "an out-of-range id is never held")
+ok(not Badges.award(B, 0), "id 0 is refused")
+ok(not Badges.award(B, Badges.BADGE_COUNT + 1), "an out-of-range id is refused")
+
+-- The mask must survive a round trip, or badges un-earn themselves on relog,
+-- which doc 06 forbids.
+local maskBack = PostCodec.decode(PostCodec.encode(B))
+eq(Badges.count(maskBack), Badges.BADGE_COUNT, "a full badge mask round trips through the codec")
+
+-- --------------------------------------------------------- tide state set
+local T = Post.new(100, 12345, 777, 1700000000)
+ok(Badges.noteTideState(T, 1), "seeing LOW for the first time counts")
+ok(not Badges.noteTideState(T, 1), "...seeing it again does not")
+eq(Badges.statsOf(T)[Badges.STAT.tideStatesSeen], 1, "one distinct state seen")
+Badges.noteTideState(T, 5)
+eq(Badges.statsOf(T)[Badges.STAT.tideStatesSeen], 2, "two distinct states seen")
+ok(not Badges.noteTideState(T, 9), "an impossible tide code is refused")
+
+-- ------------------------------------------------------------- evaluation
+local E = Post.new(101, 12345, 777, 1700000000)
+eq(#Badges.evaluate(E), 0, "a brand-new post earns nothing")
+
+-- Badge 1 is "First Light": one visitor served. Drive the real stat.
+E.stats.served = 1
+local firstEarned = Badges.evaluate(E)
+ok(#firstEarned >= 1, "serving the first visitor earns at least one badge")
+eq(firstEarned[1], 1, "...and the first one earned is id 1, First Light")
+eq(#Badges.evaluate(E), 0, "evaluating again earns nothing new")
+
+-- Crossing several thresholds at once reports them in ascending id order.
+E.stats.served = 100000
+local many = Badges.evaluate(E)
+ok(#many >= 2, "a huge jump earns several badges at once")
+local ascending = true
+for i = 2, #many do
+	if many[i] <= many[i - 1] then
+		ascending = false
+	end
+end
+ok(ascending, "...reported in ascending id order")
+
+-- THE RULE THAT MATTERS: nothing is ever revoked. Spending everything, and
+-- even dropping to the worst state the domain allows, must not take a badge
+-- back -- which is only true because every stat is a lifetime counter and
+-- none of them reads a balance.
+local heldBefore = Badges.count(E)
+E.coin = 0
+E.renown = 0
+E.store = {}
+E.shelves = {}
+eq(#Badges.evaluate(E), 0, "going broke earns nothing new")
+eq(Badges.count(E), heldBefore, "...and revokes nothing")
+
+-- THE TWO RULES FROM BadgesConfig, PINNED.
+--
+-- Rule 1: a brand-new post earns nothing. This is checked above on a fresh
+-- post, and it is the assertion that caught the original defect -- a tier-1
+-- post has six shelves and one Current, so ladders written as "2 shelves" and
+-- "1 Current" were handed out before the player had done anything.
+--
+-- Rule 2: every threshold is a value its stat can actually REACH. A ladder
+-- step that no value ever satisfies is an achievement nobody can earn, which
+-- is just as dead as one everybody has.
+local reachableShelves = {}
+for tier = 1, GameConfig.MAX_TIER do
+	reachableShelves[Post.maxShelves(tier)] = true
+end
+local reachableCurrents = {}
+for tier = 1, GameConfig.MAX_TIER do
+	local n = 0
+	for i = 1, #EconomyConfig.CURRENT_MIN_TIER do
+		if tier >= EconomyConfig.CURRENT_MIN_TIER[i] then
+			n = n + 1
+		end
+	end
+	reachableCurrents[n] = true
+end
+local newPost = Post.new(102, 12345, 777, 1700000000)
+local birth = Badges.statsOf(newPost)
+for i = 1, #BadgesConfig.BADGES do
+	local row = BadgesConfig.BADGES[i]
+	local stat, threshold = row[4], row[5]
+	ok(threshold > birth[stat], "badge " .. row[1] .. " (" .. row[2] .. ") is not already true at birth")
+	if stat == Badges.STAT.shelvesUnlocked then
+		ok(reachableShelves[threshold] == true, "badge " .. row[1] .. " asks for a shelf count that exists")
+	elseif stat == Badges.STAT.currentsUnlocked then
+		ok(reachableCurrents[threshold] == true, "badge " .. row[1] .. " asks for a Current count that exists")
+	elseif stat == Badges.STAT.tierReached then
+		ok(threshold <= GameConfig.MAX_TIER, "badge " .. row[1] .. " asks for a tier that exists")
+	elseif stat == Badges.STAT.tideStatesSeen then
+		ok(threshold <= 5, "badge " .. row[1] .. " asks for at most the five tide states")
+	end
+end
+
+-- Ids are persisted bit indices: they must be unique and within the mask.
+local seenId = {}
+for i = 1, #BadgesConfig.BADGES do
+	local id = BadgesConfig.BADGES[i][1]
+	ok(seenId[id] == nil, "badge id " .. id .. " is unique")
+	ok(id >= 1 and id <= Badges.BADGE_COUNT, "badge id " .. id .. " fits the mask")
+	seenId[id] = true
+end
+
+-- Every row in the config must be reachable: a threshold on a stat index
+-- that does not exist is an achievement no player can ever earn.
+local names = BadgesConfig.STAT_NAMES
+for i = 1, #BadgesConfig.BADGES do
+	local row = BadgesConfig.BADGES[i]
+	ok(row[4] >= 1 and row[4] <= #names, "badge " .. row[1] .. " reads a stat that exists")
+	ok(row[5] >= 1, "badge " .. row[1] .. " has a positive threshold")
+end
+
+-- And statsOf must answer for all twelve, or the rows pointing at the gap
+-- are unreachable.
+local all = Badges.statsOf(E)
+for i = 1, #names do
+	ok(all[i] ~= nil, "statsOf answers for " .. names[i])
+end
 
 end

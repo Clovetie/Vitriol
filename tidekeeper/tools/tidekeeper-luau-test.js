@@ -85,10 +85,15 @@ const FIXTURE_POST_V1 = fs
 	.readFileSync(path.join(ROOT, "tools", "fixture-blobs", "post-v1.b64"), "utf8")
 	.trim();
 
+const FIXTURE_POST_V2 = fs
+	.readFileSync(path.join(ROOT, "tools", "fixture-blobs", "post-v2.b64"), "utf8")
+	.trim();
+
 const PRELUDE = `
 -- emitted by tidekeeper-luau-test.js
 BENCH_ENABLED = false
 FIXTURE_POST_V1 = ${JSON.stringify(FIXTURE_POST_V1)}
+FIXTURE_POST_V2 = ${JSON.stringify(FIXTURE_POST_V2)}
 `;
 
 const EPILOGUE = `

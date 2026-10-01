@@ -615,6 +615,13 @@ function Visit.apply(S, delta)
 	S.standing[index] = Standing.grant(S.standing[index], delta.standing)
 	S.renown = S.renown + delta.renown
 
+	-- Lifetime gift counter (schema v3). Counted here rather than at the
+	-- decision site so that a gift only counts once it has actually been
+	-- applied -- a delta that failed its stock check never happened.
+	if delta.gifted then
+		S.stats.giftsGiven = (S.stats.giftsGiven or 0) + 1
+	end
+
 	local outcome = delta.outcome
 	if outcome == Ledger.SERVED then
 		S.stats.served = S.stats.served + 1

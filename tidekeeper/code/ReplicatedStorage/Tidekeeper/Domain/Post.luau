@@ -122,7 +122,25 @@ function Post.new(postId, owner, salt, now)
 		orders = { version = 1, rules = {} },
 		ring = {},
 		claims = {},
-		stats = { served = 0, refused = 0, partial = 0, missed = 0, noBerth = 0, coinEarned = 0 },
+		-- Lifetime counters, never balances: doc 06 says an achievement is
+		-- never revoked, so a badge may only ever read something that cannot
+		-- go down. The last six are schema v3 (iteration 8); `tideStatesSeen`
+		-- is a 5-bit mask rather than a count.
+		stats = {
+			served = 0,
+			refused = 0,
+			partial = 0,
+			missed = 0,
+			noBerth = 0,
+			coinEarned = 0,
+			lettersSent = 0,
+			lettersReceived = 0,
+			giftsGiven = 0,
+			driftersDispatched = 0,
+			tidesElapsed = 0,
+			tideStatesSeen = 0,
+		},
+		badges = { 0, 0, 0, 0, 0 },
 		-- Schema v2 (OD16). The tide epoch of the most recent Drifter this
 		-- post published. Persisting it is what makes
 		-- one-Drifter-per-post-per-epoch hold ACROSS SERVERS: before v2 the

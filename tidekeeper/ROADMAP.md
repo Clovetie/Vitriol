@@ -179,10 +179,57 @@ All 14 checks were green while all four were true. Two new scans now close both
 directions of the cross-module field contract: `member-scan` (read, never written)
 and `dead-write-scan` (written, never read).
 
-## Iteration 8+ ⬜
+## Iteration 8 ✅ — the safety net that caught nothing, and the scan that finds its kind
 
-Award the badges, build the client UI for the systems that now exist, and the idea
-bank in doc 00 §9. Scope is defined by `HANDOFF.md`, not by this table.
+| Goal | Status |
+| --- | --- |
+| Hunt a fifth dead feature before building anything | ✅ found **four** |
+| Drain the failed-save recovery queue | ✅ `PostService:sweepRecovery` |
+| Award the 40 badges | ✅ schema v3, earned in play, survives a relog |
+| A scan for the class of defect behind all of it | ✅ `orphan-scan`, gate check 16 |
+| Capture a v2 fixture before the ability vanished | ✅ `post-v2.b64`, 238 B |
+| Client UI for upgrade / letters | ⬜ iteration 9 |
+
+**Four more shipped-but-inert features, all invisible to the then-15 green checks:**
+
+1. **The failed-save recovery queue was write-only.** `DataStoreAdapter:savePost`
+   pushes an abandoned write to MemoryStore — the last-resort net against losing a
+   player's session — and `popRecovery`/`ackRecovery` were **called by nothing**.
+   The net caught the blob and dropped it. The comment above `pushRecovery` had
+   said "so the next join can retry it" since iteration 4.
+2. **The proof of the main security invariant never ran.**
+   `NetContract.hasNoStringFields` — doc 13 §2, no remote accepts a string — was
+   uncalled, while three separate comments claimed the smoke test asserted it.
+3. **Ledger history is archived and never read back** (`loadLedgerPage`, OD22).
+4. **The drifter pool is never reaped** (`reapPoolShard`, OD21).
+
+3 and 4 are documented and allowlisted rather than half-fixed.
+
+**The pattern is now three iterations old and has a name.** Iterations 6, 7 and 8
+each lost features in the *seam* between two individually-correct modules, and each
+time the existing checks were green. The scans have followed the defect up one level
+each time: `member-scan` (a field read, never written) → `dead-write-scan` (a field
+written, never read) → **`orphan-scan` (a function defined, never called)**. The
+orphan scan's allowlist is verified in both directions: an entry that stops being an
+orphan fails the scan too, so the list cannot rot into stale excuses.
+
+It found dead code **in the badge module I wrote in the same session** — two helpers
+I had defined and not used. They were deleted, not allowlisted.
+
+**Badges (schema v3).** `S.stats` grew six lifetime counters and `S.badges` is a
+40-bit mask; `Version.migrate` carries v1 and v2 saves up, filling the new fields
+with zeroes rather than backfilling achievements nobody earned. Wiring the table up
+immediately exposed a design defect in it: **a brand-new post earned three badges**,
+because `shelvesUnlocked` is `tier * 6` and the ladders had been written against the
+English of the names rather than the values the stats can take. Ids 11–15 and 34–37
+were repurposed — safe only because nothing had ever been awarded. Two rules are now
+pinned by tests: a new post earns nothing, and every threshold is reachable.
+
+## Iteration 9+ ⬜
+
+Build the client UI for the systems that now exist (upgrade, letters, the Ledger),
+close OD21/OD22, and the idea bank in doc 00 §9. Scope is defined by `HANDOFF.md`,
+not by this table.
 
 ---
 
@@ -210,6 +257,9 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD17 | Run the correctness suite in real Luau instead of transformed Lua 5.3 | ~~it5~~ | **Closed (doc 10 §8.4), and without Lute.** `tidekeeper-luau-test.js` runs the suite shim-free; 887 = 887 against fengari, 0.7 s vs 72 s. Lute release binaries remain unreachable and turned out not to be needed — it would have added a test runner and a profiler, not a different measurement |
 | OD18 | Adopt **LibMP** to measure the client frame budget on real devices (doc 10 §7.2) | it6 | Yes for the Ledger replay, sampled on a fraction of sessions — Roblox warns it raises memory. **Blocked on Studio**, like L4/L5 |
 | OD19 | Port `fake-platform.lua` to real Luau so fengari can be deleted entirely | it6+ | Only worth it if the shims start costing again. The cross-check between two VMs is currently an asset, not debt |
+| OD20 | The three dispatch fields are session-scoped, not persisted | it8 | Left as is, deliberately. A dispatch choice that does not survive a relog is a small loss; persisting it costs a schema field and a migration for something the player re-picks in one tap. Revisit only if telemetry shows players dispatching and relogging inside one epoch |
+| **OD21** | **`DataStoreAdapter:reapPoolShard` is never scheduled, so the drifter pool only grows** | **it9** | Found by the orphan scan. The reaper exists and is correct; nothing calls it. Needs a cadence slot and a decision about *which* server reaps (every server reaping every shard is a quota fire). Not urgent — pool keys carry a TTL — but unbounded growth against the 8.5 MB budget is a launch blocker |
+| **OD22** | **Ledger history is written and never read** | **it9** | `LedgerService:flushPending` archives pages via `saveLedgerPage`; `loadLedgerPage` is called by nothing and no remote asks for history. Every entry past `MAX_LEDGER_RESIDENT` (200) is currently unreadable forever. The Ledger is the surface carrying the game's whole emotional argument, so silently losing its history is worse than it sounds. Needs a remote, a client pager, and a decision on how far back to keep |
 | OD16 | `S.publishedAt` is not persisted, so one-Drifter-per-epoch holds only per server (doc 10 §6.4) | ~~it4~~ | **Closed.** Schema v2 appends it at the blob tail with a real migration and a committed v1 fixture (doc 05 §6.1). Shipped a sentinel bug en route — see **D28** |
 
 ### OD13 in full — the one non-commuting property

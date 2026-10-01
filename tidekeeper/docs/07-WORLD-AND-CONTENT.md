@@ -85,9 +85,20 @@ game's texture.
 | Post tier structures | 4 | human-modelled | 7 (needs an engine) |
 | Zones | 4 | human-built | 4 |
 | Currents | 5 | config only | 3 |
-| Achievements / badges | 40 | config only | **7 ✅ data** |
+| Achievements / badges | 40 | config only | **8 ✅ awarded** |
 | Music cues | 6 | human/licensed | 7 (needs a human) |
 | SFX | ~70 | human/licensed | 7 (needs a human) |
+
+**Iteration 8 status — badges are live.** Schema v3 added six lifetime counters and a
+40-bit mask; a badge is earned during a resolve and survives a save and a reload
+(session scenario 20). Wiring the table up exposed a defect in the *data*: a brand-new
+post immediately earned three badges, because `shelvesUnlocked` is `tier * 6` and the
+ladders had been written against the plain English of the badge names rather than the
+values the stats can actually take. Ids 11–15 and 34–37 were repurposed, which was safe
+only because nothing had ever been awarded — an id is a persisted bit index, so from the
+first live award onwards only a row's *name* may change. Two rules are now pinned by
+tests: **a new post earns nothing**, and **every threshold is a value its stat can
+reach**.
 
 **Iteration 7 status.** Every content line that is pure data is now **done and
 pinned by a test to its doc 07 target**: 200 finds, 180 Ledger phrasings, 120

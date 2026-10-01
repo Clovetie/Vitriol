@@ -598,7 +598,96 @@ iteration 9 prompt.
 
 ---
 
-## Prompt — Iteration 9+: contingency and live
+## Prompt — Iteration 9: the player can finally see it
+
+```
+You are iteration 9 of TIDEKEEPER, a Roblox game being built inside the
+Clovetie/Vitriol repository. Work only on your session's fixed branch. Never
+touch the VITRIOL tree: TIDEKEEPER is entirely inside tidekeeper/.
+
+START HERE, IN THIS ORDER.
+
+1.  git fetch && git reset --hard origin/<your branch>. The working tree is
+    reset to the session base between turns, so the previous iteration's
+    commits exist only on the remote.
+2.  cd tidekeeper/tools && npm install
+3.  Build Luau 0.700 into tidekeeper/tools/bin/luau (about 3-4 minutes):
+      git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau
+      make -C /tmp/luau config=release luau -j$(nproc)
+      cp /tmp/luau/luau tidekeeper/tools/bin/luau
+    Without it the gate shows 14 of 16 plus two skips. That is correct, not a
+    failure.
+4.  node tidekeeper/tools/tidekeeper-quality-gate.js  -- and READ it before
+    you write anything. It takes about three minutes.
+5.  Read tidekeeper/HANDOFF.md.
+
+THEN, BEFORE YOU BUILD ANYTHING, SPEND THE FIRST HOUR HUNTING DEAD FEATURES.
+
+Iterations 6, 7 and 8 each found features that were shipped and inert, every
+time with a fully green gate, every time in the seam between two modules that
+were each individually correct. Iteration 8 found four. The scans have climbed
+one level each time: member-scan (a field read, never written), dead-write-scan
+(written, never read), orphan-scan (a function defined, never called).
+
+So: find the fifth level. Ask what the three scans still cannot see. Some
+candidates, none of them checked yet:
+  * a remote that is bound but that no client code ever calls;
+  * a Ledger template id that no code path can ever produce;
+  * a config table whose keys are read but whose VALUES can never matter
+    (e.g. a weight that is always multiplied by zero);
+  * a branch that is unreachable because an earlier guard subsumes it;
+  * a stat that is incremented and never read by any badge, UI or report.
+If you find one, write the scan before the fix, and put it in the gate.
+
+YOUR MAIN WORK: THE CLIENT. The server is now well ahead of the client, which
+is the imbalance to correct.
+
+  a. RF_Upgrade has NO CALLER. Tier promotion works, is tested, and no player
+     can trigger it. Build the client path, including showing the cost and
+     refusing clearly when the player cannot pay.
+  b. The letter picker and the display of letterText. 120 letters exist and
+     nothing shows them.
+  c. The Ledger is the surface carrying this game's entire emotional argument
+     and it cannot show history: see OD22. loadLedgerPage exists and is called
+     by nothing, so every entry past MAX_LEDGER_RESIDENT (200) is archived and
+     then unreadable forever. This needs a remote, a pager and a decision on
+     how far back to keep.
+  d. Close OD21: schedule the pool reaper. Decide WHICH server reaps -- every
+     server reaping every shard is a quota fire.
+
+RULES THAT WILL BITE YOU, LEARNED THE EXPENSIVE WAY.
+
+  * Returning nil from an UpdateAsync transform ABORTS the write. That has
+    been shipped as a bug twice and used deliberately once (restorePost).
+    Know which one you are doing.
+  * Badge ids are persisted bit indices. From the first live award onwards,
+    only a row's NAME may change -- never its id, stat or threshold.
+  * Before changing the save schema, capture a fixture of the OUTGOING version
+    first, from the code that still writes it. See tools/fixture-blobs/README.
+    Once SCHEMA_VERSION moves, that blob can only be hand-forged, and a forged
+    fixture proves nothing.
+  * pure-tests.lua has section/notOk but NO ge. session-tests.lua has
+    eq/ge/le/ok and no notOk. Check before using one.
+  * newServer and settle live in tools/tests/session-prelude.lua. Import them.
+  * RF_Upgrade is rate-limited to 1 burst / 3 per minute; advance the clock
+    between attempts in tests or you will get E_REJECTED.
+  * Post.setShelf refuses slot > #S.shelves + 1. Fill densely or append.
+  * Do not paste raw tool output into a fenced block without stripping
+    trailing whitespace: git diff --check fails the gate on it.
+
+HONESTY RULES. Studio has been unreachable for eight consecutive iterations;
+assume it still is and say so plainly rather than claiming a verification level
+you did not reach. Nothing above L3.5 may be claimed without Studio. Paste real
+tool output; never paraphrase it. A partial honest result beats a complete
+claimed one.
+
+Finish with: a green gate (paste it), ROADMAP.md updated, HANDOFF.md rewritten,
+and the iteration 10 prompt written into docs/12-ITERATION-PROMPTS.md.
+```
+
+---
+
+## Prompt — Iteration 10+: contingency and live
 
 ## The handoff template
 

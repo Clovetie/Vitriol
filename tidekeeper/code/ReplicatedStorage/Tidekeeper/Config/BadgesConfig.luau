@@ -32,6 +32,27 @@
 --   5 threshold  the value the stat must reach
 --   6 hidden     1 = not listed until earned (the long-tail ones)
 --
+-- THRESHOLDS MUST BE REACHABLE, AND MUST NOT BE REACHED AT BIRTH
+-- --------------------------------------------------------------
+-- Iteration 8 wired this table up and a BRAND-NEW POST IMMEDIATELY EARNED
+-- THREE BADGES. `shelvesUnlocked` is `tier * 6`, so a tier-1 post starts with
+-- six shelves and walked straight past "Second Shelf" (2) and "Full House"
+-- (6); `currentsUnlocked` starts at 1 and walked past "Coldwater Regular" (1).
+-- The ladders had been written against the plain English of the names rather
+-- than against the values the stats can actually take, and nothing noticed,
+-- because nothing had ever evaluated them.
+--
+-- So two rules now hold, and `pure-tests.lua` pins both:
+--   * a new post earns NOTHING -- the first badge must cost the player an act;
+--   * every threshold must be a value its stat can actually reach.
+-- `shelvesUnlocked` only ever takes 6/12/18/24 and `currentsUnlocked` only
+-- 1/3/4/5, so the ladders are written in those values and nowhere else.
+--
+-- Ids 11-15 and 34-37 were repurposed at that point. That was safe ONLY
+-- because no badge had ever been awarded to anybody: an id is a persisted bit
+-- index, so from the first live award onwards, a row may have its name
+-- changed and nothing else.
+--
 -- Layer: Config (data only).
 
 return {
@@ -65,11 +86,11 @@ return {
 		{ 8, "Five Hundred", 1, 2, 500, 0 },
 		{ 9, "Five Thousand", 1, 2, 5000, 0 },
 		{ 10, "Fifty Thousand", 1, 2, 50000, 1 },
-		{ 11, "Second Shelf", 2, 3, 2, 0 },
-		{ 12, "Full House", 1, 3, 6, 0 },
-		{ 13, "Ten Shelves", 1, 3, 10, 0 },
-		{ 14, "Sixteen Shelves", 1, 3, 16, 0 },
-		{ 15, "Twenty-Four", 1, 3, 24, 1 },
+		{ 11, "Twelve Shelves", 1, 3, 12, 0 },
+		{ 12, "Eighteen Shelves", 1, 3, 18, 0 },
+		{ 13, "Twenty-Four", 1, 3, 24, 1 },
+		{ 14, "The Long Watch", 1, 12, 100, 0 },
+		{ 15, "Tide and Time", 1, 12, 500, 1 },
 		{ 16, "Tier Two", 2, 4, 2, 0 },
 		{ 17, "Tier Three", 2, 4, 3, 0 },
 		{ 18, "Tier Four", 2, 4, 4, 0 },
@@ -88,10 +109,10 @@ return {
 		{ 31, "First Dispatch", 2, 9, 1, 0 },
 		{ 32, "Far Trader", 1, 9, 50, 0 },
 		{ 33, "The Long Run", 1, 9, 500, 1 },
-		{ 34, "Coldwater Regular", 2, 10, 1, 0 },
-		{ 35, "The Glass Road", 2, 10, 2, 0 },
-		{ 36, "Longrun Licence", 2, 10, 3, 0 },
-		{ 37, "The Lantern Line", 2, 10, 4, 1 },
+		{ 34, "The Glass Road", 2, 10, 3, 0 },
+		{ 35, "Longrun Licence", 2, 10, 4, 0 },
+		{ 36, "The Lantern Line", 2, 10, 5, 1 },
+		{ 37, "Well Corresponded", 1, 7, 50, 1 },
 		{ 38, "Slack Water", 2, 11, 1, 0 },
 		{ 39, "Spring Tide", 2, 11, 2, 0 },
 		{ 40, "A Year of Tides", 1, 12, 365, 1 },
