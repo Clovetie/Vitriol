@@ -21,21 +21,33 @@ local RunService = game:GetService("RunService")
 local Tidekeeper = ReplicatedStorage:WaitForChild("Tidekeeper")
 local ClientBootstrap = require(Tidekeeper.Client.ClientBootstrap)
 local NetContract = require(Tidekeeper.Shared.NetContract)
+local Remotes = require(Tidekeeper.Shared.Remotes)
 
 local player = Players.LocalPlayer
 
--- Collect the remotes by name. If one is missing the client still starts and
--- says so; a nil-index crash on join is a worse failure than a degraded
--- screen, and the player has lost nothing either way.
-local remotes = {}
-for _, row in ipairs(NetContract.REMOTES) do
-	local name = row[1]
-	local instance = Tidekeeper:FindFirstChild(name)
-	if instance == nil then
-		warn("[Tidekeeper] remote missing: " .. name)
-	else
-		remotes[name] = instance
-	end
+-- Remotes come from `Remotes.await`, which is the client half of the single
+-- sanctioned remote factory (doc 01 section 4). It is not a convenience.
+--
+-- An earlier version of this file hand-rolled the lookup as
+-- `Tidekeeper:FindFirstChild(name)`, and it was wrong in two independent
+-- ways, either of which alone makes the game unplayable for every player:
+--
+--   1. WRONG PARENT. `Remotes.build` puts them in a SIBLING folder,
+--      ReplicatedStorage/TidekeeperRemotes, not inside the module tree
+--      ReplicatedStorage/Tidekeeper. All seven lookups returned nil, the
+--      client warned seven times and started with no remotes at all, and
+--      every session request answered "offline" forever.
+--   2. NO WAIT. Even at the right path, `FindFirstChild` is a race against
+--      replication on join. `await` uses WaitForChild with a timeout.
+--
+-- Nothing caught this for two iterations because no test constructs an
+-- Instance. The lesson is in the shape of the bug, not the typo: the client
+-- re-derived a path that the server owns, instead of calling the function
+-- whose entire job is to know it.
+local remotes, remotesWhy = Remotes.await(30)
+if remotes == nil then
+	warn("[Tidekeeper] remotes unavailable: " .. tostring(remotesWhy))
+	remotes = {}
 end
 
 local app = ClientBootstrap.start({

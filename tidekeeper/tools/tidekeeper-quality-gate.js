@@ -39,7 +39,7 @@ const MAX_CAPTURE = 200000;
  * constant on purpose: a gate that infers how far along the project is will
  * eventually infer wrongly and let a missing harness through.
  */
-const CURRENT_ITERATION = 5;
+const CURRENT_ITERATION = 6;
 
 function die(message) {
 	console.error(`tidekeeper-quality-gate: ${message}`);
@@ -191,6 +191,11 @@ run("call-graph", "call-graph.js", ["--src", rel(args.src)], { needsSource: true
 run("find-dead-config", "find-dead-config.js", ["--src", rel(args.src)], { needsSource: true });
 // Unlike the four scans above (which report and exit 0), this one exits
 // non-zero on a hit, so it genuinely gates. Determinism is the product.
+// Cross-module member resolution. Luau checks nothing here and neither did
+// anything else in this build, which is how `#Drifter.CLASS_NAMES` survived
+// a whole iteration. Required from 6.
+run("member-scan", "tidekeeper-member-scan.js", [], { requiredFrom: 6, needsSource: true });
+
 run("determinism-scan", "tidekeeper-determinism-scan.js", ["--src", rel(args.src)], { needsSource: true });
 
 // 4. Harnesses. Pending until their iteration; required once source exists.
