@@ -38,42 +38,16 @@ const { floatifyNumbers, transformModules, buildBundle, runBundle, printLog } = 
 // The fengari harness -- number semantics, bit32, the module loader -- lives
 // in lib/harness.js, shared with tidekeeper-session-test.js. Read the header
 // there before changing anything about how numbers behave in this VM.
-const CODE = "code/ReplicatedStorage/Tidekeeper";
-
 // Logical name -> path relative to tidekeeper/. The logical name must equal the
 // last segment of the module's `require` path, because that is how the
 // transform rewrites requires.
-const MODULES = {
-	// Config (pure data, no requires)
-	GameConfig: `${CODE}/Config/GameConfig.luau`,
-	TideConfig: `${CODE}/Config/TideConfig.luau`,
-	EconomyConfig: `${CODE}/Config/EconomyConfig.luau`,
-	DrifterConfig: `${CODE}/Config/DrifterConfig.luau`,
-	OrdersConfig: `${CODE}/Config/OrdersConfig.luau`,
-	FindsConfig: `${CODE}/Config/FindsConfig.luau`,
-	// L0 Lib
-	MathExt: `${CODE}/Lib/MathExt.luau`,
-	Hash: `${CODE}/Lib/Hash.luau`,
-	RNG: `${CODE}/Lib/RNG.luau`,
-	Tables: `${CODE}/Lib/Tables.luau`,
-	Signal: `${CODE}/Lib/Signal.luau`,
-	Codec: `${CODE}/Lib/Codec.luau`,
-	Schema: `${CODE}/Lib/Schema.luau`,
-	Tide: `${CODE}/Lib/Tide.luau`,
-	// Shared
-	Version: `${CODE}/Shared/Version.luau`,
-	DrifterCodec: `${CODE}/Shared/DrifterCodec.luau`,
-	PostCodec: `${CODE}/Shared/PostCodec.luau`,
-	// L2 Domain
-	Standing: `${CODE}/Domain/Standing.luau`,
-	Almanac: `${CODE}/Domain/Almanac.luau`,
-	Drifter: `${CODE}/Domain/Drifter.luau`,
-	Post: `${CODE}/Domain/Post.luau`,
-	Orders: `${CODE}/Domain/Orders.luau`,
-	Ledger: `${CODE}/Domain/Ledger.luau`,
-	Visit: `${CODE}/Domain/Visit.luau`,
-	Resolve: `${CODE}/Domain/Resolve.luau`,
-};
+//
+// This list USED TO BE DUPLICATED HERE, which is precisely what decision D32
+// forbids. It drifted the moment iteration 7 added LettersConfig to the shared
+// map: the Luau runner picked it up and this one crashed with "unknown module
+// LettersConfig", on a file that had not changed. Two lists of the same thing
+// is one list and one liability, so this now reads the real one.
+const MODULES = require("./lib/module-map.js").PURE_REL;
 
 const argv = process.argv.slice(2);
 const noBench = argv.includes("--no-bench");

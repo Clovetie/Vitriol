@@ -47,6 +47,7 @@ local Tide = require(Tidekeeper.Lib.Tide)
 local DrifterCodec = require(Tidekeeper.Shared.DrifterCodec)
 local ReceiptCodec = require(Tidekeeper.Shared.ReceiptCodec)
 local Drifter = require(Tidekeeper.Domain.Drifter)
+local LettersConfig = require(Tidekeeper.Config.LettersConfig)
 local Post = require(Tidekeeper.Domain.Post)
 
 local ExchangeService = {}
@@ -173,17 +174,56 @@ function ExchangeService:buildDrifter(S, epoch)
 	-- Cargo is COPIED, NOT MOVED (doc 03 section 3.1): at most four ids off
 	-- the owner's shelves, offered as a barter claim the recipient accepts or
 	-- declines. There is no transfer, so there is no duplication exploit.
+	--
+	-- THE PLAYER'S OWN CHOICE WINS. `RF_Dispatch` records `S.dispatchCargo`
+	-- and `S.dispatchLetter` on the post and relies on publication at logout
+	-- to carry them. Until iteration 7 this function ignored both: it
+	-- recomputed cargo by walking the shelves in slot order and hard-coded
+	-- `d.letterId = 0`. The effect was that the entire dispatch screen was
+	-- inert -- a player chose what to send and who-knows-what went instead,
+	-- and no letter ever reached another player, which also made Ledger
+	-- template 105 ("your drifter brought a note back") unreachable prose.
+	-- Nothing caught it because each half is valid on its own; the defect
+	-- lived in the gap between the handler and this service. That gap now
+	-- has a check: tools/tidekeeper-dead-write-scan.js.
+	--
+	-- The shelf walk remains as the FALLBACK for a post that logs out
+	-- without ever opening the dispatch screen, which is the common case.
 	local cargo = {}
 	local cargoCount = 0
-	for slot = 1, #S.shelves do
-		local shelf = S.shelves[slot]
-		if shelf ~= nil and shelf.id ~= nil and shelf.id > 0 and cargoCount < DrifterConfig.MAX_CARGO then
-			cargoCount = cargoCount + 1
-			cargo[cargoCount] = shelf.id
+	local chosen = S.dispatchCargo
+	if chosen ~= nil and #chosen > 0 then
+		for i = 1, #chosen do
+			local id = chosen[i]
+			-- Re-validate against CURRENT stock. The choice was made earlier
+			-- in the session and the shelf may have sold out since; trusting
+			-- the stale selection would ship cargo the post no longer holds.
+			if cargoCount < DrifterConfig.MAX_CARGO and id ~= nil and id > 0 and Post.stockOf(S, id) > 0 then
+				cargoCount = cargoCount + 1
+				cargo[cargoCount] = id
+			end
+		end
+	end
+	if cargoCount == 0 then
+		for slot = 1, #S.shelves do
+			local shelf = S.shelves[slot]
+			if shelf ~= nil and shelf.id ~= nil and shelf.id > 0 and cargoCount < DrifterConfig.MAX_CARGO then
+				cargoCount = cargoCount + 1
+				cargo[cargoCount] = shelf.id
+			end
 		end
 	end
 	d.cargo = cargo
-	d.letterId = 0
+
+	-- The letter is an index into an authored phrase list, never free text
+	-- (doc 13 section 2). Clamp rather than trust: the field is server-set,
+	-- but a stale value from before a content change must not address a
+	-- phrase that no longer exists.
+	local letterId = S.dispatchLetter or 0
+	if letterId < 0 or letterId > LettersConfig.MAX_LETTER_ID then
+		letterId = 0
+	end
+	d.letterId = letterId
 	return d
 end
 

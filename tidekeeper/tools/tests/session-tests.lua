@@ -627,6 +627,36 @@ do -- 15. CLIENT-SIDE LOCALISATION COVERAGE
 	end
 	eq("no prose exists for a template the domain cannot emit", orphans, 0)
 
+	-- Every find the economy can produce must have a NAME. Iteration 6 added
+	-- 176 rows to FindsConfig and did not add them to Strings.FIND, so for a
+	-- whole iteration every find above id 24 rendered as "something the sea
+	-- left". The data shipped and the words did not, and because the sampled
+	-- entries all used low ids, nothing noticed. This walks the real find
+	-- table rather than a sample.
+	local FindsConfig = TidekeeperRequire("FindsConfig")
+	Format.resetMisses()
+	local unnamed = {}
+	for i = 1, #FindsConfig.FINDS do
+		local id = FindsConfig.FINDS[i][1]
+		if Format.findName(id) == Strings.FIND_FALLBACK then
+			unnamed[#unnamed + 1] = id
+		end
+	end
+	eq("every find in the content set has a display name", #unnamed, 0)
+
+	-- Same for letters: an id that reaches a player with no words behind it
+	-- is an envelope that opens on nothing.
+	local LettersConfig = TidekeeperRequire("LettersConfig")
+	local wordless = {}
+	for i = 1, #LettersConfig.LETTERS do
+		local id = LettersConfig.LETTERS[i][1]
+		if Format.letterText(id) == Strings.LETTER_FALLBACK then
+			wordless[#wordless + 1] = id
+		end
+	end
+	eq("every letter in the content set has text", #wordless, 0)
+	eq("no fallback fired while covering finds and letters", Format.totalMisses(), 0)
+
 	-- ------------------------------------------------- then the real thing
 	local app, env = newServer({ seed = 77 })
 	local userId = 5150
@@ -987,6 +1017,72 @@ do -- 16. THE CLIENT, DRIVEN AGAINST THE REAL SERVER
 	eq("the client never reuses a sequence number", dupes, 0)
 
 	REPORT.clientScreens = #SCREENS
+end
+
+do -- 17. THE DISPATCH PIPELINE ACTUALLY CARRIES WHAT THE PLAYER CHOSE
+	-- Iteration 7 found RF_Dispatch was inert end to end. The handler wrote
+	-- S.dispatchLetter and S.dispatchCargo; ExchangeService:buildDrifter read
+	-- neither, recomputing cargo from the shelves and hard-coding
+	-- letterId = 0. So the dispatch screen was decoration: your cargo choice
+	-- was discarded and no letter ever reached another player, which also
+	-- made Ledger template 105 unreachable.
+	--
+	-- Every check was green throughout, because each half is valid code on
+	-- its own. This scenario asserts the two halves actually MEET.
+	local Post = TidekeeperRequire("Post")
+	local Tide = TidekeeperRequire("Tide")
+	local app, env = newServer({ seed = 909 })
+	local userId = 7321
+	env:addPlayer(userId)
+	settle(app, env, 200)
+
+	local S = app.posts:get(userId)
+	ok("the dispatching post exists", S ~= nil)
+
+	-- Stock two finds so there is something legitimate to send. Stock and
+	-- shelves are different things: `setShelf` prices a display slot,
+	-- `addStock` is what the post actually holds, and cargo is validated
+	-- against the latter.
+	Post.addStock(S, 7, 3)
+	Post.addStock(S, 3, 2)
+	Post.setShelf(S, 1, 7, 18)
+	Post.setShelf(S, 2, 3, 12)
+	local epoch = Tide.epoch(env:now())
+
+	-- What the player chose, as RF_Dispatch would have recorded it.
+	S.dispatchedAt = epoch
+	S.dispatchLetter = 41
+	S.dispatchCargo = { 3 }
+
+	local d = app.exchange:buildDrifter(S, epoch)
+	eq("the drifter carries the letter the player attached", d.letterId, 41)
+	eq("the drifter carries exactly the cargo the player chose", #d.cargo, 1)
+	eq("...and it is the right find", d.cargo[1], 3)
+
+	-- A letter id beyond the content set must be dropped, not carried. The
+	-- field is server-set, but a value persisted before a content change
+	-- would otherwise address a phrase that no longer exists.
+	S.dispatchLetter = 99999
+	local d2 = app.exchange:buildDrifter(S, epoch)
+	eq("an out-of-range letter id is dropped", d2.letterId, 0)
+
+	-- A stale choice must be re-validated against CURRENT stock, not trusted.
+	S.dispatchLetter = 7
+	S.dispatchCargo = { 199 }
+	local d3 = app.exchange:buildDrifter(S, epoch)
+	local carriedUnstocked = false
+	for i = 1, #d3.cargo do
+		if d3.cargo[i] == 199 then carriedUnstocked = true end
+	end
+	ok("cargo the post no longer holds is not shipped", not carriedUnstocked)
+	ok("the shelf fallback still fills the hold", #d3.cargo > 0)
+
+	-- And a post that never opened the dispatch screen still trades.
+	S.dispatchLetter = nil
+	S.dispatchCargo = nil
+	local d4 = app.exchange:buildDrifter(S, epoch)
+	eq("a post that never dispatched carries no letter", d4.letterId, 0)
+	ok("...but still carries cargo off its shelves", #d4.cargo > 0)
 end
 
 print(string.format(

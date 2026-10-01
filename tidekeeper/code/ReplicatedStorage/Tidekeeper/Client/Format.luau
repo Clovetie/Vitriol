@@ -40,6 +40,7 @@ Format.misses = {
 	class = 0,
 	tide = 0,
 	arity = 0,
+	letter = 0,
 }
 
 function Format.resetMisses()
@@ -48,11 +49,12 @@ function Format.resetMisses()
 	Format.misses.class = 0
 	Format.misses.tide = 0
 	Format.misses.arity = 0
+	Format.misses.letter = 0
 end
 
 function Format.totalMisses()
 	local m = Format.misses
-	return m.template + m.find + m.class + m.tide + m.arity
+	return m.template + m.find + m.class + m.tide + m.arity + m.letter
 end
 
 -- ----------------------------------------------------------------- lookups
@@ -73,6 +75,22 @@ function Format.className(id)
 		return Strings.CLASS_FALLBACK
 	end
 	return name
+end
+
+-- The text of a letter a drifter carried home. Ledger template 105 announces
+-- that a note arrived; this is the note. Until iteration 7 no letter could
+-- ever travel (ExchangeService hard-coded letterId = 0), so this lookup had
+-- nothing to resolve and template 105 was unreachable prose.
+function Format.letterText(id)
+	if id == nil or id <= 0 then
+		return nil
+	end
+	local text = Strings.LETTER[id]
+	if text == nil then
+		Format.misses.letter = Format.misses.letter + 1
+		return Strings.LETTER_FALLBACK
+	end
+	return text
 end
 
 function Format.tideName(code)

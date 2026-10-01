@@ -30,6 +30,7 @@ local Tidekeeper = ReplicatedStorage:WaitForChild("Tidekeeper")
 local NetContract = require(Tidekeeper.Shared.NetContract)
 local DrifterConfig = require(Tidekeeper.Config.DrifterConfig)
 local Tide = require(Tidekeeper.Lib.Tide)
+local LettersConfig = require(Tidekeeper.Config.LettersConfig)
 local Post = require(Tidekeeper.Domain.Post)
 
 local DispatchHandler = {}
@@ -106,9 +107,14 @@ function DispatchHandler.handle(app, player, payload)
 	return { status = OK, epoch = epoch, cargo = #cargo }
 end
 
--- The authored phrase list lives on the client as localised strings; the
--- server only needs the ceiling so it can reject a forged index.
-DispatchHandler.MAX_LETTER_ID = 96
+-- The authored phrase list lives in Config/LettersConfig, which is under
+-- ReplicatedStorage and therefore visible to both sides. The server needs
+-- the ceiling so it can reject a forged index.
+--
+-- This was hard-coded to 96 until iteration 7, while the real list did not
+-- exist at all. Deriving it means the ceiling cannot drift from the content
+-- again: add a phrase and the validator follows.
+DispatchHandler.MAX_LETTER_ID = LettersConfig.MAX_LETTER_ID
 
 DispatchHandler.OK = OK
 DispatchHandler.E_REJECTED = E_REJECTED

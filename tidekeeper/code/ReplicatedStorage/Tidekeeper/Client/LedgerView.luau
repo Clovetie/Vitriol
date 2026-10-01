@@ -105,6 +105,10 @@ function LedgerView.build(entries, names, options)
 			band = LedgerView.warmthBand(entry.warmth),
 			-- A letter is the one thing that gets its own affordance.
 			hasLetter = (entry.noteId ~= nil and entry.noteId > 0) or false,
+			-- ...and the affordance needs something to open. Carrying only
+			-- the boolean meant the UI could show an envelope that contained
+			-- nothing; the words were never looked up anywhere.
+			letterText = Format.letterText(entry.noteId),
 		}
 		unread = unread + 1
 	end

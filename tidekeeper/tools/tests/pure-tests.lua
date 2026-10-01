@@ -2317,6 +2317,28 @@ end
 eq(badFind, 0, "every find row is well formed")
 eq(Tables.count(idsSeen), #FindsConfig.FINDS, "every find id is unique")
 
+-- --------------------------------------------------------------- letters
+-- The letter list is the other half of the dispatch feature that iteration 7
+-- found inert: the ids were validated against a hard-coded ceiling of 96 and
+-- there was no phrase list at all. Pin the count to the doc 07 target so the
+-- content cannot be deleted without turning this red.
+local LettersConfig = TidekeeperRequire("LettersConfig")
+eq(#LettersConfig.LETTERS, 120, "doc 07 section 5 wants 120 letters for v1")
+eq(LettersConfig.MAX_LETTER_ID, #LettersConfig.LETTERS, "the validation ceiling matches the content")
+
+local letterIds = {}
+local badLetter = 0
+for i = 1, #LettersConfig.LETTERS do
+	local row = LettersConfig.LETTERS[i]
+	if row[1] ~= i then badLetter = badLetter + 1 end
+	if letterIds[row[1]] then badLetter = badLetter + 1 end
+	letterIds[row[1]] = true
+	if row[2] < 1 or row[2] > #LettersConfig.CATEGORY_NAMES then badLetter = badLetter + 1 end
+end
+eq(badLetter, 0, "every letter row is well formed and densely numbered")
+eq(Tables.count(letterIds), #LettersConfig.LETTERS, "every letter id is unique")
+
+
 -- =============================================================== benchmark
 end
 section("benchmark")
