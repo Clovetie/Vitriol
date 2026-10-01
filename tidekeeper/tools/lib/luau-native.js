@@ -121,6 +121,13 @@ function TKRequire(name)
 	CACHE[name] = { value }
 	return value
 end
+
+-- The fengari harness injects the same resolver under the name
+-- \`TidekeeperRequire\`, and tests/pure-tests.lua is shared verbatim between
+-- the two runners -- so the alias is what lets ONE test file serve both VMs.
+-- Without it the port would have needed a doctored copy of the suite, and a
+-- doctored copy is exactly the thing this runner exists to get rid of.
+TidekeeperRequire = TKRequire
 `;
 
 /**

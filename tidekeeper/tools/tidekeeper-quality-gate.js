@@ -39,7 +39,7 @@ const MAX_CAPTURE = 200000;
  * constant on purpose: a gate that infers how far along the project is will
  * eventually infer wrongly and let a missing harness through.
  */
-const CURRENT_ITERATION = 4;
+const CURRENT_ITERATION = 5;
 
 function die(message) {
 	console.error(`tidekeeper-quality-gate: ${message}`);
@@ -200,6 +200,10 @@ run("session-test", "tidekeeper-session-test.js", [], { requiredFrom: 3 });
 // It exits 0 and prints SKIPPED when no `luau` binary is present, so the gate
 // stays green on a machine that has not built one -- but it says so loudly
 // rather than vanishing.
+// The correctness suite in a real Luau VM, cross-checked against fengari
+// (OD17). Required from iteration 5. Same skip contract as the bench.
+run("luau-test", "tidekeeper-luau-test.js", ["--compare"], { requiredFrom: 5 });
+
 run("luau-bench", "tidekeeper-luau-bench.js", [], { requiredFrom: 4 });
 
 // 5. Whitespace hygiene in the working tree.

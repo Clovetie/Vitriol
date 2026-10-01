@@ -272,7 +272,7 @@ function PlayerService:sendHandshake(player, S, chunkCount)
 			current = S.current,
 			epoch = Tide.epoch(self.clock()),
 			chunks = chunkCount,
-			shelves = Post.shelfCount(S),
+			shelfCount = Post.shelfCount(S),
 		})
 	end
 end

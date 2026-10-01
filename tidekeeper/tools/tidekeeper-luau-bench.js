@@ -35,35 +35,7 @@ const ROOT = path.resolve(__dirname, "..", "..");
 const CODE = path.join(ROOT, "tidekeeper", "code", "ReplicatedStorage", "Tidekeeper");
 const OUT = path.join(__dirname, "reports");
 
-const MODULES = {
-	GameConfig: `${CODE}/Config/GameConfig.luau`,
-	TideConfig: `${CODE}/Config/TideConfig.luau`,
-	EconomyConfig: `${CODE}/Config/EconomyConfig.luau`,
-	DrifterConfig: `${CODE}/Config/DrifterConfig.luau`,
-	OrdersConfig: `${CODE}/Config/OrdersConfig.luau`,
-	FindsConfig: `${CODE}/Config/FindsConfig.luau`,
-	NotifyConfig: `${CODE}/Config/NotifyConfig.luau`,
-	MathExt: `${CODE}/Lib/MathExt.luau`,
-	Hash: `${CODE}/Lib/Hash.luau`,
-	RNG: `${CODE}/Lib/RNG.luau`,
-	Tables: `${CODE}/Lib/Tables.luau`,
-	Signal: `${CODE}/Lib/Signal.luau`,
-	Codec: `${CODE}/Lib/Codec.luau`,
-	Schema: `${CODE}/Lib/Schema.luau`,
-	Tide: `${CODE}/Lib/Tide.luau`,
-	Version: `${CODE}/Shared/Version.luau`,
-	DrifterCodec: `${CODE}/Shared/DrifterCodec.luau`,
-	PostCodec: `${CODE}/Shared/PostCodec.luau`,
-	ReceiptCodec: `${CODE}/Shared/ReceiptCodec.luau`,
-	Standing: `${CODE}/Domain/Standing.luau`,
-	Almanac: `${CODE}/Domain/Almanac.luau`,
-	Drifter: `${CODE}/Domain/Drifter.luau`,
-	Post: `${CODE}/Domain/Post.luau`,
-	Orders: `${CODE}/Domain/Orders.luau`,
-	Ledger: `${CODE}/Domain/Ledger.luau`,
-	Visit: `${CODE}/Domain/Visit.luau`,
-	Resolve: `${CODE}/Domain/Resolve.luau`,
-};
+const { PURE: MODULES } = require("./lib/module-map");
 
 function main() {
 	const argv = process.argv.slice(2);

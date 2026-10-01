@@ -129,6 +129,12 @@ function OrdersView.setOrdersPayload(seq, program)
 	return { seq = seq, bytes = bytes }
 end
 
-OrdersView.CLASS_COUNT = #Drifter.CLASS_NAMES
+-- Re-exported so the view's consumers do not each reach into Domain. It is
+-- `Drifter.CLASS_COUNT`, already a count -- an earlier version wrote
+-- `#Drifter.CLASS_NAMES`, a table that has never existed, which made this
+-- module throw AT LOAD TIME and take the whole Orders screen with it.
+-- Nothing caught it for an entire iteration because no test ever required
+-- this file; `check-syntax` parses, it does not execute.
+OrdersView.CLASS_COUNT = Drifter.CLASS_COUNT
 
 return OrdersView

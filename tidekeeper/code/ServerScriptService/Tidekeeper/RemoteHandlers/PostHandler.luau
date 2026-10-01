@@ -92,7 +92,7 @@ function PostHandler.arrange(app, player, payload)
 			return { status = E_ILLEGAL }
 		end
 		app.posts:markDirty(userId)
-		return { status = OK, shelves = Post.shelfCount(S) }
+		return { status = OK, shelfCount = Post.shelfCount(S) }
 	end
 
 	-- You may only shelve what you actually hold. This is the check that the
@@ -106,7 +106,7 @@ function PostHandler.arrange(app, player, payload)
 		return { status = E_ILLEGAL }
 	end
 	app.posts:markDirty(userId)
-	return { status = OK, shelves = Post.shelfCount(S) }
+	return { status = OK, shelfCount = Post.shelfCount(S) }
 end
 
 -- ------------------------------------------------------------ setOrders

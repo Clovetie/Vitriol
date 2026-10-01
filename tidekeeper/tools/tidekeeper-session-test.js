@@ -53,78 +53,7 @@ const SCRIPTS = "code/ServerScriptService/Tidekeeper";
 // Logical name -> path. The name MUST equal the last segment of the module's
 // require path; the transform resolves requires by base name, which is also
 // why every module in this game has a globally unique file name.
-const MODULES = {
-	// L0 Config
-	GameConfig: `${REPLICATED}/Config/GameConfig.luau`,
-	TideConfig: `${REPLICATED}/Config/TideConfig.luau`,
-	EconomyConfig: `${REPLICATED}/Config/EconomyConfig.luau`,
-	DrifterConfig: `${REPLICATED}/Config/DrifterConfig.luau`,
-	OrdersConfig: `${REPLICATED}/Config/OrdersConfig.luau`,
-	FindsConfig: `${REPLICATED}/Config/FindsConfig.luau`,
-	NotifyConfig: `${REPLICATED}/Config/NotifyConfig.luau`,
-	// L0 Lib
-	MathExt: `${REPLICATED}/Lib/MathExt.luau`,
-	Hash: `${REPLICATED}/Lib/Hash.luau`,
-	RNG: `${REPLICATED}/Lib/RNG.luau`,
-	Tables: `${REPLICATED}/Lib/Tables.luau`,
-	Signal: `${REPLICATED}/Lib/Signal.luau`,
-	Codec: `${REPLICATED}/Lib/Codec.luau`,
-	Schema: `${REPLICATED}/Lib/Schema.luau`,
-	Tide: `${REPLICATED}/Lib/Tide.luau`,
-	// L2 Shared
-	Version: `${REPLICATED}/Shared/Version.luau`,
-	DrifterCodec: `${REPLICATED}/Shared/DrifterCodec.luau`,
-	PostCodec: `${REPLICATED}/Shared/PostCodec.luau`,
-	ReceiptCodec: `${REPLICATED}/Shared/ReceiptCodec.luau`,
-	NetContract: `${REPLICATED}/Shared/NetContract.luau`,
-	Remotes: `${REPLICATED}/Shared/Remotes.luau`,
-	// L2 Domain
-	Standing: `${REPLICATED}/Domain/Standing.luau`,
-	Almanac: `${REPLICATED}/Domain/Almanac.luau`,
-	Drifter: `${REPLICATED}/Domain/Drifter.luau`,
-	Post: `${REPLICATED}/Domain/Post.luau`,
-	Orders: `${REPLICATED}/Domain/Orders.luau`,
-	Ledger: `${REPLICATED}/Domain/Ledger.luau`,
-	Visit: `${REPLICATED}/Domain/Visit.luau`,
-	Resolve: `${REPLICATED}/Domain/Resolve.luau`,
-	// L1 Adapters
-	DataStoreAdapter: `${SERVER}/Adapters/DataStoreAdapter.luau`,
-	MemoryAdapter: `${SERVER}/Adapters/MemoryAdapter.luau`,
-	NotifyAdapter: `${SERVER}/Adapters/NotifyAdapter.luau`,
-	PolicyAdapter: `${SERVER}/Adapters/PolicyAdapter.luau`,
-	// L3 Services
-	CadenceService: `${SERVER}/Services/CadenceService.luau`,
-	ExchangeService: `${SERVER}/Services/ExchangeService.luau`,
-	LedgerService: `${SERVER}/Services/LedgerService.luau`,
-	NotifyService: `${SERVER}/Services/NotifyService.luau`,
-	ShowcaseService: `${SERVER}/Services/ShowcaseService.luau`,
-	PostService: `${SERVER}/Services/PostService.luau`,
-	PlayerService: `${SERVER}/Services/PlayerService.luau`,
-	Bootstrap: `${SERVER}/Services/Bootstrap.luau`,
-	// L4 Remote handlers (loaded so that a syntax or layering error in them
-	// fails this suite rather than waiting for Studio)
-	SessionHandler: `${SCRIPTS}/RemoteHandlers/SessionHandler.luau`,
-	PostHandler: `${SCRIPTS}/RemoteHandlers/PostHandler.luau`,
-	DispatchHandler: `${SCRIPTS}/RemoteHandlers/DispatchHandler.luau`,
-	DebugHandler: `${SCRIPTS}/RemoteHandlers/DebugHandler.luau`,
-	Profiler: `${SCRIPTS}/Diagnostics/Profiler.luau`,
-	BudgetMeter: `${SCRIPTS}/Diagnostics/BudgetMeter.luau`,
-	// L5 Client (iteration 4). Loaded so the localisation table and the
-	// presenters are exercised by the same suite that drives the server --
-	// the whole point of scenario 15 is that the ids the DOMAIN emits and the
-	// prose the CLIENT holds are checked against each other, and they can
-	// only be checked together.
-	Strings: `${REPLICATED}/Client/Strings.luau`,
-	Format: `${REPLICATED}/Client/Format.luau`,
-	LedgerView: `${REPLICATED}/Client/LedgerView.luau`,
-	TideView: `${REPLICATED}/Client/TideView.luau`,
-	PostView: `${REPLICATED}/Client/PostView.luau`,
-	OrdersView: `${REPLICATED}/Client/OrdersView.luau`,
-	DispatchView: `${REPLICATED}/Client/DispatchView.luau`,
-	ClientBootstrap: `${REPLICATED}/Client/ClientBootstrap.luau`,
-	// The fake platform is required like any other module.
-	FakePlatform: "tools/tests/fake-platform.lua",
-};
+const { SESSION_REL: MODULES } = require("./lib/module-map");
 
 const argv = process.argv.slice(2);
 const verbose = argv.includes("--verbose");

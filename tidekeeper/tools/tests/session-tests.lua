@@ -803,6 +803,188 @@ do -- 15. CLIENT-SIDE LOCALISATION COVERAGE
 end
 
 print("")
+-- =========================================================================
+-- SCENARIO 16 -- THE CLIENT, DRIVEN AGAINST THE REAL SERVER
+--
+-- Iteration 4 shipped a client layer and then admitted in the handoff that
+-- "no Instance has ever been created ... this is the largest untested
+-- surface in the project". Scenario 15 covered the PROSE. This covers the
+-- MACHINE: ClientBootstrap talking to the actual remote handlers, over the
+-- actual fake platform, with the actual server state behind it.
+--
+-- It needs no Roblox because the client is a presenter (D25). The only thing
+-- faked here is the RemoteFunction object -- a table with an InvokeServer
+-- method, which is the entire surface ClientBootstrap:invoke touches.
+-- =========================================================================
+do -- 16. THE CLIENT, DRIVEN AGAINST THE REAL SERVER
+	local ClientBootstrap = TidekeeperRequire("ClientBootstrap")
+	local NetContract = TidekeeperRequire("NetContract")
+	local Format = TidekeeperRequire("Format")
+	local LedgerView = TidekeeperRequire("LedgerView")
+	local SessionHandler = TidekeeperRequire("SessionHandler")
+
+	local app, env = newServer({ seed = 20260501 })
+	local player = env:addPlayer(5150)
+	settle(app, env)
+
+	local function now()
+		return env.clock.now
+	end
+
+	-- A fake RemoteFunction. Note it goes through the REAL handler with the
+	-- REAL app, so a mistake in the payload contract fails here.
+	local function remoteTo(handler)
+		return {
+			InvokeServer = function(_, payload)
+				return handler(app, player, payload)
+			end,
+		}
+	end
+
+	local logged = {}
+	local client = ClientBootstrap.start({
+		clock = now,
+		userId = 5150,
+		logger = function(tag, msg) logged[#logged + 1] = tag .. ": " .. msg end,
+		remotes = {
+			[NetContract.RF_SESSION] = remoteTo(SessionHandler.handle),
+		},
+	})
+
+	-- ---------------------------------------------------------------- session
+	local reply, err = client:requestSession()
+	ok("the client gets a session from the real handler: " .. tostring(err), reply ~= nil)
+	eq("the session reported OK", reply ~= nil and reply.status or -1, 0)
+	eq("one invoke was counted", client.stats.invokes, 1)
+	eq("no invoke failed", client.stats.failures, 0)
+	eq("the snapshot was applied", client.stats.snapshots, 1)
+	ok("the client is dirty after a snapshot", client.dirty == true)
+
+	-- ------------------------------------------------------------- every screen
+	-- Each screen must render without erroring and must produce a tide
+	-- header. A screen that silently returns an empty model is a black
+	-- rectangle in the player's hands.
+	local SCREENS = {
+		{ ClientBootstrap.SCREEN_WORLD, "world" },
+		{ ClientBootstrap.SCREEN_LEDGER, "ledger" },
+		{ ClientBootstrap.SCREEN_POST, "post" },
+		{ ClientBootstrap.SCREEN_ORDERS, "orders" },
+		{ ClientBootstrap.SCREEN_CHART, "chart" },
+		{ ClientBootstrap.SCREEN_ALMANAC, "almanac" },
+	}
+	Format.resetMisses()
+	for i = 1, #SCREENS do
+		local id, name = SCREENS[i][1], SCREENS[i][2]
+		client:setScreen(id)
+		local okRender, model = pcall(function()
+			return client:render()
+		end)
+		ok("screen " .. name .. " renders without error", okRender == true)
+		if okRender then
+			eq("screen " .. name .. " reports its own id", model.screen, id)
+			ok("screen " .. name .. " has a tide header", model.tide ~= nil)
+			ok("screen " .. name .. " names the tide", type(model.tide.state) == "string")
+		end
+	end
+	eq("rendering every screen produced no render misses", Format.totalMisses(), 0)
+
+	-- The two data screens must actually carry their data, not just not
+	-- crash. This is the assertion that would have caught a view wired to a
+	-- field the snapshot does not have.
+	client:setScreen(ClientBootstrap.SCREEN_POST)
+	local postModel = client:render()
+	ok("the post screen carries a post model", postModel.post ~= nil)
+	-- One row per shelf slot the tier allows, empty slots included -- the
+	-- player has to see the empty shelf to want to fill it.
+	ge("the post screen renders a row per shelf slot", #postModel.post.rows, 6)
+	ok("the post screen states its tier", (postModel.post.tierText or "") ~= "")
+	ok("the post screen states its shelf usage", (postModel.post.shelfText or "") ~= "")
+	ok("no post row leaks a directive", string.find(postModel.post.rows[1].name, "{", 1, true) == nil)
+
+	client:setScreen(ClientBootstrap.SCREEN_ORDERS)
+	local ordersModel = client:render()
+	ok("the orders screen carries an orders model", ordersModel.orders ~= nil)
+
+	-- --------------------------------------------------------------- redraw
+	-- step() must redraw only when something changed. A Ledger that rebuilds
+	-- every frame is 60 string builds a second on a phone.
+	client:setScreen(ClientBootstrap.SCREEN_LEDGER)
+	local before = client.stats.renders
+	local first = client:step()
+	ok("a dirty client redraws", first ~= nil)
+	local second = client:step()
+	eq("a clean client does not redraw", second, nil)
+	eq("exactly one render happened", client.stats.renders, before + 1)
+
+	client:applyLedgerBatch({})
+	local third = client:step()
+	ok("a ledger batch makes the client dirty again", third ~= nil)
+
+	-- ------------------------------------------------------- the renderer seam
+	-- Main.client.luau is the only file that builds Instances, and it does so
+	-- behind this `draw` seam. Proving the seam is called with a well-formed
+	-- model is as close to testing that file as is possible without an engine
+	-- -- and it is the part worth testing, because the Instance code is
+	-- mechanical and this is where the contract lives.
+	local drawn = {}
+	local recording = ClientBootstrap.start({
+		clock = now,
+		userId = 5150,
+		renderer = {
+			draw = function(_, model)
+				drawn[#drawn + 1] = model
+			end,
+		},
+		remotes = {
+			[NetContract.RF_SESSION] = remoteTo(SessionHandler.handle),
+		},
+	})
+	recording:requestSession()
+	recording:setScreen(ClientBootstrap.SCREEN_LEDGER)
+	recording:step()
+	eq("the renderer seam was called exactly once", #drawn, 1)
+	ok("the renderer received a model", drawn[1] ~= nil and drawn[1].screen ~= nil)
+
+	-- ------------------------------------------------------------- failure
+	-- A client whose remote is missing must degrade to a message, not throw.
+	-- The player on a dropped connection is the most common "state" there is.
+	local offline = ClientBootstrap.start({ clock = function() return 0 end })
+	local noReply, offlineText = offline:requestSession()
+	eq("an offline client gets no reply", noReply, nil)
+	ok("an offline client gets a human message", type(offlineText) == "string" and #offlineText > 0)
+	ok("the offline message is not a raw directive", string.find(offlineText, "{", 1, true) == nil)
+	eq("the offline failure was counted", offline.stats.failures, 1)
+
+	-- A remote that THROWS must be caught and counted, not propagated.
+	local throwing = ClientBootstrap.start({
+		clock = function() return 0 end,
+		remotes = {
+			[NetContract.RF_SESSION] = {
+				InvokeServer = function()
+					error("simulated network failure")
+				end,
+			},
+		},
+	})
+	local threwReply = throwing:requestSession()
+	eq("a throwing remote yields no reply", threwReply, nil)
+	eq("a throwing remote is counted as a failure", throwing.stats.failures, 1)
+
+	-- --------------------------------------------------------- sequence numbers
+	-- NetContract rejects out-of-order sequence numbers, so the client must
+	-- never reuse one. This is the client half of the replay defence.
+	local seqs = {}
+	local dupes = 0
+	for _ = 1, 25 do
+		local n = client:nextSeq()
+		if seqs[n] then dupes = dupes + 1 end
+		seqs[n] = true
+	end
+	eq("the client never reuses a sequence number", dupes, 0)
+
+	REPORT.clientScreens = #SCREENS
+end
+
 print(string.format(
 	"measured: %.2f DataStore and %.2f MemoryStore requests per session over %d sessions across %d posts and %d days",
 	REPORT.dataPerSession or 0,

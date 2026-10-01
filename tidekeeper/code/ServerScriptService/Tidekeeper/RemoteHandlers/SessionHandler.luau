@@ -74,7 +74,13 @@ function SessionHandler.handle(app, player, payload)
 		renown = S.renown,
 		epoch = Tide.epoch(now),
 		resolvedAt = S.resolvedAt,
-		shelves = Post.shelfCount(S),
+		-- NAME MEANS THE SAME THING ON BOTH SIDES OF THE WIRE.
+		-- `shelves` was the shelf COUNT here and the shelf ARRAY in the
+		-- domain (`S.shelves[i].id`), so PostView.build -- which reads the
+		-- array, as the word implies -- indexed a number and threw. The
+		-- count is now `shelfCount`; `shelves` is the array everywhere.
+		shelfCount = Post.shelfCount(S),
+		shelves = S.shelves,
 		maxShelves = Post.maxShelves(S.tier),
 		stock = Post.totalStock(S),
 		chunks = session and session.chunkCount or 0,
