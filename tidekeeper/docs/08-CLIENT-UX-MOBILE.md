@@ -219,6 +219,66 @@ What it asserts, beyond "does not crash":
 It found two load-time crashes on first run (doc 10 §8.5). Both were in files that had
 never been executed by anything.
 
+### 8.4 The client could not do anything — iteration 9
+
+Scenario 16 drove the client through `invoke` and proved the plumbing worked. It never
+asked the one question that mattered: **does the client ever call any of this?**
+
+It did not. Six client → server remotes existed; the client invoked exactly one of them
+(`RF_Session`) and then listened. Arranging a shelf, combing the beach, setting standing
+orders, dispatching a drifter and buying a tier each had a complete, rate-limited,
+schema-checked, session-tested server half **and no way for a player to reach it**. The
+game was a screensaver with excellent test coverage.
+
+Underneath that, two of the three payload builders the client owned produced payloads
+the server would have rejected on arrival — which is only possible because none had ever
+been sent:
+
+| builder | sent | `NetContract` wants |
+|---|---|---|
+| `PostView.arrangePayload` | `find`, price clamped to `4294967295` | `findId`, `EconomyConfig.MAX_PRICE` (`4294967`) — 1000× lower |
+| `DispatchView.payload` | `slot`, `phrase`, cargo as `{id, qty}` | `targets` (array), `letterId`, cargo as plain ids |
+| `OrdersView.setOrdersPayload` | — | already conformant |
+
+Every spec is a **strict** map, so an extra or misnamed field is a rejection, not a
+warning. The builders had round-tripped against *themselves* in tests and agreed with
+themselves perfectly. Hence **D45**: a client payload builder is validated against the
+server's own schema through `NetContract.accept`, never against its own expectations.
+
+**What iteration 9 added.** One seam, `ClientBootstrap:act(remoteName, payload)` —
+invoke, check status, fold the reply into the snapshot, mark dirty — and six verbs on
+top of it: `arrange`, `comb`, `setOrders`, `dispatch`, `upgrade`, `upgradeOffer`.
+
+Two rules fell out of it, both about who owns a number:
+
+- **The server owns prices (D46).** `:upgrade()` sends `{seq}` and nothing else; the
+  tier and the cost are the server's business. `:upgradeOffer()` *displays*
+  `snapshot.nextCost`, which `SessionHandler` now sends. A client that computes a price
+  locally will eventually show one number and charge another, and in a cozy game that
+  reads as dishonesty rather than as a bug.
+- **Only the server's fields are trusted.** `act` folds exactly
+  `AUTHORITATIVE_FIELDS = {tier, coin, renown, nextCost, shelfCount, maxShelves, stock}`
+  from a reply, so a handler cannot accidentally teach the client a field nobody
+  defined.
+
+**`statusText` was lying.** It mapped codes 1 and 2 and sent *everything else* to
+`ERR_OFFLINE` — "Can't reach the post right now." So a comb refused because the tide
+was wrong (code 3), or a node still regrowing (code 4), told the player their connection
+had dropped. Nobody noticed because no client code could reach a remote that returns a 3
+or a 4. It now maps 3 and 4 too, and takes the **remote name** with the status, because
+code 4 means `E_COOLDOWN` from `PostHandler` and `E_ALREADY_OUT` from `DispatchHandler`
+— the same number, two meanings, depending on who answered. That collision is a wart in
+the contract rather than in the client, raised as **OD23**.
+
+**The durable part is check 17.** `tidekeeper-remote-scan.js` walks `NetContract.REMOTES`
+and requires, per row, that the originating side calls it *and* the receiving side
+listens. It has **no allowlist**: a remote nobody speaks is never acceptable, only
+unfinished. See doc 09 §7.
+
+`LetterView` joins the client this iteration: 120 letters in 7 categories, chosen by id.
+Letter **ids** cross the wire, never player text — the same rule the dispatch spec
+enforces with `hasNoStringFields`.
+
 ## 9. Safety-shaped UX
 
 Because this game shows players to each other, the UX carries safety weight (doc 13).

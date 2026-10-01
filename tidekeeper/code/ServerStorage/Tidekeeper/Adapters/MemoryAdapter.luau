@@ -308,6 +308,48 @@ function MemoryAdapter:tryLock(userId, token, ttl)
 	return true, token
 end
 
+-- A one-winner-per-name lease, for work that must happen but must not happen
+-- on every server at once.
+--
+-- The pool reaper is the case this exists for (OD21): 5 Currents x 64 shards
+-- of expired pool keys need deleting once per tide epoch, and twenty servers
+-- each deleting all 320 of them is twenty times the request budget for the
+-- same result. One server takes the lease for an epoch and does the work;
+-- the rest skip it and cost nothing.
+--
+-- Same atomic transform as `tryLock`, and the same honest degradation: if
+-- MemoryStore is unavailable this returns false, so NOBODY reaps. That is
+-- the right way round -- a missed reap is growth we can see in the metrics,
+-- while twenty servers reaping blind is a quota fire during an outage.
+function MemoryAdapter:tryLease(name, token, ttl)
+	local map = self:hashMap(MAP_LOCK)
+	if map == nil then
+		return false, nil
+	end
+	local key = "lease:" .. tostring(name)
+	local holder = nil
+	local ok, err = pcall(function()
+		map:UpdateAsync(key, function(old)
+			if old ~= nil and old ~= token then
+				holder = old
+				return nil
+			end
+			holder = token
+			return token
+		end, ttl)
+	end)
+	if not ok then
+		fail(self, err)
+		return false, "error"
+	end
+	note(self, "update", 2)
+	if holder ~= token then
+		return false, holder
+	end
+	self:chargeItem(key, tostring(token), false)
+	return true, token
+end
+
 function MemoryAdapter:refreshLock(userId, token, ttl)
 	local map = self:hashMap(MAP_LOCK)
 	if map == nil then

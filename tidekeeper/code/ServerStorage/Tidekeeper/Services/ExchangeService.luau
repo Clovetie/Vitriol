@@ -92,6 +92,9 @@ local function newStats()
 		receiptsDelivered = 0,
 		receiptBatches = 0,
 		indexWrites = 0,
+		shardsReaped = 0,
+		reapLeasesWon = 0,
+		reapLeasesLost = 0,
 		emptyEpochs = 0,
 	}
 end
@@ -118,6 +121,11 @@ function ExchangeService.new(options)
 	-- case, which costs a dropped Drifter rather than corrupt history.
 	self.lastPublish = {}
 	self.decodeBuffer = {}
+	-- Pool reaper cursor (OD21). `reapEpoch` is the epoch currently being
+	-- cleaned; `reapCursor` walks the Current x shard grid for it.
+	self.reapEpoch = nil
+	self.reapCursor = 0
+	self.reapToken = tostring(opts.jobId or "studio")
 	return self
 end
 
@@ -616,6 +624,81 @@ function ExchangeService:trimDelivered(currentEpoch)
 		end
 	end
 	return removed
+end
+
+-- ------------------------------------------------------------- the reaper
+
+-- Pool keys older than the catch-up window can never be claimed again: a
+-- resolve clamps to MAX_CATCHUP_EPOCHS, so nothing will ever look that far
+-- back. Until iteration 9 `DataStoreAdapter:reapPoolShard` existed, was
+-- correct, and was CALLED BY NOTHING -- the pool only ever grew. The orphan
+-- scan found it; this schedules it (OD21).
+--
+-- HOW MANY KEYS. 5 Currents x 64 shards = 320 keys per epoch. One
+-- RemoveAsync per call on the IO slot (5 s) clears an epoch in about 27
+-- minutes, comfortably inside the 6.2-hour epoch that produces it.
+--
+-- WHICH SERVER. Exactly one, chosen by a MemoryStore lease per epoch. Twenty
+-- servers each deleting the same 320 keys is twenty times the request budget
+-- for the same result -- and the prompt for this iteration called that out
+-- as a quota fire. If MemoryStore is unavailable `tryLease` returns false and
+-- NOBODY reaps, which is the right way round: a missed reap is growth we can
+-- see in the metrics, while twenty servers reaping blind during an outage is
+-- the outage getting worse.
+ExchangeService.REAP_AGE_EPOCHS = GameConfig.MAX_CATCHUP_EPOCHS + 1
+ExchangeService.REAP_LEASE_TTL = 7200
+
+function ExchangeService:reapTick(now)
+	if self.data == nil or self.memory == nil then
+		return 0
+	end
+	local target = Tide.epoch(now or self.clock()) - ExchangeService.REAP_AGE_EPOCHS
+	if target < 0 then
+		return 0
+	end
+
+	-- A new epoch to clean: take the lease, or stand down for this one.
+	if self.reapEpoch ~= target then
+		local won = self.memory:tryLease("reap:" .. tostring(target), self.reapToken, ExchangeService.REAP_LEASE_TTL)
+		if not won then
+			self.stats.reapLeasesLost = self.stats.reapLeasesLost + 1
+			-- Remember the refusal so we do not re-ask every tick; the next
+			-- epoch will offer a fresh chance.
+			self.reapEpoch = target
+			self.reapCursor = -1
+			return 0
+		end
+		self.stats.reapLeasesWon = self.stats.reapLeasesWon + 1
+		self.reapEpoch = target
+		self.reapCursor = 0
+	end
+
+	-- -1 is "this epoch belongs to another server".
+	if self.reapCursor < 0 then
+		return 0
+	end
+
+	-- Read off the adapter instance rather than importing the adapter: the
+	-- service layer does not depend on a particular storage back end.
+	local shards = self.data.POOL_SHARDS or 64
+	local currents = EconomyConfig.CURRENT_COUNT
+	if self.reapCursor >= currents * shards then
+		return 0
+	end
+
+	local current = math.floor(self.reapCursor / shards) + 1
+	local shard = self.reapCursor % shards
+	self.reapCursor = self.reapCursor + 1
+
+	-- Deleting a key that is already gone is not an error: most of these
+	-- shards were never written, because a shard only exists if a drifter
+	-- hashed into it.
+	local ok = self.data:reapPoolShard(current, target, shard)
+	if ok then
+		self.stats.shardsReaped = self.stats.shardsReaped + 1
+		return 1
+	end
+	return 0
 end
 
 function ExchangeService:resetStats()

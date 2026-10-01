@@ -239,21 +239,42 @@ and defer if below a floor of 8. The `BudgetMeter` diagnostic exposes this live.
 
 ## 9. Reaping
 
-Two reapers, both on the `slow` cadence slot, both idempotent, both rate-limited:
+Two reapers, both idempotent, both rate-limited:
 
 1. **Pool reaper** — deletes `DrifterPool` shards older than `epoch - 28`. One shard per
-   slow tick maximum. A shard deleted twice is harmless.
+   **IO** tick maximum, on one leaseholding server. A shard deleted twice is harmless,
+   and most shards were never written at all (a shard exists only if a drifter hashed
+   into it).
 2. **Ledger reaper** — deletes ledger pages older than 180 days on the owner's own load,
    costing nothing extra.
 
 Never run a reaper from Open Cloud during peak hours: since 2026-07-29 it competes with
 live servers for the same request budget.
 
-**Status, iteration 8.** Neither reaper is scheduled. `DataStoreAdapter:reapPoolShard`
-exists, is correct, and is called by nothing (**OD21**); the ledger reaper is not
-written. The orphan scan found the first and now holds it with a reason, so it can no
-longer be mistaken for working. Pool keys carry a TTL, so this is growth rather than
-leakage, but it is a launch blocker against the 8.5 MB pool budget.
+**Status, iteration 9 — the pool reaper is scheduled (OD21 closed).**
+
+`ExchangeService:reapTick` runs on the **IO** slot (5 s), deletes **one** shard per
+tick, and targets exactly one epoch: `epoch - (MAX_CATCHUP_EPOCHS + 1)` = `epoch - 28`.
+Nothing can ever claim a key that old, because a resolve clamps its catch-up to 27
+epochs. Below epoch 28 the whole thing is a no-op rather than a wrap into negative
+epochs, which is tested.
+
+**Which server reaps: exactly one, by lease.** 5 Currents × 64 shards = 320 keys per
+epoch. Twenty servers each deleting the same 320 keys is twenty times the request
+budget for the same result, so the server that wants the job first takes a MemoryStore
+lease — `MemoryAdapter:tryLease(name, token, ttl)`, the same atomic transform as the
+post lock — keyed `reap:<epoch>` with a 2-hour TTL. Losers record `reapLeasesLost` and
+skip, re-offering at the next epoch. One shard per 5 s clears 320 keys in ~27 minutes,
+comfortably inside the 6.2-hour epoch that produces them.
+
+If MemoryStore is **unavailable**, `tryLease` returns false and **nobody** reaps. That
+is deliberately the safe direction: a missed reap is growth visible in the metrics,
+whereas twenty servers reaping blind during an outage makes the outage worse.
+
+Counters: `shardsReaped`, `reapLeasesWon`, `reapLeasesLost`.
+
+The **ledger reaper is still not written**, and ledger history is still write-only
+(**OD22**) — see the roadmap.
 
 ## 9.1 The failed-save recovery queue
 

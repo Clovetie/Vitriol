@@ -1494,3 +1494,88 @@ do -- 22. A PLAYER CAN ACTUALLY DO THINGS
 	ge("the client made at least six invokes", client.stats.invokes, 6)
 	eq("no invoke failed at the transport level", client.stats.failures, 0)
 end
+
+do -- 23. THE POOL REAPER RUNS, AND ONLY ON ONE SERVER (OD21)
+	-- `DataStoreAdapter:reapPoolShard` was correct and called by nothing for
+	-- five iterations, so the drifter pool only ever grew. The orphan scan
+	-- found it in iteration 8; iteration 9 schedules it.
+	--
+	-- Two things have to be true and they pull in opposite directions: the
+	-- work must actually happen, and it must NOT happen on every server at
+	-- once -- 5 Currents x 64 shards deleted twenty times over is twenty
+	-- times the request budget for the same result.
+	local Tide = TidekeeperRequire("Tide")
+	local ExchangeService = TidekeeperRequire("ExchangeService")
+	local Bootstrap = TidekeeperRequire("Bootstrap")
+
+	local appA, env = newServer({ seed = 4242, jobId = "server-A" })
+	settle(appA, env, 60)
+
+	-- Nothing is reapable until the world is older than the catch-up window,
+	-- and the harness starts at epoch 0. Confirm the guard first -- a reaper
+	-- that deletes epoch -28 would be deleting live keys by wrapping.
+	eq("a young world reaps nothing", appA.exchange:reapTick(env.clock.now), 0)
+
+	env:advance(Tide.EPOCH_SECONDS * (ExchangeService.REAP_AGE_EPOCHS + 2))
+	local now = env.clock.now
+	local target = Tide.epoch(now) - ExchangeService.REAP_AGE_EPOCHS
+	ge("there is an epoch old enough to reap", target, 0)
+
+	-- Write a pool key in the epoch that is about to age out, and one in an
+	-- epoch that is still live, so we can prove the reaper is discriminating
+	-- rather than just destructive.
+	appA.data:publishDrifter(1, target, 0, "xx")
+	appA.data:publishDrifter(1, target + 5, 0, "yy")
+
+	local reaped = 0
+	for _ = 1, 400 do
+		reaped = reaped + appA.exchange:reapTick(now)
+	end
+	ge("the reaper removed shards", reaped, 1)
+	ge("...and counted them", appA.exchange.stats.shardsReaped, 1)
+	eq("...having won exactly one lease", appA.exchange.stats.reapLeasesWon, 1)
+
+	-- The live epoch's key must survive. `claimDrifters` is the only reader,
+	-- so ask it: a key that was reaped yields nothing.
+	local liveTaken = appA.data:claimDrifters(1, target + 5, 0, 4)
+	ok("a key inside the catch-up window was NOT reaped", liveTaken ~= false)
+
+	-- It stops at the end of the grid rather than looping forever.
+	local before = appA.exchange.stats.shardsReaped
+	for _ = 1, 50 do
+		appA.exchange:reapTick(now)
+	end
+	eq("a finished epoch is not reaped again", appA.exchange.stats.shardsReaped, before)
+
+	-- A SECOND server on the same MemoryStore, same epoch. This is the whole
+	-- point of the lease: it must stand down and delete nothing.
+	local appB = Bootstrap.start({
+		dataStoreService = env.services.DataStoreService,
+		memoryStoreService = env.services.MemoryStoreService,
+		policyService = env.services.PolicyService,
+		players = env.PlayersService,
+		runService = env.RunService,
+		clock = function()
+			return env.clock.now
+		end,
+		monotonic = function()
+			return env.clock.now
+		end,
+		waiter = function(seconds)
+			return env:wait(seconds)
+		end,
+		jobId = "server-B",
+		headless = true,
+		autoStart = false,
+		bindPlayers = false,
+		silent = true,
+		seed = 4242,
+	})
+
+	for _ = 1, 400 do
+		appB.exchange:reapTick(now)
+	end
+	eq("the second server reaped nothing", appB.exchange.stats.shardsReaped, 0)
+	eq("...because it lost the lease", appB.exchange.stats.reapLeasesWon, 0)
+	ge("...and said so", appB.exchange.stats.reapLeasesLost, 1)
+end

@@ -225,11 +225,40 @@ English of the names rather than the values the stats can take. Ids 11–15 and 
 were repurposed — safe only because nothing had ever been awarded. Two rules are now
 pinned by tests: a new post earns nothing, and every threshold is reachable.
 
-## Iteration 9+ ⬜
+## Iteration 9 ✅ — the client could not do anything, and the pool was never reaped
 
-Build the client UI for the systems that now exist (upgrade, letters, the Ledger),
-close OD21/OD22, and the idea bank in doc 00 §9. Scope is defined by `HANDOFF.md`,
-not by this table.
+| Deliverable | Status |
+| --- | --- |
+| Client action layer: `arrange`, `comb`, `setOrders`, `dispatch`, `upgrade`, `upgradeOffer` over one `act()` seam | ✅ |
+| `PostView.arrangePayload` and `DispatchView.payload` made conformant to the real strict specs | ✅ |
+| `nextCost` sent by `SessionHandler`; the client displays prices, never computes them (D46) | ✅ |
+| `statusText` maps codes 3 and 4, and takes the remote name to disambiguate code 4 | ✅ |
+| `LetterView` — 120 letters, 7 categories, ids over the wire | ✅ |
+| **`tidekeeper-remote-scan.js`** — gate check 17, no allowlist | ✅ |
+| **OD21 closed** — pool reaper scheduled on the IO slot behind a MemoryStore lease | ✅ |
+| Bench made best-of-3 so it fails on code, not on machine load | ✅ |
+| Session scenarios 21–23 | ✅ |
+
+**The find.** Six client → server remotes existed. All six were bound, rate-limited,
+schema-checked and session-tested on the server. The client invoked exactly **one** of
+them and then listened. Every verb in the game — arrange, comb, orders, dispatch,
+upgrade — had a complete server half and no way for a player to reach it, with sixteen
+checks green. Two of the three client payload builders also produced payloads the
+server would have rejected outright, which is only possible because none had ever been
+sent. Full account in doc 08 §8.4; the ladder of scans in doc 10 §12.
+
+**OD21.** `reapTick` deletes one pool shard per IO tick from epoch `now - 28`, and only
+on the server holding a `reap:<epoch>` MemoryStore lease — 5 Currents × 64 shards
+deleted once, not once per server. If MemoryStore is down nobody reaps, which is the
+safe direction. Doc 05 §9.
+
+---
+
+## Iteration 10+ ⬜
+
+Close **OD22** (ledger history is still write-only) and **OD23** (status code 4 means
+two different things), build the screens the new verbs deserve, and the idea bank in
+doc 00 §9. Scope is defined by `HANDOFF.md`, not by this table.
 
 ---
 
@@ -258,8 +287,9 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD18 | Adopt **LibMP** to measure the client frame budget on real devices (doc 10 §7.2) | it6 | Yes for the Ledger replay, sampled on a fraction of sessions — Roblox warns it raises memory. **Blocked on Studio**, like L4/L5 |
 | OD19 | Port `fake-platform.lua` to real Luau so fengari can be deleted entirely | it6+ | Only worth it if the shims start costing again. The cross-check between two VMs is currently an asset, not debt |
 | OD20 | The three dispatch fields are session-scoped, not persisted | it8 | Left as is, deliberately. A dispatch choice that does not survive a relog is a small loss; persisting it costs a schema field and a migration for something the player re-picks in one tap. Revisit only if telemetry shows players dispatching and relogging inside one epoch |
-| **OD21** | **`DataStoreAdapter:reapPoolShard` is never scheduled, so the drifter pool only grows** | **it9** | Found by the orphan scan. The reaper exists and is correct; nothing calls it. Needs a cadence slot and a decision about *which* server reaps (every server reaping every shard is a quota fire). Not urgent — pool keys carry a TTL — but unbounded growth against the 8.5 MB budget is a launch blocker |
+| OD21 ✅ | `DataStoreAdapter:reapPoolShard` is never scheduled, so the drifter pool only grows | ~~it9~~ | **Closed (doc 05 §9).** `ExchangeService:reapTick` on the IO slot, one shard per tick, targeting `epoch - 28` — nothing can claim a key that old, because resolve clamps catch-up to 27. *Which* server was the real question: exactly one, by a `reap:<epoch>` MemoryStore lease via the new `MemoryAdapter:tryLease`. 320 keys per epoch deleted once rather than once per server; losers count `reapLeasesLost` and skip. If MemoryStore is unavailable **nobody** reaps — a missed reap is visible growth, twenty blind reapers during an outage is a quota fire. Proved by session scenario 23, including a negative control where removing the lease makes a second server duplicate 284 deletes |
 | **OD22** | **Ledger history is written and never read** | **it9** | `LedgerService:flushPending` archives pages via `saveLedgerPage`; `loadLedgerPage` is called by nothing and no remote asks for history. Every entry past `MAX_LEDGER_RESIDENT` (200) is currently unreadable forever. The Ledger is the surface carrying the game's whole emotional argument, so silently losing its history is worse than it sounds. Needs a remote, a client pager, and a decision on how far back to keep |
+| **OD23** | **Handler status code `4` means two different things** | **it10** | `PostHandler` returns 4 for `E_COOLDOWN`; `DispatchHandler` returns 4 for `E_ALREADY_OUT`. The client cannot translate a 4 without also knowing which remote answered, so `ClientBootstrap:statusText` now takes the remote name — correct, but it is covering for the contract rather than fixing it. The fix is one status enum owned by `NetContract`, with non-overlapping codes, which is a mechanical change across both handlers and their tests |
 | OD16 | `S.publishedAt` is not persisted, so one-Drifter-per-epoch holds only per server (doc 10 §6.4) | ~~it4~~ | **Closed.** Schema v2 appends it at the blob tail with a real migration and a committed v1 fixture (doc 05 §6.1). Shipped a sentinel bug en route — see **D28** |
 
 ### OD13 in full — the one non-commuting property

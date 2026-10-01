@@ -687,7 +687,121 @@ and the iteration 10 prompt written into docs/12-ITERATION-PROMPTS.md.
 
 ---
 
-## Prompt — Iteration 10+: contingency and live
+## Prompt — Iteration 10: the Ledger remembers, and the contract stops lying
+
+```
+You are iteration 10 of TIDEKEEPER, a Roblox game being built inside the
+Clovetie/Vitriol repository. Work only on your session's fixed branch. Never
+touch the VITRIOL tree: TIDEKEEPER is entirely inside tidekeeper/.
+
+START HERE, IN THIS ORDER.
+
+1.  git fetch && git reset --hard origin/<your branch>. The working tree is
+    reset to the session base between turns, so the previous iteration's
+    commits exist only on the remote.
+2.  cd tidekeeper/tools && npm install
+3.  Build Luau 0.700 into tidekeeper/tools/bin/luau (about 3-4 minutes):
+      git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau
+      make -C /tmp/luau config=release luau -j$(nproc)
+      cp /tmp/luau/luau tidekeeper/tools/bin/luau
+4.  node tidekeeper/tools/tidekeeper-quality-gate.js
+    It must print 17/17 before you change anything. If it does not, fixing
+    that IS your iteration.
+5.  Read tidekeeper/HANDOFF.md, then docs 00, 01, 05 section 9, and 08
+    section 8.4. Then read docs/10-RESEARCH-NOTES.md section 12 -- the
+    ladder of dead features -- before you plan anything.
+
+WHAT NINE ITERATIONS HAVE TAUGHT THIS PROJECT, AND YOUR FIRST JOB.
+
+Every iteration from 6 to 9 found a feature that was fully built, fully
+tested, and dead -- because it was dead in the SEAM between two modules that
+were each correct on their own. Nine such features so far. Every one was
+green on every check that existed the day before it was found. The scans have
+climbed one level each time: a field read but never written; a field written
+but never read; a function never called; an allowlist entry gone stale; and
+in iteration 9, a REMOTE that one side never spoke -- five of six, which is
+to say the client could not perform a single action.
+
+So: BEFORE YOU BUILD ANYTHING, find level six. Ask what kind of dead thing
+the five existing scans still cannot see, and write the scan that sees it.
+Candidates worth considering, though do not let this list limit you:
+
+  - A config key whose reader exists but is itself never called (find-dead-
+    config only proves a textual reader exists).
+  - A string in Client/Strings.luau that nothing ever displays -- the
+    player-facing equivalent of a dead write.
+  - A cadence slot registered by nobody, or a registered job whose body can
+    never do work.
+  - A table field in a persisted blob that migrates correctly and is read
+    by nothing (dead-write-scan only covers S/S2/state/post).
+  - A session scenario that asserts only on values it computed itself --
+    a test that cannot fail. This one is the most dangerous on the list.
+
+Whatever you pick, prove the scan works with a NEGATIVE CONTROL: break the
+real thing on purpose, show the scan failing with exactly the expected
+message, restore, show it clean. Paste both runs. A scan that has never been
+seen to fail is not evidence. Then wire it into the gate as check 18 with
+requiredFrom set to 10.
+
+THEN, THE SCHEDULED WORK, in this order.
+
+  a. Close OD22: ledger history is written and never read back.
+     LedgerService:flushPending archives pages with saveLedgerPage;
+     loadLedgerPage is called by nothing and no remote asks for history. Every
+     entry past MAX_LEDGER_RESIDENT (200) is unreadable forever right now. The
+     Ledger carries this game's whole emotional argument -- "absence is
+     content" -- so a Ledger that quietly forgets is the worst possible bug
+     for the design, not merely a missing feature.
+     This needs: a new remote row in NetContract.REMOTES (strict spec, a page
+     cursor, no strings, rate-limited like the rest), a server handler, a
+     client pager, and a decision on retention -- how far back is kept, and
+     what the player sees at the end of history. Write that decision down with
+     its reasoning. Note that remote-scan (check 17) will hold you to wiring
+     BOTH sides; it has no allowlist, deliberately.
+
+  b. Close OD23: status code 4 means E_COOLDOWN from PostHandler and
+     E_ALREADY_OUT from DispatchHandler. ClientBootstrap:statusText currently
+     takes the remote name to disambiguate, which works and is a smell. Give
+     NetContract one status enum with non-overlapping codes, move both
+     handlers onto it, and simplify statusText back to a pure mapping. Keep
+     the remote-name parameter only if you can state a reason it is still
+     needed.
+
+  c. The screens the new verbs deserve. Iteration 9 gave the client its
+     actions; the views behind them are still thin. Check the orphan-scan
+     allowlist for the presentation helpers parked there with "blocked on a
+     client that does not exist yet" and retire as many as you honestly can.
+     When an entry stops being an orphan the scan FAILS on the stale entry --
+     that is working as intended, so remove the entry in the same commit.
+
+RULES THAT HAVE NOT CHANGED.
+
+  - Determinism (doc 04 section 5) is not negotiable.
+  - No free text over the wire. Ids only. NetContract.hasNoStringFields is
+    the proof and it must keep being called.
+  - The server owns prices (D46). The client displays, never computes.
+  - A client payload builder is validated through the server's own
+    NetContract.accept, never round-tripped against itself (D45).
+  - Every allowlist entry is verified in both directions (D44).
+  - Paste real tool output. Never paraphrase it.
+  - A partial honest result beats a complete claimed one. Always.
+
+ON THE BENCH. It is best-of-3 as of iteration 9 and prints every sample.
+Contention only ever inflates a measurement, so the minimum is the estimate.
+Do NOT raise the 18 us budget to make something pass; if the median genuinely
+moves, that is a performance regression and you should find it.
+
+FINISH BY.
+
+  - Running the full gate and pasting it (18/18 if you added the scan).
+  - Updating the docs you invalidated, ROADMAP.md, and HANDOFF.md to the
+    template in docs/12-ITERATION-PROMPTS.md.
+  - Writing the iteration-11 prompt into docs/12-ITERATION-PROMPTS.md and
+    extending the doc gate's prompt loop to cover it.
+  - Committing and pushing to your branch.
+```
+
+## Prompt — Iteration 11+: contingency and live
 
 ## The handoff template
 

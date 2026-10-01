@@ -108,6 +108,9 @@ function Bootstrap.start(opts)
 		data = app.data,
 		memory = app.memory,
 		clock = clock,
+		-- Identifies this server when it takes the pool-reap lease, so the
+		-- holder is legible in MemoryStore during an incident.
+		jobId = o.jobId or game.JobId,
 		logger = logger,
 	})
 	app.ledger = LedgerService.new({
@@ -160,6 +163,11 @@ function Bootstrap.start(opts)
 	end)
 	app.cadence:register(CadenceService.SLOT_IO, "showcase.flush", function()
 		app.showcase:flush()
+	end)
+	-- OD21. One RemoveAsync per IO tick, and only on the server that holds
+	-- the lease for this epoch. See ExchangeService:reapTick.
+	app.cadence:register(CadenceService.SLOT_IO, "exchange.reap", function()
+		app.exchange:reapTick(app.clock())
 	end)
 	app.cadence:register(CadenceService.SLOT_IO, "exchange.trim", function()
 		app.exchange:trimDelivered(app.posts:epochNow())

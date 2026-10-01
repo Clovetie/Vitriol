@@ -556,6 +556,57 @@ explicitly forbids re-fetching the performance and LibMP pages to pad a section.
 Everything else this iteration was found by reading the project's own code, which
 is where all four of its real defects were hiding.
 
+## 12. Iteration-9 pass — the ladder of dead features
+
+Nothing was fetched this iteration. The defects were found by reading the project's
+own code, which is where every one of the last nine has been.
+
+### 12.1 The ladder
+
+Each iteration has added exactly one scan, and each scan has found a kind of dead
+feature the previous ones could not see. The pattern is stable enough to state as a
+rule: **a check that inspects one module at a time cannot see a feature that is dead
+in the seam between two correct modules.**
+
+| level | scan | the dead thing it sees |
+|---|---|---|
+| 1 | `member-scan` | a field read that no module writes |
+| 2 | `dead-write-scan` | a field written to shared state that nothing reads |
+| 3 | `orphan-scan` | an exported function nobody calls |
+| 4 | `orphan-scan`, both directions | an **allowlist entry** that has gone stale |
+| 5 | `remote-scan` | a **remote** one side never speaks |
+
+Level 5 is the one that caught the biggest hole: five of six client → server remotes
+had a complete server half and zero client callers (doc 08 §8.4). Every level found
+something real on its first run, and every one of those things was green on all the
+checks that existed the day before.
+
+### 12.2 Two implementation notes worth keeping
+
+**A scan that reuses `strip()` must not parse string data from stripped text.** The
+first `remote-scan` read `NetContract.REMOTES` from the stripped file and saw an empty
+table — the remote names *are* string literals, which `strip()` blanks. The correct
+split is: **parse the contract from raw text, detect call sites in stripped text.**
+Detecting in raw text would have been worse than useless here, because `PostView`
+contains a comment naming `RF_Arrange` that would have masked the exact bug the scan
+exists to find. The scan therefore matches only the `NetContract.<CONST>` form.
+
+**`remote-scan` has no allowlist, deliberately.** Every other scan needs one, because
+library surface and diagnostics are legitimately uncalled. A remote is different: it is
+a contract between two sides that both exist in this repo. One that nobody speaks is
+never acceptable, only unfinished.
+
+### 12.3 A measurement that failed on load rather than on code
+
+The resolve bench measured the same unchanged code at **15.8 µs** standalone and
+**19.0 µs** immediately after a full gate run, against an **18 µs** budget. A check
+that fails because the machine is busy is one people re-run, and then ignore.
+
+The bench is now **best-of-3**, printing every sample. This is not a weakened budget —
+the budget is untouched. Contention can only ever make code measure *slower*; there is
+no load that makes it faster. So the minimum across attempts is the best available
+estimate of the true cost, and the spread is printed so a reader can judge it.
+
 ## 9. Known unknowns
 
 Recorded so later iterations do not mistake absence of evidence for evidence.
