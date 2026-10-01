@@ -187,6 +187,38 @@ doing, and forcing it through a visit template was always going to invent facts.
 bug was nine iterations-worth of invisible: nothing rendered those entries until a
 client existed.
 
+### 8.3 The client executes — iteration 5
+
+Scenario 16 drives `ClientBootstrap` against the real remote handlers, over the fake
+platform, with real server state behind it. The only faked object is a `RemoteFunction`:
+a table with an `InvokeServer` method, which is the entire surface
+`ClientBootstrap:invoke` touches. That is the dividend of D25 — a presenter layer can be
+driven end to end with no engine at all.
+
+What it asserts, beyond "does not crash":
+
+- **every one of the six screens renders**, reports its own id, and carries a tide
+  header with a named state. A screen that silently returns an empty model is a black
+  rectangle in the player's hands, and that passes a "no error" test;
+- the Post and Orders screens **carry their data**, not just a shell — the assertion
+  that catches a view wired to a field the snapshot does not have;
+- **redraw happens only when dirty.** `step()` returns a model once, then `nil` until
+  something changes. A Ledger that rebuilds every frame is 60 string builds a second on
+  a phone, for a screen that changes once every 1.6 seconds;
+- the **renderer seam** (`renderer:draw(model)`) is called exactly once with a
+  well-formed model. `Main.client.luau` is the only file that builds Instances and it
+  does so behind this seam, so this is as close to testing that file as is possible
+  without an engine — and it is the half worth testing, because the Instance code is
+  mechanical and the contract is here;
+- a client with **no remote** and a client whose remote **throws** both degrade to a
+  human-readable message with no directive in it, and both count the failure. A dropped
+  connection is the most common state a mobile client is ever in;
+- the client **never reuses a sequence number**, which is its half of the replay
+  defence `NetContract` enforces on the server side.
+
+It found two load-time crashes on first run (doc 10 §8.5). Both were in files that had
+never been executed by anything.
+
 ## 9. Safety-shaped UX
 
 Because this game shows players to each other, the UX carries safety weight (doc 13).

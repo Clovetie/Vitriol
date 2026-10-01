@@ -1,95 +1,165 @@
-# Handoff — TIDEKEEPER, end of iteration 4
+# Handoff — TIDEKEEPER, end of iteration 5
 
-**State:** the game is playable end to end in simulation. 57 Luau modules, 12 222 lines,
-layers L0–L5. The client layer exists — eight pure presenter modules and exactly one
-`LocalScript` — and every word a player reads is now generated from integers at read
-time. **1 005 executed assertions across two suites, 0 failures.** The 18 µs
-`Visit.resolve` budget, deferred by iterations 2 and 3, is **measured and closed**.
+**State:** the harness can now be believed, and the client has run. 57 Luau modules,
+~12 300 lines. **1 055 executed assertions across two suites, 0 failures**, and 887 of
+them are now independently re-run in a **real Luau VM** that agrees exactly.
 
-**Verification level claimed: L3.5** — *runs in a real Luau VM* (doc 09 §4). This level
-was added this iteration. It is **not** L4: no Roblox engine was involved, no DataModel
-exists, and no real DataStore has been touched. See §3.
+**Verification level claimed: L3.5** — *runs in a real Luau VM* (doc 09 §4). Iteration 4
+earned that level for the performance benchmark; iteration 5 extends it to the entire
+correctness suite. It is **not** L4: no Roblox engine was involved, no Instance has been
+created, no real DataStore touched.
 
-**The iteration in one sentence:** two of the three things iteration 3 declared blocked
-on "no Roblox Studio is reachable" turned out not to need Studio at all, and finding
-that out was worth more than the features.
+**The iteration in one sentence:** until now every correctness claim in this project was
+made about a lightly rewritten copy of the code, and the first time the client was
+actually executed, two of its six screens threw on load.
+
+**This iteration did not ship the game.** Content volume, economy tuning and the
+cold-start playtest were in the prompt and are **not started** — see §6. A partial
+honest result beats a complete claimed one.
 
 **Read in this order:**
 
 | # | File | Why |
 | --- | --- | --- |
 | 1 | this file | what happened, what is true, what to do next |
-| 2 | [`ROADMAP.md`](ROADMAP.md) | tracker, validation snapshot, open decisions OD1–OD18 |
-| 3 | [`docs/10-RESEARCH-NOTES.md`](docs/10-RESEARCH-NOTES.md) | **§7 is new** and is the most important reading in this iteration |
-| 4 | [`docs/04-SIMULATION-MODEL.md`](docs/04-SIMULATION-MODEL.md) | §6.1 — the measured performance numbers |
-| 5 | [`docs/08-CLIENT-UX-MOBILE.md`](docs/08-CLIENT-UX-MOBILE.md) | §8.1–8.2 — how the client and the prose system actually work |
-| 6 | [`docs/05-PERSISTENCE.md`](docs/05-PERSISTENCE.md) | §6.1 — schema v2 and the sentinel bug |
-| 7 | [`tools/bin/README.md`](tools/bin/README.md) | how to build the Luau VM the bench needs |
+| 2 | [`docs/10-RESEARCH-NOTES.md`](docs/10-RESEARCH-NOTES.md) | **§8 is new** — triage, OD17, and the two client bugs |
+| 3 | [`ROADMAP.md`](ROADMAP.md) | tracker, validation snapshot, open decisions OD1–OD19 |
+| 4 | [`docs/08-CLIENT-UX-MOBILE.md`](docs/08-CLIENT-UX-MOBILE.md) | §8.3 — what scenario 16 actually asserts |
+| 5 | [`tools/README.md`](tools/README.md) | §7 — the two runners and why both exist |
+| 6 | [`tools/bin/README.md`](tools/bin/README.md) | how to build the Luau VM, four minutes |
 
 ---
 
-## 1. What was built
+## 1. Triage first — the rule iteration 4 imposed, and it paid
 
-```
-code/ReplicatedStorage/Tidekeeper/Client/     (new — 8 modules, all pure)
-  Strings          every word a player reads, keyed by template id
-  Format           expands {directives}; five miss counters, no silent fallback
-  LedgerView       the replay screen; re-runs the real Visit.resolve
-  TideView         the tide clock, in the player's local timezone
-  PostView         shelves, stock, coin
-  OrdersView       the standing-orders editor, opcode-driven
-  DispatchView     choosing where a Drifter goes
-  ClientBootstrap  wires the views to the remotes; no Instances
+Iterations 2, 3 and 4 each planned around Studio being available and each had to
+re-plan. The iteration-4 prompt made triage mandatory *before* planning. All three
+answers, with evidence, are in doc 10 §8:
 
-code/StarterPlayer/StarterPlayerScripts/Tidekeeper/
-  Main.client.luau  the ONLY client file that touches `game`,
-                    holds the ONLY client RunService connection,
-                    and is the ONLY place a client Instance is created
-```
+| | Question | Answer |
+| --- | --- | --- |
+| (a) | Studio reachable? | **No.** No process, `DISPLAY` unset, no MCP port, no `rojo`/`lune`/`lute`. |
+| (b) | GitHub release assets? | **No** (`SSL_ERROR_SYSCALL`), though `api.github.com` is 200. Lute still unavailable. |
+| (c) | Notification API shipped? | **No.** `last_updated 2026-09-30`, same three opt-in members. Fourth check, fourth no. |
 
-Plus, on the tooling side:
-
-```
-tools/lib/luau-native.js        bundles pure modules for a real Luau VM
-tools/bench/resolve-bench.luau  the OD12 benchmark chunk
-tools/tidekeeper-luau-bench.js  runner; skips loudly when no VM is present
-tools/fixture-blobs/post-v1.b64 a genuine 249-byte v1 PostCodec blob
-tools/bin/README.md             how to build Luau in four minutes
-```
-
-### 1.1 The client is a presenter layer, not an application (D25)
-
-Eight of the nine client files are pure: they take data, they return a view-model table,
-and they cannot see the DataModel. `Client` is in the determinism scan's `NO_DATAMODEL`
-set, so a view that calls `GetService` fails the build rather than being caught in
-review. The single `LocalScript` owns everything impure.
-
-This means every screen in the game is testable without Roblox, and scenario 15 does
-exactly that: it renders the entire Ledger, checks every line, and never constructs an
-Instance.
-
-### 1.2 No sentence is ever stored or replicated (D26, D27)
-
-A Ledger entry on the wire is `(templateId, epoch, actorId, slots[])` — about 24 bytes
-of integers. The prose lives only in `Client/Strings.luau` and is expanded at read time.
-Two consequences, both load-bearing:
-
-- **Translation is one file.** Every historical entry in every existing save re-renders
-  in a new language, because the save contains no English.
-- **The phrasing is chosen by `hash(actorId, epoch)`, never randomly.** The Ledger is a
-  *replay* (doc 04 §7). Reopening it must produce the same words forever, or the game's
-  memory becomes quietly unreliable.
+**(a) deserves a note, because the first answer was wrong.** `pgrep -afi "roblox|studio"`
+reported a hit — which was the grep matching *its own command line*. Had that gone
+unchecked, this iteration would have been planned around a Studio that does not exist.
+It is the same failure mode as iteration 4's connection counter: a check that appears
+to confirm something while actually observing itself.
 
 ---
 
-## 2. Commands and their real output
+## 2. What was built
 
-### `node tidekeeper/tools/tidekeeper-quality-gate.js`
+### 2.1 OD17 — the correctness suite runs in real Luau, with no shims
+
+`tools/tidekeeper-luau-test.js`. This is the important one.
+
+`tests/pure-tests.lua` has always run under **fengari**, a Lua 5.3 VM. Lua 5.3 is not
+Luau, so that harness reshapes both the game and the tests before either will run:
+
+| fengari needs | real Luau |
+| --- | --- |
+| every numeric literal rewritten to a float | nothing |
+| `bit32` rebuilt from a 64 KB byte-wise XOR table | native |
+| `math.floor/ceil/abs/max/min` wrapped to return floats | nothing |
+| `string.format("%d", …)` rewritten to `%.0f` | nothing |
+
+Each row is a divergence between the tested artefact and the shipped one. One of them
+once produced **841 meaningless passes**. So: *every correctness claim this project has
+made since iteration 2 was a claim about a lightly rewritten copy of the code.*
+
+Now both VMs run the same file and agree:
 
 ```
-TIDEKEEPER quality gate — iteration 4, source root tidekeeper/code (57 Luau file(s))
+=== pure-tests.lua in REAL Luau (tidekeeper/tools/bin/luau) ===
+  passed         887
+  failed         0
+  wall time      735 ms
+  shims applied  none (the fengari harness needs four)
 
-  ok  doc-gate           TIDEKEEPER doc gate: 173/173 checks passed
+=== cross-check against the fengari suite ===
+  fengari        887 passed, 0 failed
+  real Luau      887 passed, 0 failed
+  agreement      identical
+```
+
+Three things to keep:
+
+- **The suite is shared byte for byte.** A doctored copy would have reintroduced the
+  exact problem the port exists to remove. It cost one alias (`TidekeeperRequire`) and
+  one injected fixture string.
+- **Agreement is the deliverable, not the Luau number.** Two independent VMs agreeing
+  rules out "the harness is wrong" *and* "the port is wrong" at once. `--compare` is how
+  the gate runs it.
+- **0.7 s versus 72 s.** A hundredfold speedup changes how a suite gets used. A
+  72-second loop gets run at the end; a 0.7-second one gets run constantly.
+
+**fengari stays.** The session harness needs a fake DataModel (`fake-platform.lua`, 705
+lines) that has not been ported, so the shims remain in the tree regardless — and
+keeping both preserves the cross-check, which is the most valuable property here. Real
+Luau is authoritative; fengari is the second opinion and the no-binary fallback.
+
+### 2.2 Scenario 16 — the client, driven against the real server
+
+Iteration 4's handoff said plainly: *"no Instance has ever been created … this is the
+largest untested surface in the project."* Scenario 16 drives the real
+`ClientBootstrap` against the real remote handlers over the fake platform. No engine is
+needed because the client is a presenter (D25) — the only faked object is a
+`RemoteFunction`, a table with one method.
+
+Beyond "does not crash", it asserts: every one of the six screens renders and carries a
+named tide state; the data screens carry data, not a shell; `step()` redraws **only**
+when dirty; the `renderer:draw(model)` seam is called exactly once with a well-formed
+model; a missing remote and a throwing remote both degrade to a human message with no
+directive in it and both count the failure; and sequence numbers are never reused.
+Detail in doc 08 §8.3.
+
+### 2.3 `lib/module-map.js`
+
+The module list had been copy-pasted into three runners. A fourth consumer made that
+untenable — a module added to one list and not the others gives a `nil` require that
+surfaces as a confusing runtime error in one tool while the others stay green. It also
+documents the trap that bit during the refactor: **two path conventions**, absolute for
+`luau-native` and relative for the fengari harness, and handing over the wrong one
+produces a doubled path that *looks* like a missing file.
+
+---
+
+## 3. The two bugs scenario 16 found on first run
+
+Both were in code that had **never once been executed**.
+
+**`OrdersView` threw at load time.** Its last line was `#Drifter.CLASS_NAMES` — a table
+that has never existed in any version of this project; the real export is
+`Drifter.CLASS_COUNT`. In Studio this takes the entire Orders screen with it, and
+`require` failures cascade to everything downstream.
+
+**`PostView` indexed a number.** The field `shelves` meant the shelf **array** in the
+domain (`S.shelves[i].id`) and the shelf **count** on the wire (`Post.shelfCount(S)`).
+`PostView.build` reads the array, as the word implies, so it threw.
+
+The second is worth dwelling on because the fix direction was not obvious until the
+evidence was read: **`PostView` was already reading `snapshot.shelfCount`.** The client
+had been written against the honest contract and the *server* was the wrong side. So the
+count became `shelfCount` in all four places that send it, and `shelves` is the array
+everywhere. **This is D28 again** — one name must not mean two things — and it is the
+second time that exact failure has shipped.
+
+**The general finding, and it is the one to carry forward:
+`check-syntax` parses, it does not execute.** A module can be syntactically perfect, pass
+a 13-rule determinism scan, be reviewed, and still throw on the first line of real use.
+Only running it catches that.
+
+---
+
+## 4. Commands and their real output
+
+```
+TIDEKEEPER quality gate — iteration 5, source root tidekeeper/code (57 Luau file(s))
+
+  ok  doc-gate           TIDEKEEPER doc gate: 172/172 checks passed
   ok  separation         no dependency on the VITRIOL tree
   ok  check-syntax       All 57 Luau file(s) parsed successfully.
   ok  metrics              53  code/ReplicatedStorage/Tidekeeper/Domain/Resolve.luau
@@ -98,220 +168,95 @@ TIDEKEEPER quality gate — iteration 4, source root tidekeeper/code (57 Luau fi
   ok  find-dead-config     ✓ no dead keys
   ok  determinism-scan   clean
   ok  smoke-test         TIDEKEEPER smoke test: 888 passed, 0 failed, 0 static proof(s) failed
-  ok  session-test       TIDEKEEPER session test: 117 passed, 0 failed
-  ok  luau-bench         TIDEKEEPER Luau bench: within budget (median 15.903 us, p99 22.326 us, catch-up 2946.6 us).
+  ok  session-test       TIDEKEEPER session test: 167 passed, 0 failed
+  ok  luau-test          TIDEKEEPER Luau test: 887 passed, 0 failed, agrees with fengari
+  ok  luau-bench         TIDEKEEPER Luau bench: within budget (median 15.492 us, p99 23.827 us, catch-up 2868.9 us).
   ok  git-diff-check
 
-TIDEKEEPER quality gate: 12/12 checks passed
+TIDEKEEPER quality gate: 13/13 checks passed
 ```
 
-**Two of these are environment-dependent and will not reproduce on a clean checkout
-without a step.** `tools/node_modules/` and `tools/bin/luau` are both gitignored, and
-both vanish on a fresh clone:
+**On a clean checkout two things are missing and both are gitignored on purpose:**
 
 ```bash
 cd tidekeeper/tools && npm install          # fengari + luaparse; without it every
                                             # Lua-running check dies with MODULE_NOT_FOUND
-# and, for the benchmark only, see tools/bin/README.md (four minutes)
+# and see tools/bin/README.md for the luau binary (four minutes from source)
 ```
 
-Without the binary the gate reports `skip luau-bench` and **11/12 checks passed, 1 not
-applicable yet** — which is the correct output, not a failure. It used to render that
-skip as a plain `ok` with a stray help line, making a benchmark that never ran look
-identical to one that passed; fixed this iteration.
-
-### `node tidekeeper/tools/tidekeeper-luau-bench.js`
-
-```
-=== Visit.resolve (REAL Luau) ===
-  median         15.980 us
-  p99            18.312 us
-  budget         18 us median / 50 us p99 (doc 04 section 6)
-  headroom       1.1x under the median budget
-  calibration    1e6 integer adds took 4.7 ms
-  ratio          one visit costs about 3416 integer adds
-
-=== Resolve.run (REAL Luau) ===
-  1 epoch, no arrivals            17.0 us
-  27 epochs, 216 arrivals       2945.3 us   (the documented worst case)
-  budget for a full catch-up   12000.0 us   (doc 01 section 5: 12 ms slow slot)
-  headroom                         4.1x
-
-RESULT median=15.980us p99=18.312us catchup=2945.3us verdict=WITHIN_BUDGET
-```
-
-Needs a `luau` binary; see [`tools/bin/README.md`](tools/bin/README.md). Without one it
-prints `SKIPPED` with build instructions and exits 0 — the gate stays green but says so.
-
-### `node tidekeeper/tools/tidekeeper-determinism-scan.js`
-
-**13 rules now**, clean, 5 explicit allowances, and a whole-tree connection count:
-
-```
-  ok  single-connection      2/2 RunService connection(s)
-         .../Services/CadenceService.luau:209
-         .../StarterPlayerScripts/Tidekeeper/Main.client.luau:78
-clean
-```
-
-The connection budget is now **exactly exhausted**, which is the intended steady state:
-one scheduler per side, and a thirteenth connection anywhere fails the build.
-
-### `node tidekeeper/tools/tidekeeper-session-test.js`
-
-```
-TIDEKEEPER session test: 117 passed, 0 failed
-measured: 5.64 DataStore and 5.24 MemoryStore requests per session
-          over 200 sessions across 8 posts and 30 days
-```
-
-Unchanged request cost — the client layer adds no platform calls, which is the point of
-it being a presenter.
+Without the binary the gate reports `skip luau-test`, `skip luau-bench` and
+**11/13 passed, 2 not applicable yet** — correct output, not a failure.
 
 ---
 
-## 3. What is *not* verified, stated plainly
+## 5. What is *not* verified, stated plainly
 
-- **Nothing has run inside Roblox.** No Studio was reachable from this environment, in
-  this iteration or the two before it. Everything is either fengari (L2), a fake
-  DataModel (L3), or the standalone Luau VM (L3.5).
-- **L3.5 is not L4.** The `luau` CLI is the same *language runtime* Roblox embeds, at a
-  pinned version, but there is no DataModel, the GC tuning and build flags differ, and
-  the hardware is a CI box. Doc 09 §4 has the full table. The performance numbers are a
-  fair order of magnitude and are **not** numbers from Roblox hardware.
-- **No Instance has ever been created.** The client's `Main.client.luau` builds real UI
-  and has been parsed, scanned and reviewed — it has never been *run*. This is the
-  largest untested surface in the project and iteration 5 must treat it that way.
-- **Median performance headroom is 1.1×.** That is inside budget and it is thin. It is
-  reported as thin everywhere rather than rounded up to "comfortable".
-- **No human has played this.** R1 is still open.
+- **Nothing has run inside Roblox.** Four iterations, four times unreachable. L4, L5 and
+  R1 are not "nearly done" — nothing about them has been started, and no further work in
+  this environment will start them.
+- **No Instance has ever been created.** `Main.client.luau` is still the one file that
+  has never executed. Scenario 16 tests the seam it calls, not the Instance code behind
+  it. Given that two of the six *pure* client modules threw on first execution, assume
+  this file is broken until proven otherwise.
+- **L3.5 is not L4.** Same VM, no DataModel, different GC tuning and build flags, CI
+  hardware.
+- **Median performance headroom is 1.1×.** Inside budget, and thin.
+- **The game has no content.** 21 Ledger templates against a target of 180; no finds, no
+  letters, no Seed Drifters, no island.
+- **No human has played this.**
 
 ---
 
-## 4. Where the documents were wrong
+## 6. What iteration 5 was asked for and did not do
 
-| Document | Was | Is |
+Stated flatly, because the roadmap tables alone make it look like slippage rather than a
+decision:
+
+| Asked | Status | Why |
 | --- | --- | --- |
-| doc 04 §6 | "at a measured target of ≤ 18 µs … ~11.7 ms" | a real catch-up is **2.9 ms**; the 11.7 ms figure came from multiplying the *budget* by the worst case and calling it a measurement |
-| doc 09 §4 | L3 → L4 with nothing between | **L3.5** exists; the gap between "a fake DataModel" and "the Roblox engine" contains a real, useful rung |
-| doc 10 §6.4 | OD12 needs Studio | it needed a compiler |
-| ROADMAP OD14 | "settle in it4" | moved to it5 **with a stated lean and a reason**, not silently slipped |
+| 200 finds, 180 templates, 120 letters, 64 Seed Drifters, 90 décor, 40 badges | **not started** | the iteration went entirely into making the harness trustworthy and running the client |
+| Economy tuning across 8 play patterns | **not started** | — |
+| Cold-start playtest (R4) | **not started** | needs humans |
+| Title, thumbnail, Moments clips, launch checklist | **not started** | needs a published place |
+
+The judgement: a content pass written against a harness that reshapes the code before
+testing it, and against a client whose screens had never been loaded, would have been
+content built on two unknowns. Both are now known. Iteration 6 can write content against
+a suite that runs the real language and a client that has been executed.
 
 ---
 
-## 5. Decisions iteration 4 made that iteration 5 inherits
+## 7. Decisions iteration 5 made
 
-Decisions D13–D22 are unchanged and remain in force. New:
+D13–D30 stand. New:
 
 | # | Decision | Why |
 | --- | --- | --- |
-| D23 | `publishedAt` is persisted at schema v2 by **appending at the blob tail**, never inserting | v2 is byte-for-byte v1 plus a `u32`; a reader that ignored the tail would still parse the head |
-| D24 | Fixture blobs in `tools/fixture-blobs/` are **never edited and never regenerated** | a regenerated fixture tests the current code against itself; the entire value is that those bytes were written by code that no longer exists |
-| D25 | The client is a pure presenter layer plus exactly one `LocalScript` | `Main.client.luau` is the only client file touching `game` and owns the only client `RunService` connection; enforced by the scan, not by review |
-| D26 | **No sentence is ever stored or replicated.** `(templateId, slots)` renders through `Strings`/`Format` at read time | translation becomes one file, and every historical save re-renders in the new language |
-| D27 | Prose variants are chosen by `hash(actorId, epoch)`, never randomly | the Ledger is a replay; it must read identically forever |
-| D28 | **A sentinel must be impossible to confuse with a legal value.** Check it against the *range* of the field, not against what looks empty | see §5.1 |
-| D29 | An exemption list may say *which* file may do X, never *how many times*. Where the invariant is a count, **count it** | see §5.2 |
-| D30 | Receipts have their own Ledger template range (100–105), separate from visit templates (1–99) | see §5.3 |
-
-### 5.1 The sentinel bug — D28
-
-`publishedAt` was first written as `0 = never published`. But `Tide.epoch(TideConfig.EPOCH)`
-is **0** — epoch 0 is a real epoch, the *first* one. So a post created during the first
-6.2 hours of the game's existence read as "already published at epoch 0", and
-`ExchangeService:publish` refused it forever with `lastEpoch 0 >= epoch 0`.
-
-Six previously-green session assertions went red simultaneously. Because the client work
-landed in the same iteration, the failures looked like the new tests and cost real time
-before the actual cause was found. The fix: `publishedAt` is **absent** in memory for
-"never", and the codec stores **`epoch + 1`** on the wire so that wire-0 is unambiguous.
-
-The general lesson is the decision: *what is the range of this field, and does the
-sentinel fall inside it?* "Zero looks empty" is not an argument.
-
-### 5.2 Exemptions cannot express counts — D29
-
-The determinism scan gained an `exceptFiles` option this iteration for a good reason:
-`except` matches a **basename**, and both `Main.server.luau` and `Main.client.luau`
-reduce to `"Main"`, so exempting one would have silently exempted the other. That was a
-real hole and `exceptFiles` closes it.
-
-But it exposed the deeper problem: the rule that matters is not "which file may connect
-to `RunService`" — it is "**how many** `RunService` connections exist in the whole
-game". An exemption list cannot say that. So a thirteenth check counts them across the
-tree with `MAX_CONNECTIONS = 2`, one per side, and naming a file in an exemption list no
-longer buys it a second connection.
-
-**And the first version of the count was itself wrong**, which is worth recording. It
-matched on the literal identifier `RunService`, so it never saw
-`self.runService.Heartbeat:Connect(...)` in `CadenceService` — the service takes
-RunService by injection, which is precisely what lets the session harness drive the
-server with no DataModel. The check reported **1/2** for a game that has two
-connections: a green check for an invariant nobody was enforcing, which is worse than
-no check at all.
-
-It now matches on the **signal name** rather than the receiver, and reports 2/2. The
-general form of the lesson: *a static check written against one calling convention
-silently exempts every other convention in the codebase.* Test a new check by
-confirming it catches the thing that already exists, not by confirming it is quiet.
-
-### 5.3 The bug the localisation test found — D30
-
-Scenario 15 was written to check that every Ledger template has prose. It found that,
-and then it found something much worse.
-
-`LedgerService:slotsFor` was filling Ledger slots from a positional pool
-`{spent, warmth, noteId, flags}` **regardless of what the template's slots meant**. So a
-receipt — "your drifter, at somebody else's post" — was rendered through a *visit*
-template, and a coin amount landed in a `{find:1}` slot. The game confidently named an
-object "12", and a tide code of 6 appeared where only 1–5 exist.
-
-The fix is structural rather than a slot remap, because the remap would have been a lie:
-a receipt genuinely does not know which find was on the shelf, what the host's tide was
-doing, or what class of boat the host saw. Those facts do not exist on that side of the
-exchange. So receipts now have **their own template range, 100–105**, with prose written
-for what a receipt actually knows, and `slotsFor` maps each one explicitly. The one
-piece of real data recovered rather than invented is the tide: it is a pure function of
-time, so `Tide.codeForEpoch(r.epoch)` reconstructs it exactly.
-
-**This bug was invisible for two iterations because nothing rendered those entries.**
-Server code that produces data no one reads yet is untested code wearing a passing test
-suite.
+| D31 | **Real Luau is authoritative for correctness; fengari is the second opinion.** The two runners share the test file byte for byte and the gate asserts they agree | agreement across independent VMs rules out both "the harness is wrong" and "the port is wrong"; a doctored copy of the suite would prove neither |
+| D32 | A shared `lib/module-map.js` is the only place the module list lives, and it exports absolute *and* relative forms by name | three copies had already drifted; the two path conventions are a real trap and are now documented at the point of use |
+| D33 | **Triage before planning.** Capability questions get answered with evidence, and a check that could be observing itself gets re-run a second way | the `pgrep` false positive would have planned the whole iteration around a Studio that does not exist |
 
 ---
 
-## 6. Open questions for iteration 5
+## 8. Open questions for iteration 6
 
-Full table in [`ROADMAP.md`](ROADMAP.md). The ones that will actually bite:
+Full table in [`ROADMAP.md`](ROADMAP.md).
 
-- **OD14 — does `warmth` affect price?** Now has a lean: **no, keep it prose-only.**
-  Wiring it into price turns warmth into a stat to farm and makes every visitor an
-  optimisation problem, which inverts doc 00's pillars. Decide against a playtest.
-- **OD17 — adopt Lute.** It has a native Luau test runner, which would let
-  `pure-tests.lua` stop being *transformed Lua 5.3 under fengari* and become real Luau —
-  deleting `floatifyNumbers`, the `bit32` shim and the `%d`→`%.0f` rewrite outright, and
-  with them a whole class of "the harness disagrees with the game" bug.
-- **OD18 — adopt LibMP** for the client frame budget, sampled on a fraction of sessions.
-- **Static checks only see the calling conventions they were written against.**
-  `single-connection` now reports 2/2 (§5.2) — but it is a regex over source text, so
-  it would still miss a connection made through a variable, a table of handlers, or a
-  helper function. It is a tripwire, not a proof. If iteration 5 adds a scheduler by
-  any indirect route, the check will stay green and be wrong. The same caveat applies
-  to every rule in the determinism scan.
-- **Studio, finally.** The MCP ecosystem is far richer than doc 09 §2 recorded (doc 10
-  §7.3): 68-tool servers with `execute_luau`, `start_playtest`, screenshots and Open
-  Cloud passthrough. All of them need a running Studio process. If one is available in
-  iteration 5, L4 and L5 are reachable in a single session.
+- **Content is the whole job now.** The tooling argument is finished: the suite runs the
+  real language, the client executes, the gate is 13 checks. There is nothing left to
+  sharpen before writing content, and sharpening tools further would be avoidance.
+- **Assume `Main.client.luau` is broken.** Two of six pure client modules threw on first
+  execution. That file has still never run.
+- **OD18 (LibMP) and OD19 (porting `fake-platform.lua`)** are both parked: OD18 needs
+  Studio, OD19 is only worth it if the fengari shims start costing again — today the
+  cross-check they enable is an asset.
+- **Studio.** The MCP ecosystem is ready (doc 10 §7.3) and useless without a running
+  Studio process. If one ever appears, L4, L5 and R1 all unlock in a single session, and
+  that outranks everything else.
 
 ---
 
-## 7. Prompt for iteration 5
+## 9. Prompt for iteration 6
 
 See [`docs/12-ITERATION-PROMPTS.md`](docs/12-ITERATION-PROMPTS.md), heading
-**"Prompt — Iteration 5: it ships"**, for the copy-paste prompt. It was rewritten at
-the end of iteration 4 and now opens with a mandatory triage step, because iterations
-2, 3 and 4 each planned around Studio being available and each had to re-plan.
-
-(That file's prompts are headed by name, not numbered. An earlier version of this line
-said "§5", which in that document resolves to *"5. Where the docs were wrong"* in the
-handoff template — a different thing entirely.)
+**"Prompt — Iteration 6: content"**.

@@ -102,19 +102,29 @@ changed is that **one of those blocked items turned out not to need Studio at al
 OD12 was closed by building the standalone Luau VM (doc 10 §7.4). The remaining
 Studio-shaped work is genuinely Studio-shaped and is restated in iteration 5.
 
-## Iteration 5 — it ships ⬜
+## Iteration 5 — the harness tells the truth 🟡
+
+Triage (doc 10 §8) found Studio unreachable for the fourth iteration, so iteration 5
+took the no-Studio branch of its own prompt: tooling truth first, then content.
 
 | Deliverable | Status |
 | --- | --- |
-| 200 finds via the generative pipeline + human curation gate | ⬜ |
-| 180 Ledger templates, 120 letters, 64 Seed Drifters, 90 décor, 4 tiers, 40 badges | ⬜ |
-| Island finished (Scene Generator if shipped, hand-built otherwise) | ⬜ |
-| Economy tuned against 8 simulated play patterns | ⬜ |
-| **R4: cold-start playtest at < 200 DAU** | ⬜ |
+| **OD17: the correctness suite runs in real Luau, zero shims** | ✅ 887 = 887, cross-checked |
+| **Scenario 16: the client driven against the real server** | ✅ found 2 load-time crashes |
+| Module list deduplicated into `lib/module-map.js` | ✅ |
+| 200 finds via the generative pipeline + human curation gate | ⬜ **not started** |
+| 180 Ledger templates, 120 letters, 64 Seed Drifters, 90 décor, 4 tiers, 40 badges | ⬜ **not started** |
+| Island finished (Scene Generator if shipped, hand-built otherwise) | ⬜ **not started** |
+| Economy tuned against 8 simulated play patterns | ⬜ **not started** |
+| **R4: cold-start playtest at < 200 DAU** | ⬜ needs humans |
 | Shipping title chosen against live search data | ⬜ |
 | Thumbnail + 3 Moments clips | ⬜ |
 | Pre-launch checklist (doc 13 §6) complete | ⬜ |
 | Telemetry + soft-launch region + rollback plan | ⬜ |
+
+**This iteration did not ship the game.** It is named for what it actually did: made
+the test harness trustworthy, and ran the client for the first time. Content volume,
+economy tuning and everything requiring a human or an engine move to iteration 6.
 
 ## Iteration 6+ ⬜
 
@@ -144,8 +154,9 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD13 | Arrival scheduling is window-width dependent (see below) | ~~it3~~ | **Closed.** `CadenceService.planChunks` and `chunkForDrifter` are pure; at-most-once is asserted by session scenario 8 |
 | OD14 | Should `warmth` feed the price a Drifter will accept, not just the prose? | **it5** | **Lean: no — keep it prose-only.** Now that the client exists, `warmth` reads as memory and courtesy. Wiring it into price turns it into a stat to farm and makes every visitor an optimisation problem, which is the opposite of doc 00's pillars. Decide against a playtest, not in the abstract |
 | OD15 | DataStore compresses values itself; does our base64 packing still pay? (doc 10 §6.2) | it4 | Binary packing is not compression, but base64 inflates 33 %. Sizes are far inside budget — measure, do not redesign |
-| OD17 | Replace the hand-rolled `luau`-CLI bundling with **Lute** (doc 10 §7.4) | it5 | Yes if reachable. Lute has a native test runner, so `pure-tests.lua` could stop being transformed Lua 5.3 under fengari and become real Luau — deleting `floatifyNumbers`, the `bit32` shim and the `%d` rewrite |
-| OD18 | Adopt **LibMP** to measure the client frame budget on real devices (doc 10 §7.2) | it5 | Yes for the Ledger replay, sampled on a fraction of sessions — Roblox warns it raises memory |
+| OD17 | Run the correctness suite in real Luau instead of transformed Lua 5.3 | ~~it5~~ | **Closed (doc 10 §8.4), and without Lute.** `tidekeeper-luau-test.js` runs the suite shim-free; 887 = 887 against fengari, 0.7 s vs 72 s. Lute release binaries remain unreachable and turned out not to be needed — it would have added a test runner and a profiler, not a different measurement |
+| OD18 | Adopt **LibMP** to measure the client frame budget on real devices (doc 10 §7.2) | it6 | Yes for the Ledger replay, sampled on a fraction of sessions — Roblox warns it raises memory. **Blocked on Studio**, like L4/L5 |
+| OD19 | Port `fake-platform.lua` to real Luau so fengari can be deleted entirely | it6+ | Only worth it if the shims start costing again. The cross-check between two VMs is currently an asset, not debt |
 | OD16 | `S.publishedAt` is not persisted, so one-Drifter-per-epoch holds only per server (doc 10 §6.4) | ~~it4~~ | **Closed.** Schema v2 appends it at the blob tail with a real migration and a committed v1 fixture (doc 05 §6.1). Shipped a sentinel bug en route — see **D28** |
 
 ### OD13 in full — the one non-commuting property
@@ -162,6 +173,21 @@ to exactly one resolve. But it makes *at-most-once delivery* a hard requirement 
 `ExchangeService`, not a nicety, and a retry that re-delivers a batch would corrupt
 history rather than duplicate it.
 
+## Validation snapshot — end of iteration 5
+
+| Check | Real output |
+| --- | --- |
+| `tidekeeper-quality-gate.js` | **13/13** checks passed |
+| `tidekeeper-doc-gate.js` | **172/172** checks passed |
+| `check-syntax.js` | all **57** Luau files parsed |
+| `tidekeeper-determinism-scan.js` | **clean** — 13 rules, 5 allowances, **2/2** RunService connections |
+| `tidekeeper-smoke-test.js` (fengari) | **888 passed, 0 failed**, 3/3 static proofs |
+| `tidekeeper-luau-test.js` (real Luau) | **887 passed, 0 failed, agrees with fengari** — 0.7 s |
+| `tidekeeper-session-test.js` | **167 passed, 0 failed** — 16 scenarios |
+| `tidekeeper-luau-bench.js` | **within budget** — median 15.5 µs, p99 23.8 µs, catch-up 2.87 ms |
+| Executed assertions | **1 055** (888 + 167), plus 887 cross-checked in a second VM |
+| Verification level claimed | **L3.5** — correctness *and* timings now in a real Luau VM. Still not L4: no engine |
+
 ## Validation snapshot — end of iteration 4
 
 Full command output is pasted in [`HANDOFF.md`](HANDOFF.md) §2.
@@ -169,7 +195,7 @@ Full command output is pasted in [`HANDOFF.md`](HANDOFF.md) §2.
 | Check | Real output |
 | --- | --- |
 | `tidekeeper-quality-gate.js` | **12/12** checks passed (11/12 + 1 skip without a local `luau` binary) |
-| `tidekeeper-doc-gate.js` | **173/173** checks passed |
+| `tidekeeper-doc-gate.js` | **172/172** checks passed |
 | `check-syntax.js` | all **57** Luau files parsed |
 | `tidekeeper-determinism-scan.js` | **clean** — 57 files, **13** rules, 5 explicit allowances, **2/2** RunService connections |
 | `tidekeeper-smoke-test.js` | **888 passed, 0 failed**, 3/3 static proofs |

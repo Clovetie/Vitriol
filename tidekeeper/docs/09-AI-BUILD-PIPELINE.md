@@ -136,7 +136,7 @@ What each iteration is allowed to claim.
 | L1 — parses | `check-syntax.js` | it2 |
 | L2 — executes correctly | Lua VM harness assertions | it2 |
 | L3 — integrates | session harness against a fake DataModel | it3 |
-| **L3.5 — runs in real Luau** | the `luau` CLI: same language runtime, not the engine | **it4** |
+| **L3.5 — runs in real Luau** | the `luau` CLI: same language runtime, not the engine | **it4** (timings), **it5** (correctness) |
 | L4 — runs in the engine | Studio MCP `execute_luau` transcript | it4 |
 | L5 — plays | Studio playtest, screenshots, console clean | it4 |
 | L6 — feels right | a human played it | it5 |
@@ -164,6 +164,13 @@ The gap between L3.5 and L4 is real and it is not hand-waving:
 | — | the hardware is whatever the CI box is |
 
 So L3.5 answers "is this algorithm the right order of magnitude" with a real number, and
-leaves "does it hit the budget on Roblox's hardware" to L4. Iteration 4 used it to close
+leaves "does it hit the budget on Roblox's hardware" to L4.
+
+Iteration 5 widened L3.5 from the benchmark to the **whole correctness suite**
+(`tidekeeper-luau-test.js`, doc 10 §8.4). That matters more than the timings did: the
+fengari harness has to reshape numbers, `bit32`, `math.*` and `string.format` before the
+game will run at all, so until iteration 5 *every correctness claim in this project was
+made about a lightly rewritten copy of the code*. Both VMs now run the same file and
+agree on 887 assertions, which is the first evidence that the rewriting never mattered. Iteration 4 used it to close
 OD12 as *within budget with thin headroom*, which is a far more useful answer than a
 third iteration of "unknown".

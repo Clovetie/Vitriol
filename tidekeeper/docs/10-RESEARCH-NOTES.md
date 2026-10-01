@@ -369,7 +369,117 @@ under `lute test` rather than as transformed Lua 5.3 under fengari — which wou
 class of "the harness disagrees with the game" bug. Blocked in iteration 4 only because
 this sandbox cannot reach GitHub release assets and Lute needs itself to bootstrap.
 
-## 8. Known unknowns
+## 8. Iteration-5 verification pass — 2026-10-01
+
+The iteration-4 handoff made triage mandatory before planning, because iterations 2, 3
+and 4 each planned around Studio being available and each had to re-plan. Three
+questions, answered before anything was built.
+
+### 8.1 Is a Roblox Studio process reachable? **No** — and the first answer was wrong
+
+The honest version of this check matters, because the first attempt said *yes*:
+
+```
+$ pgrep -afi "roblox|studio"
+1342 /bin/bash -l -c echo "..."; pgrep -afi "roblox|studio"; ...
+```
+
+The only match was **the grep matching its own command line**. `DISPLAY` is unset, no
+MCP bridge port (3000/3001/3002/8080/44755) is listening, and no `rojo`/`lune`/`lute`
+binary is on `PATH`. There is no Studio and no way to reach one.
+
+That is the fourth iteration in a row, and it is worth stating what it costs: **L4, L5
+and R1 are not reachable from this environment at all.** They are not "deferred" in the
+sense of being nearly done; nothing about them has been started, and no amount of
+further work in this sandbox will start them.
+
+### 8.2 Lute, again — still blocked, and now definitively
+
+`release-assets.githubusercontent.com` fails with `SSL_ERROR_SYSCALL` while
+`api.github.com` returns 200 and `git clone` works. The release *metadata* is readable;
+the release *binaries* are not. Lute needs a working Lute to bootstrap its own build, so
+cloning the source does not help.
+
+**This is settled, not pending.** The `luau` CLI is the route: `git clone --branch 0.700`
+plus `make config=release luau` is four minutes with only `g++` and `make`, and it is
+the same VM. Lute would add a test runner and a profiler on top; it would not change a
+single measurement. OD17 was achievable without it (§8.4).
+
+### 8.3 Turn-based notifications — fourth check, fourth "no"
+
+`ExperienceNotificationService.md`, `last_updated: 2026-09-30T22:13:33Z`. Still exactly
+three members — `CanPromptOptInAsync()`, `PromptOptIn()`, `OptInPromptClosed` — all
+client-only, all about *opting in*. There is still no send API on the engine surface and
+still no turn API. `CreateUserNotificationAsync` is still gone.
+
+Checked in iterations 2, 3, 4 and 5. **R5 was the right call and the design has now
+survived four opportunities to be wrong.** Nothing in the game depends on a
+notification being sent.
+
+### 8.4 OD17 closed — the correctness suite now runs in real Luau
+
+`tools/tidekeeper-luau-test.js` runs `tests/pure-tests.lua` in the real Luau VM with
+**no shims at all**. For comparison, the fengari path needs four, and the table in
+`tools/README.md` §7 is not academic — each row is a divergence between the tested
+artefact and the shipped one:
+
+| fengari needs | real Luau |
+| --- | --- |
+| every numeric literal rewritten to a float | nothing |
+| `bit32` rebuilt from a 64 KB byte-wise XOR table | native |
+| `math.floor/ceil/abs/max/min` wrapped to return floats | nothing |
+| `string.format("%d", …)` rewritten to `%.0f` | nothing |
+
+Two results:
+
+- **887 passed, 0 failed — identical to fengari.** `--compare` asserts the equality and
+  the gate runs it that way. Agreement across two independent VMs rules out "the
+  harness is wrong" and "the port is wrong" simultaneously, which neither number proves
+  alone.
+- **0.7 s versus 72 s.** A hundredfold speedup changes how the suite gets used: a
+  72-second feedback loop gets run at the end, a 0.7-second one gets run constantly.
+
+The suite is shared **byte for byte** between the two runners. That was a deliberate
+constraint — a doctored copy would have reintroduced exactly the "the tests are not the
+game" problem the port exists to remove. It cost one alias (`TidekeeperRequire`) and
+one injected fixture string.
+
+**Why fengari is still here.** The session harness needs a fake DataModel
+(`fake-platform.lua`, 705 lines) and nothing has been ported to Luau on that side, so
+the shims stay in the tree regardless. Keeping both also keeps the cross-check, which
+is the single most valuable property of the arrangement. Real Luau is authoritative;
+fengari is the second opinion and the fallback when no binary has been built.
+
+### 8.5 The client executed for the first time, and two screens were broken
+
+Iteration 4 shipped a client layer and said so plainly in its handoff: *"no Instance has
+ever been created … this is the largest untested surface in the project."* Scenario 16
+drives the real `ClientBootstrap` against the real remote handlers over the fake
+platform. No engine is required, because the client is a presenter (D25) — the only
+faked object is a `RemoteFunction`, which is a table with one method.
+
+It immediately found two crashes in code that had **never once been executed**:
+
+1. `OrdersView` ended with `#Drifter.CLASS_NAMES` — a table that has never existed in
+   any version of this project. The module threw **at load time**, which in Studio takes
+   the entire Orders screen with it, and `require` failures cascade.
+2. The field `shelves` meant the shelf **array** in the domain (`S.shelves[i].id`) and
+   the shelf **count** on the wire (`Post.shelfCount(S)`). `PostView.build` reads the
+   array, as the word implies, so it indexed a number and threw.
+
+The second one is worth dwelling on, because the fix direction was not obvious until the
+evidence was read: `PostView` was *already* reading `snapshot.shelfCount`. The client had
+been written against the honest contract and the server was the side that was wrong. The
+count is now `shelfCount` in all four places that send it, and `shelves` is the array
+everywhere. **This is D28 again** — one name must not mean two things — and it is the
+second time that exact failure has shipped, which is why it is now a named decision
+rather than a war story.
+
+**The general finding: `check-syntax` parses, it does not execute.** A module can be
+syntactically perfect, pass a 13-rule determinism scan, be reviewed, and still throw on
+the first line of real use. The only thing that catches that is running it.
+
+## 9. Known unknowns
 
 Recorded so later iterations do not mistake absence of evidence for evidence.
 

@@ -306,10 +306,19 @@ if (fs.existsSync(asyncPath) && fs.existsSync(persistPath)) {
 const promptPath = path.join(DOCS, "12-ITERATION-PROMPTS.md");
 if (fs.existsSync(promptPath)) {
 	const text = read(promptPath);
-	for (const n of [2, 3, 4, 5]) {
+	// Every iteration that has been reached needs a prompt, plus an
+	// open-ended tail prompt for whatever comes after. The tail moves as the
+	// project advances -- it was "6+" through iteration 4 and becomes "7+"
+	// once iteration 6 has a prompt of its own -- so it is derived rather
+	// than hard-coded, which is what caught the rename that produced it.
+	for (const n of [2, 3, 4, 5, 6]) {
 		check(`prompt for iteration ${n}`, text.includes(`Iteration ${n}:`), "not present");
 	}
-	check("prompt for iteration 6+", /Iteration 6\+/.test(text), "not present");
+	const tail = text.match(/Iteration (\d+)\+/);
+	check("an open-ended tail prompt exists", tail !== null, "no 'Iteration N+' heading");
+	if (tail) {
+		notes.push(`tail prompt covers iteration ${tail[1]}+`);
+	}
 	check("handoff template", text.includes("Handoff — TIDEKEEPER, iteration N"), "not present");
 
 	const blocks = text.split("```").filter((_, i) => i % 2 === 1);

@@ -328,31 +328,115 @@ includes the real-Luau benchmark. Paste the real output.
 
 ---
 
-## Prompt — Iteration 6+: contingency and live
+## Prompt — Iteration 6: content
+
+> **Written at the end of iteration 5.** Iteration 5 took the no-Studio branch and spent
+> itself on tooling truth: the correctness suite now runs in real Luau with no shims, and
+> the client executed for the first time (and two screens threw). None of the content
+> work happened. That is iteration 6's whole job.
 
 ```
-You are iteration 6 (or later) of TIDEKEEPER. Read tidekeeper/HANDOFF.md and
-tidekeeper/ROADMAP.md first; they, not this template, define your scope.
+You are iteration 6 of TIDEKEEPER (`tidekeeper/`). The engineering argument is over.
+57 modules, 1055 assertions, 13/13 quality gate, correctness cross-checked in a real
+Luau VM. The game has almost no CONTENT, and that is now the only thing that matters.
 
-BRANCH: work only on your session's fixed branch; never switch or create branches.
-SEPARATION: TIDEKEEPER lives entirely in `tidekeeper/`. Never read, modify or reference
-the VITRIOL tree at /code, /docs, /tools.
+BRANCH: your session's fixed branch only.
+SEPARATION: never touch the VITRIOL tree (/code, /docs, /tools and the three root .md
+files belong to the other game).
 
-Default priorities, highest first:
-  1. Anything iteration 5 marked incomplete or unverified.
-  2. Live telemetry: measure D1, D7, first-30-seconds churn, and the live/echo/seed
-     Drifter mix. Compare against the targets in doc 06 §8 and write down the delta.
-  3. R1 revisited with real players rather than playtesters.
-  4. The idea bank in doc 00 §9, in this order: Storms, Salvage wrecks, the Chart
-     puzzle. Do not start one until the live numbers say the core loop holds.
-  5. Offline solo play (doc 04 §11) once the platform feature reaches early access.
+READ FIRST:
+  tidekeeper/HANDOFF.md              -- sections 3, 5 and 6 especially
+  tidekeeper/docs/07-WORLD-AND-CONTENT.md
+  tidekeeper/docs/06-ECONOMY-PROGRESSION.md
+  tidekeeper/docs/11-HUMAN-AUTHORED.md
+  tidekeeper/docs/09-AI-BUILD-PIPELINE.md section 2 (the asset pipeline + curation gate)
 
-Do not add: combat, real-time co-presence mechanics, paid random items, free text,
-Robux-for-item trading, or a second scheduler. Doc 01 §10 and doc 00 §8 remain binding
-forever.
+STEP 0 -- TRIAGE, BEFORE YOU PLAN. Three questions, answered with EVIDENCE:
+  a) Is a Roblox Studio process reachable? Check for a process, a DISPLAY, a listening
+     MCP port, and rojo/lune/lute on PATH. WARNING: `pgrep -af "roblox|studio"` matches
+     its own command line -- iteration 5 nearly planned around a Studio that did not
+     exist. Confirm any positive a second way.
+     If yes: L4, L5 and R1 unlock in one session and they outrank everything below.
+  b) Can you reach github.com RELEASE ASSETS (not just api.github.com)? If not, build
+     the luau CLI from source -- four minutes, tidekeeper/tools/bin/README.md.
+  c) Re-check ExperienceNotificationService. Absent in iterations 2, 3, 4 and 5. Record
+     the date and the answer; change nothing if it is still absent.
+
+THEN RESTORE THE ENVIRONMENT (both are gitignored and vanish on a clean checkout):
+  cd tidekeeper/tools && npm install
+  # plus the luau binary, per tools/bin/README.md
+Without them the gate reports 11/13 with 2 skips. That is correct output, not a pass.
+
+DELIVER, IN THIS ORDER:
+
+1. ASSUME Main.client.luau IS BROKEN.
+   It is the only file that has never executed, and two of the six PURE client modules
+   threw on their first run. Read it line by line against the view-model contract that
+   scenario 16 asserts. Every field it reads must be one a view actually returns.
+   You cannot run it without Studio -- so make the failure impossible to hide: extend
+   the determinism scan or write a static check that every `model.x` it touches exists
+   in the corresponding view's return table.
+
+2. CONTENT. This is the bulk of the iteration.
+   - 200 finds via the pipeline in doc 09 section 2, with the human curation gate.
+     Expect to reject about 35%. Record every generated asset's source and licence in
+     tidekeeper/docs/ASSETS.md.
+   - 180 Ledger prose templates, 120 fixed-phrase letters, 64 Seed Drifter characters,
+     90 decor pieces, 4 post tier structures, 40 badges.
+   - Contingency: if Scene Generator has not shipped, build the island by hand per
+     doc 11 section 2. Do not block on an unreleased tool.
+
+   THE CONTENT RULES THAT ARE ALREADY ENFORCED -- read them before writing a line:
+   - Every new template id MUST get prose AND an entry in scenario 15's SAMPLE table,
+     in the same commit. The test fails on an id with no prose and on prose with no id,
+     in BOTH directions.
+   - Slot values in SAMPLE must be SEMANTICALLY VALID, not arbitrary integers. An
+     earlier version used `(k + variant) % 7 + 1` and produced tide code 6, which does
+     not exist, and the suite then failed for a reason unrelated to the game.
+   - Directives DO NOT NEST. `{plural:1|one boat|{1} boats}` leaks literal braces to
+     the player (doc 08 section 8.1).
+   - No sentence is ever stored or replicated (D26). Prose lives in Client/Strings.luau
+     and nowhere else.
+   - Variants are chosen by hash(actorId, epoch), never randomly (D27).
+
+3. ECONOMY TUNING.
+   - Run the 30-day simulated lifetime at 8 play patterns (daily 5 min, daily 20 min,
+     twice-weekly, lapsed-and-returned, whale, non-payer, tier-rusher, pure-idler) and
+     tune the curves in doc 06 section 7 against the result.
+   - Settle OD14. The lean is NO -- keep warmth prose-only. Wiring it into price makes
+     warmth a stat to farm and turns every visitor into an optimisation problem, which
+     inverts the pillars in doc 00. Overturn it only with playtest evidence.
+
+4. ONLY IF STUDIO IS REACHABLE: run the pure core under execute_luau and diff against
+   the L3.5 numbers in doc 04 section 6.1 (median headroom is only 1.1x, so a slower
+   engine result is a real finding, not noise); verify buffer/base64, a real DataStore
+   write/read of the v1 fixture, a real MemoryStore queue; then RUN THE CLIENT, playtest,
+   capture console output and screenshots. Claim L4, then L5, with transcripts pasted in.
+
+WHAT THIS PROJECT HAS LEARNED THE HARD WAY -- do not repeat any of these:
+  - check-syntax PARSES, it does not EXECUTE. OrdersView was syntactically perfect,
+    passed a 13-rule scan, and threw at load time on a table that never existed.
+  - A green check that enforces nothing is worse than no check. The connection counter
+    matched the literal identifier `RunService` and never saw
+    `self.runService.Heartbeat:Connect` -- it reported 1/2 for a game with 2. When you
+    write a check, first confirm it CATCHES the thing that already exists.
+  - One name must not mean two things (D28). `publishedAt = 0` meant "never" in a game
+    where epoch 0 is real. `shelves` meant an array in the domain and a count on the
+    wire. Both shipped. Both broke something silently.
+  - Server code producing data nothing reads is untested code wearing a passing suite.
+  - A check can observe itself. See the pgrep note in step 0(a).
+
+Claim the highest level you have EVIDENCE for and no higher: L3.5 if nothing changed,
+L4 with an execute_luau transcript, L5 with a playtest, L6 only if a human played it.
+A partial honest result beats a complete claimed one -- say what you did not do.
+
+Run `node tidekeeper/tools/tidekeeper-quality-gate.js`; it must be green. Paste the
+real output. Update ROADMAP.md, rewrite HANDOFF.md, write the iteration 7 prompt.
 ```
 
 ---
+
+## Prompt — Iteration 7+: contingency and live
 
 ## The handoff template
 
