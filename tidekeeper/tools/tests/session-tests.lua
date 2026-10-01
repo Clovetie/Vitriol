@@ -1133,3 +1133,89 @@ print(string.format(
 	REPORT.posts or 0,
 	REPORT.days or 0
 ))
+
+do -- 19. THE FAILED-SAVE RECOVERY QUEUE ACTUALLY GETS DRAINED
+	-- `DataStoreAdapter:savePost` pushes the payload onto a MemoryStore queue
+	-- whenever a write is abandoned -- a stale session lock, or a retry
+	-- budget that ran out. The comment above `pushRecovery` says "so the next
+	-- join can retry it". Through iteration 7 nothing ever called
+	-- `popRecovery`: the safety net caught the blob and then dropped it. A
+	-- player whose save failed lost the session regardless.
+	--
+	-- Three behaviours are load-bearing and all three are checked here:
+	-- the blob comes back; a NEWER stored post is never clobbered by it; and
+	-- a batch containing an entry we must defer is not acked out of
+	-- existence.
+	local PostCodec = TidekeeperRequire("PostCodec")
+	local Post = TidekeeperRequire("Post")
+
+	local app, env = newServer({ seed = 909 })
+	local userId = 4242
+	env:addPlayer(userId)
+	settle(app, env, 200)
+
+	-- Take a snapshot of the post with a distinctive balance, then evict the
+	-- player so the sweep is allowed to touch them.
+	-- Build the rescued blob from a COPY, leaving the live post alone: the
+	-- logout save below must land a strictly OLDER post than the queued one,
+	-- which is the situation a real abandoned write leaves behind.
+	local S = app.posts:get(userId)
+	local snapshot = PostCodec.decodeFromString(PostCodec.encodeToString(S))
+	snapshot.coin = 7777
+	snapshot.resolvedAt = snapshot.resolvedAt + 1000
+	local rescued = PostCodec.encodeToString(snapshot)
+	ok("the blob to be rescued encoded", rescued ~= nil)
+
+	env:removePlayer(userId)
+	settle(app, env, 60)
+	ok("the player is no longer resident", app.posts:get(userId) == nil)
+
+	-- Simulate the abandoned write.
+	local pushed = app.memory:pushRecovery(userId, rescued)
+	ok("the abandoned blob is on the recovery queue", pushed == true)
+
+	local applied = app.posts:sweepRecovery(8)
+	eq("the sweep restored exactly one post", applied, 1)
+	eq("...and counted it", app.posts.stats.recoveriesApplied, 1)
+
+	-- The rescued bytes are really in the store now.
+	local okRead, stored = app.data:loadPost(userId)
+	ok("the restored post reads back", okRead and stored ~= nil)
+	local back = PostCodec.decodeFromString(stored)
+	ok("...and decodes", back ~= nil)
+	eq("...with the rescued balance", back.coin, 7777)
+
+	-- A SECOND recovery of the same (now stale) blob must not go backwards.
+	-- Advance the stored post past the queued one, the way the server that
+	-- stole the lock would have.
+	local newer = PostCodec.decodeFromString(stored)
+	newer.coin = 9999
+	newer.resolvedAt = newer.resolvedAt + 5000
+	app.data:savePost(userId, PostCodec.encodeToString(newer), nil)
+
+	app.memory:pushRecovery(userId, rescued)
+	local applied2 = app.posts:sweepRecovery(8)
+	eq("a superseded blob is not restored", applied2, 0)
+	ge("...it is counted as dropped", app.posts.stats.recoveriesDropped, 1)
+
+	local okRead2, stored2 = app.data:loadPost(userId)
+	ok("the newer post survived", okRead2)
+	local kept = PostCodec.decodeFromString(stored2)
+	eq("...with the newer balance intact", kept.coin, 9999)
+
+	-- A resident player's entry is deferred, never restored underneath a
+	-- live session, and -- because one ReadAsync id covers the whole batch --
+	-- the batch is left unacked rather than partially deleted.
+	env:addPlayer(userId)
+	settle(app, env, 200)
+	app.memory:pushRecovery(userId, rescued)
+	local applied3 = app.posts:sweepRecovery(8)
+	eq("a resident player's blob is not restored", applied3, 0)
+	ge("...it is deferred", app.posts.stats.recoveriesDeferred, 1)
+
+	-- Still queued: evicting the player and sweeping again resolves it.
+	env:removePlayer(userId)
+	settle(app, env, 60)
+	local okPop, items = app.memory:popRecovery(8)
+	ok("the deferred entry is still on the queue", okPop and items ~= nil and #items >= 1)
+end

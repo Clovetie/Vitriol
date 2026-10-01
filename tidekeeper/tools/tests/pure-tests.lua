@@ -94,6 +94,7 @@ local Resolve = TidekeeperRequire("Resolve")
 
 local GameConfig = TidekeeperRequire("GameConfig")
 local EconomyConfig = TidekeeperRequire("EconomyConfig")
+local NetContract = TidekeeperRequire("NetContract")
 local DrifterConfig = TidekeeperRequire("DrifterConfig")
 local OrdersConfig = TidekeeperRequire("OrdersConfig")
 local FindsConfig = TidekeeperRequire("FindsConfig")
@@ -2535,4 +2536,35 @@ if #TESTS.failures > 0 then
 	for i = 1, #TESTS.failures do
 		print("  " .. TESTS.failures[i])
 	end
+end
+
+section("net contract")
+do
+
+-- doc 13 section 2: no remote accepts a string field anywhere in its payload.
+-- Strings are the arbitrary-content surface -- the thing that turns a trade
+-- remote into an unmoderated chat channel -- so the contract is ids and
+-- numbers only, and every piece of player-visible prose is looked up client
+-- side from a table the server also knows.
+--
+-- `NetContract.hasNoStringFields` walks SPECS and proves it. Three separate
+-- comments in the codebase claimed this was "asserted by the smoke test".
+-- It was not: the function was defined, correct, and called by nothing at
+-- all until the iteration-8 orphan scan found it. The proof of the main
+-- security invariant had never once run.
+local clean, offender = NetContract.hasNoStringFields()
+ok(clean, "no remote spec accepts a string field (offender: " .. tostring(offender) .. ")")
+
+-- The assertion is only worth anything if it can actually fail, so prove the
+-- walker detects a string rather than always returning true.
+local saved = NetContract.SPECS
+NetContract.SPECS = { RF_Canary = { fields = { note = { kind = "string" } } } }
+local poisoned, who = NetContract.hasNoStringFields()
+NetContract.SPECS = saved
+eq(poisoned, false, "the walker rejects a spec that does accept a string")
+eq(who, "RF_Canary", "...and names the offending remote")
+
+-- And it still passes after restoring, i.e. the test left nothing behind.
+ok(NetContract.hasNoStringFields(), "SPECS restored intact")
+
 end

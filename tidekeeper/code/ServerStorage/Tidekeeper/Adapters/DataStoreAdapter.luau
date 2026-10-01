@@ -87,6 +87,8 @@ local function newStats()
 		deferrals = 0,
 		failures = 0,
 		abandonedWrites = 0,
+		recoveriesApplied = 0,
+		recoveriesSuperseded = 0,
 		unlockedSessions = 0,
 		bytesWritten = 0,
 		bytesRead = 0,
@@ -371,6 +373,60 @@ function DataStoreAdapter:savePost(userId, blob, expectToken)
 end
 
 -- --------------------------------------------------------- drifter pool
+
+-- Write back a blob that an earlier save abandoned (see `savePost`: a stale
+-- lock or an exhausted retry budget pushes the payload onto the recovery
+-- queue). This is the ONLY writer that can run while another server owns the
+-- player, so it is the only one that has to defend against going backwards:
+-- by the time we retry, the server that stole the lock may already have
+-- written something newer, and blindly restoring would *cause* the data loss
+-- this queue exists to prevent.
+--
+-- `isNewer(oldBlob) -> boolean` is supplied by the caller, which owns the
+-- codec; the adapter stays blob-level. Returning nil from an UpdateAsync
+-- transform aborts the write without consuming a conflict, which is exactly
+-- the semantics wanted when the stored value already wins.
+--
+-- Returns (ok, applied, reason). `ok=true, applied=false` means the queue
+-- entry was resolved and should be acked -- the blob is simply obsolete.
+function DataStoreAdapter:restorePost(userId, blob, isNewer)
+	if type(blob) ~= "string" or #blob == 0 then
+		return false, false, "empty blob"
+	end
+	if #blob > GameConfig.MAX_POST_BLOB_BYTES * 2 then
+		return false, false, "blob too large"
+	end
+	local store, err = self:store(STORE_POST)
+	if store == nil then
+		return false, false, err
+	end
+	if not self:awaitBudget(Enum.DataStoreRequestType.UpdateAsync) then
+		return false, false, "no write budget"
+	end
+	local key = self:postKey(userId)
+	local applied = false
+	local ok, message = self:attempt("write", function()
+		return store:UpdateAsync(key, function(old)
+			if old ~= nil and isNewer ~= nil and not isNewer(old) then
+				applied = false
+				return nil
+			end
+			applied = true
+			return blob
+		end)
+	end)
+	if not ok then
+		return false, false, message
+	end
+	if applied then
+		self.stats.recoveriesApplied = self.stats.recoveriesApplied + 1
+		self.stats.bytesWritten = self.stats.bytesWritten + #blob
+		self:log("restored an abandoned save for " .. tostring(userId))
+		return true, true, "restored"
+	end
+	self.stats.recoveriesSuperseded = self.stats.recoveriesSuperseded + 1
+	return true, false, "superseded"
+end
 
 function DataStoreAdapter:poolKey(current, epoch, shard)
 	return "c" .. tostring(current) .. ":e" .. tostring(epoch) .. ":s" .. tostring(shard)

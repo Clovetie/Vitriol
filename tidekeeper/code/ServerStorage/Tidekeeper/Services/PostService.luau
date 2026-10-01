@@ -60,6 +60,9 @@ local function newStats()
 		resolveRuns = 0,
 		resolveChunks = 0,
 		invariantFailures = 0,
+		recoveriesApplied = 0,
+		recoveriesDropped = 0,
+		recoveriesDeferred = 0,
 	}
 end
 
@@ -289,6 +292,82 @@ function PostService:save(userId, force)
 	return true, "saved"
 end
 
+-- Drain the failed-save recovery queue. `savePost` pushes a blob here when a
+-- write is abandoned, and until now nothing ever read it back -- the safety
+-- net caught the payload and then dropped it on the floor.
+--
+-- Three outcomes per entry, and the distinction is the whole point:
+--   * resident on THIS server -> leave it queued (deferred). We hold the
+--     lock and will write something newer ourselves in a moment; restoring
+--     underneath a live session would fight our own save.
+--   * the stored post is newer -> ack and drop. The lock moved on and the
+--     other server already persisted past this blob; the entry is obsolete.
+--   * otherwise -> restore it, then ack.
+--
+-- Undecodable blobs are acked too: a blob we cannot parse can never be
+-- restored, and leaving it queued would block the queue forever.
+function PostService:sweepRecovery(max)
+	if self.memory == nil or self.data == nil then
+		return 0
+	end
+	local ok, items, id = self.memory:popRecovery(max or 4)
+	if not ok or items == nil or #items == 0 then
+		return 0
+	end
+	local applied = 0
+	local unresolved = 0
+	for i = 1, #items do
+		local item = items[i]
+		local value = item
+		-- MemoryStore hands back either the raw value or a wrapper with it.
+		if type(value) == "table" and value.blob == nil and value.value ~= nil then
+			value = value.value
+		end
+		local userId = type(value) == "table" and value.userId or nil
+		local blob = type(value) == "table" and value.blob or nil
+		if userId == nil or type(blob) ~= "string" then
+			self.stats.recoveriesDropped = self.stats.recoveriesDropped + 1
+		elseif self.resident[userId] ~= nil then
+			self.stats.recoveriesDeferred = self.stats.recoveriesDeferred + 1
+			unresolved = unresolved + 1
+		else
+			local candidate = PostCodec.decodeFromString(blob)
+			if candidate == nil then
+				self.stats.recoveriesDropped = self.stats.recoveriesDropped + 1
+			else
+				local mine = candidate.resolvedAt or 0
+				local wrote, didApply = self.data:restorePost(userId, blob, function(oldBlob)
+					local stored = PostCodec.decodeFromString(oldBlob)
+					if stored == nil then
+						-- Unreadable stored value: our decodable blob wins.
+						return true
+					end
+					return mine > (stored.resolvedAt or 0)
+				end)
+				if wrote then
+					if didApply then
+						self.stats.recoveriesApplied = self.stats.recoveriesApplied + 1
+						applied = applied + 1
+					else
+						self.stats.recoveriesDropped = self.stats.recoveriesDropped + 1
+					end
+				else
+					unresolved = unresolved + 1
+				end
+			end
+		end
+	end
+	-- ReadAsync hands back ONE id covering the whole batch, so the ack is
+	-- all-or-nothing: acking now would also delete the entries we chose to
+	-- defer or failed to write. If anything is unresolved we ack nothing and
+	-- let the 30s invisibility window expire, which re-presents the batch to
+	-- the next sweep. Slower, but it cannot lose a blob.
+	if unresolved == 0 and id ~= nil then
+		self.memory:ackRecovery(id)
+	end
+	return applied
+end
+
 -- Registered on the `slow` slot. Saves at most one post per call: a burst of
 -- twenty simultaneous saves is exactly the shape that trips the per-server
 -- queue (30 requests deep, then error codes 301-306).
@@ -313,6 +392,11 @@ function PostService:tick()
 	end
 	if oldest ~= nil then
 		self:save(oldest, false)
+	else
+		-- Only when this server owes no save: the recovery queue is empty in
+		-- the healthy case, so this costs one MemoryStore read on an idle
+		-- tick and nothing at all when the queue is dry.
+		self:sweepRecovery(4)
 	end
 end
 
