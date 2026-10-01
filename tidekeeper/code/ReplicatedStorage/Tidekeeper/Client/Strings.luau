@@ -747,7 +747,6 @@ Strings.UI = {
 	DISPATCH_SENT = "Gone out on the ebb.",
 	DISPATCH_ALREADY = "Your drifter is already out. One to a tide.",
 	DISPATCH_CARGO = "Cargo",
-	DISPATCH_PHRASE = "Say",
 
 	CHART_TITLE = "The chart",
 	CHART_CURRENT = "Current {1}",
@@ -785,23 +784,5 @@ Strings.UI = {
 	LETTER_CHOSEN = "You wrote: {1}",
 }
 
--- Authored phrases a player may attach to a dispatched Drifter. THE COMPLETE
--- SET -- a player picks an index from this list and the index is what crosses
--- the wire (doc 13 section 2). There is no free text anywhere in this game, so
--- there is nothing to filter and no moderation hot path.
-Strings.PHRASE = {
-	[1] = "Fair winds.",
-	[2] = "Looking for glass, if you have it.",
-	[3] = "Keep the change.",
-	[4] = "My shelf is thin this tide.",
-	[5] = "Thank you for the last one.",
-	[6] = "I'll be back at low water.",
-	[7] = "Nothing needed. Just passing.",
-	[8] = "Your prices are kind.",
-	[9] = "Save me something bright.",
-	[10] = "The water was rough out there.",
-	[11] = "Good hunting.",
-	[12] = "I owe you one.",
-}
 
 return Strings

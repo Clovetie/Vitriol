@@ -25,11 +25,6 @@ local Orders = require(Tidekeeper.Domain.Orders)
 
 local PostHandler = {}
 
-local OK = 0
-local E_REJECTED = 1
-local E_NO_POST = 2
-local E_ILLEGAL = 3
-local E_COOLDOWN = 4
 
 -- A comb node yields once per tide epoch. Not a timer in seconds: the tide
 -- is the clock for everything in this game, and a node that refreshes on a
@@ -74,11 +69,11 @@ local function begin(app, player, name, payload)
 	local ok, why = NetContract.accept(app.guard, userId, name, payload, app.clock())
 	if not ok then
 		app.logger("PostHandler", "rejected " .. name .. " from " .. tostring(userId) .. ": " .. tostring(why))
-		return nil, { status = E_REJECTED }
+		return nil, { status = NetContract.E_REJECTED }
 	end
 	local S = app.posts:get(userId)
 	if S == nil then
-		return nil, { status = E_NO_POST }
+		return nil, { status = NetContract.E_NO_POST }
 	end
 	return S, nil
 end
@@ -95,24 +90,24 @@ function PostHandler.arrange(app, player, payload)
 	if payload.findId == 0 then
 		local cleared = Post.clearShelf(S, payload.slot)
 		if not cleared then
-			return { status = E_ILLEGAL }
+			return { status = NetContract.E_ILLEGAL }
 		end
 		app.posts:markDirty(userId)
-		return { status = OK, shelfCount = Post.shelfCount(S) }
+		return { status = NetContract.OK, shelfCount = Post.shelfCount(S) }
 	end
 
 	-- You may only shelve what you actually hold. This is the check that the
 	-- schema cannot express and that the client must never be trusted with.
 	if Post.stockOf(S, payload.findId) <= 0 then
-		return { status = E_ILLEGAL }
+		return { status = NetContract.E_ILLEGAL }
 	end
 	local ok, why = Post.setShelf(S, payload.slot, payload.findId, payload.price)
 	if not ok then
 		app.logger("PostHandler", "illegal arrange from " .. tostring(userId) .. ": " .. tostring(why))
-		return { status = E_ILLEGAL }
+		return { status = NetContract.E_ILLEGAL }
 	end
 	app.posts:markDirty(userId)
-	return { status = OK, shelfCount = Post.shelfCount(S) }
+	return { status = NetContract.OK, shelfCount = Post.shelfCount(S) }
 end
 
 -- ------------------------------------------------------------- upgrade
@@ -133,10 +128,10 @@ function PostHandler.upgrade(app, player, payload)
 	local ok, why = Post.promote(S)
 	if not ok then
 		app.logger("PostHandler", "refused upgrade for " .. tostring(userId) .. ": " .. tostring(why))
-		return { status = E_ILLEGAL }
+		return { status = NetContract.E_ILLEGAL }
 	end
 	app.posts:markDirty(userId)
-	return { status = OK, tier = S.tier, coin = S.coin, nextCost = Post.promotionCost(S) }
+	return { status = NetContract.OK, tier = S.tier, coin = S.coin, nextCost = Post.promotionCost(S) }
 end
 
 -- ------------------------------------------------------------ setOrders
@@ -155,18 +150,18 @@ function PostHandler.setOrders(app, player, payload)
 	local program, why = Orders.decode(payload.bytes, 1, #payload.bytes)
 	if program == nil then
 		app.logger("PostHandler", "undecodable orders from " .. tostring(userId) .. ": " .. tostring(why))
-		return { status = E_ILLEGAL }
+		return { status = NetContract.E_ILLEGAL }
 	end
 	-- Tier caps the rule count, so validation needs the SERVER's idea of the
 	-- player's tier and never the client's.
 	local ok, badWhy = Orders.validate(program, S.tier)
 	if not ok then
 		app.logger("PostHandler", "invalid orders from " .. tostring(userId) .. ": " .. tostring(badWhy))
-		return { status = E_ILLEGAL }
+		return { status = NetContract.E_ILLEGAL }
 	end
 	S.orders = program
 	app.posts:markDirty(userId)
-	return { status = OK, rules = #program.rules, bytes = Orders.byteLength(program) }
+	return { status = NetContract.OK, rules = #program.rules, bytes = Orders.byteLength(program) }
 end
 
 -- ---------------------------------------------------------------- comb
@@ -191,7 +186,7 @@ function PostHandler.comb(app, player, payload)
 	-- rewarded sitting still.
 	local lastEpoch = S.comb[payload.nodeId]
 	if lastEpoch ~= nil and lastEpoch > 0 and epoch - lastEpoch < EconomyConfig.COMB_RESPAWN_EPOCHS then
-		return { status = E_COOLDOWN, epoch = epoch, readyAt = lastEpoch + EconomyConfig.COMB_RESPAWN_EPOCHS }
+		return { status = NetContract.E_COOLDOWN, epoch = epoch, readyAt = lastEpoch + EconomyConfig.COMB_RESPAWN_EPOCHS }
 	end
 
 	-- The tide gates the zone. Zone 1 is the tide line itself: it only
@@ -200,7 +195,7 @@ function PostHandler.comb(app, player, payload)
 	-- and the game tells you when they are rather than making you guess.
 	local state = Tide.stateForEpoch(epoch)
 	if payload.zoneId == 1 and state ~= "LOW" then
-		return { status = E_ILLEGAL }
+		return { status = NetContract.E_ILLEGAL }
 	end
 
 	local rng = RNG.new(Hash.mix(S.salt, key, epoch))
@@ -210,18 +205,18 @@ function PostHandler.comb(app, player, payload)
 	local qty = 1 + rng:range(0, 2)
 	-- `addStock` returns the quantity ACTUALLY added, which is 0 when the
 	-- store is full or the stack is capped. Zero is not an error the player
-	-- caused, so it reports as OK with qty 0 and the client says the shelf
+	-- caused, so it reports as NetContract.OK with qty 0 and the client says the shelf
 	-- is full.
 	local added = Post.addStock(S, findId, qty)
 	S.comb[payload.nodeId] = epoch
 	app.posts:markDirty(userId)
-	return { status = OK, findId = findId, qty = added, epoch = epoch }
+	return { status = NetContract.OK, findId = findId, qty = added, epoch = epoch }
 end
 
-PostHandler.OK = OK
-PostHandler.E_REJECTED = E_REJECTED
-PostHandler.E_NO_POST = E_NO_POST
-PostHandler.E_ILLEGAL = E_ILLEGAL
-PostHandler.E_COOLDOWN = E_COOLDOWN
+PostHandler.OK = NetContract.OK
+PostHandler.E_REJECTED = NetContract.E_REJECTED
+PostHandler.E_NO_POST = NetContract.E_NO_POST
+PostHandler.E_ILLEGAL = NetContract.E_ILLEGAL
+PostHandler.E_COOLDOWN = NetContract.E_COOLDOWN
 
 return PostHandler

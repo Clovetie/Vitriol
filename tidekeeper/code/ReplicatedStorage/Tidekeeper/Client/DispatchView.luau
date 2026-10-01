@@ -7,7 +7,7 @@
 -- is the one screen where the safety design is load-bearing rather than
 -- theoretical (doc 13 section 2):
 --
---   * the player picks a PHRASE INDEX from `Strings.PHRASE`, never types;
+--   * the player picks a LETTER ID from `LetterView`, never types;
 --   * the recipient is one of three ANONYMOUS slots -- no name, no user id, no
 --     way to target a specific person, and therefore no way to use the
 --     mechanic to harass one;
@@ -18,7 +18,7 @@
 -- text to filter, which is why the game has no moderation hot path at all.
 
 local Format = require(script.Parent.Format)
-local Strings = require(script.Parent.Strings)
+local LetterView = require(script.Parent.LetterView)
 local LettersConfig = require(script.Parent.Parent.Config.LettersConfig)
 
 local DispatchView = {}
@@ -55,7 +55,15 @@ function DispatchView.build(slots, held, alreadyOut)
 		title = Format.label("DISPATCH_TITLE"),
 		options = options,
 		cargo = cargo,
-		phrases = Strings.PHRASE,
+		cargoTitle = Format.label("DISPATCH_CARGO"),
+		-- The letter picker, by id. `Strings.PHRASE` used to be handed over
+		-- here -- 12 canned lines from the design that preceded letters.
+		-- Iteration 7 gave drifters 120 real letters and `letterId`; the
+		-- phrase list stayed wired to the renderer for three iterations
+		-- afterwards, offering the player a choice the wire could no longer
+		-- carry. The dead-content scan found its label and the table went
+		-- with it.
+		letterCategories = LetterView.categories(),
 		blocked = alreadyOut == true,
 		blockedText = alreadyOut and Format.label("DISPATCH_ALREADY") or nil,
 		sentText = Format.label("DISPATCH_SENT"),

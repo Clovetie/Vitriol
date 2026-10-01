@@ -54,6 +54,10 @@ function PostView.build(snapshot)
 		stockText = Format.label("POST_STOCK", { snapshot.stock or 0 }),
 		coinText = Format.label("POST_COIN", { snapshot.coin or 0 }),
 		renownText = Format.label("POST_RENOWN", { snapshot.renown or 0 }),
+		-- The label on the price field of the arrange control. Arranging is
+		-- the one place a player types a number, and an unlabelled number
+		-- box is a guess.
+		priceLabel = Format.label("POST_SET_PRICE"),
 	}
 end
 

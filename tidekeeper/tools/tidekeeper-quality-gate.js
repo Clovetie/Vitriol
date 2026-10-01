@@ -39,7 +39,7 @@ const MAX_CAPTURE = 200000;
  * constant on purpose: a gate that infers how far along the project is will
  * eventually infer wrongly and let a missing harness through.
  */
-const CURRENT_ITERATION = 9;
+const CURRENT_ITERATION = 10;
 
 function die(message) {
 	console.error(`tidekeeper-quality-gate: ${message}`);
@@ -201,6 +201,9 @@ run("member-scan", "tidekeeper-member-scan.js", [], { requiredFrom: 6, needsSour
 run("dead-write-scan", "tidekeeper-dead-write-scan.js", [], { requiredFrom: 7, needsSource: true });
 run("orphan-scan", "tidekeeper-orphan-scan.js", [], { requiredFrom: 8, needsSource: true });
 run("remote-scan", "tidekeeper-remote-scan.js", [], { requiredFrom: 9, needsSource: true });
+// Level six: content a player can never see. Found 18 of 51 UI labels dead on
+// its first run, including the entire navigation bar. Required from 10.
+run("dead-content-scan", "tidekeeper-dead-content-scan.js", [], { requiredFrom: 10, needsSource: true });
 
 run("determinism-scan", "tidekeeper-determinism-scan.js", ["--src", rel(args.src)], { needsSource: true });
 

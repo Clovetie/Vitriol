@@ -105,7 +105,6 @@ const ALLOWED_ORPHANS = new Map([
 	["PolicyAdapter.mayTradePaidItems", "no paid content exists; must gate any future paid trade"],
 
 	// --- genuinely unfinished, scheduled -------------------------------
-	["DataStoreAdapter.loadLedgerPage", "Ledger history read path not built; see OD22 and doc 07"],
 ]);
 
 function walk(dir, ext, out) {

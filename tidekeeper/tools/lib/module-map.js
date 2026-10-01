@@ -69,6 +69,8 @@ const CLIENT = {
 	TideView: `${CODE}/Client/TideView.luau`,
 	PostView: `${CODE}/Client/PostView.luau`,
 	OrdersView: `${CODE}/Client/OrdersView.luau`,
+	ChartView: `${CODE}/Client/ChartView.luau`,
+	AlmanacView: `${CODE}/Client/AlmanacView.luau`,
 	LetterView: `${CODE}/Client/LetterView.luau`,
 	DispatchView: `${CODE}/Client/DispatchView.luau`,
 	ClientBootstrap: `${CODE}/Client/ClientBootstrap.luau`,
@@ -103,6 +105,7 @@ const SERVER = {
 	// L4 Remote handlers + diagnostics (loaded so that a syntax or layering
 	// error in them fails this suite rather than waiting for Studio)
 	SessionHandler: `${SCRIPTS_CODE}/RemoteHandlers/SessionHandler.luau`,
+	HistoryHandler: `${SCRIPTS_CODE}/RemoteHandlers/HistoryHandler.luau`,
 	PostHandler: `${SCRIPTS_CODE}/RemoteHandlers/PostHandler.luau`,
 	DispatchHandler: `${SCRIPTS_CODE}/RemoteHandlers/DispatchHandler.luau`,
 	DebugHandler: `${SCRIPTS_CODE}/RemoteHandlers/DebugHandler.luau`,

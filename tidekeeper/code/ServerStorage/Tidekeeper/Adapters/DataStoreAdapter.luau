@@ -615,6 +615,110 @@ function DataStoreAdapter:ledgerKey(userId, page)
 	return "l:" .. tostring(userId) .. ":" .. tostring(page)
 end
 
+-- ------------------------------------------------- the ledger page index
+--
+-- OD22. Archived ledger pages were written and never read back, and there
+-- was no way to read them back even in principle: a page key was
+-- "l:<userId>:<epoch>" and nothing recorded WHICH epochs had pages. A reader
+-- would have had to probe ~700 keys to cover the retention window.
+--
+-- Worse, the epoch was not a safe key. `saveLedgerPage` overwrites, and two
+-- servers flushing a page for the same player inside one 6.2-hour epoch --
+-- an ordinary server hop -- would silently destroy one of the two pages.
+--
+-- So pages are now numbered from an atomic counter kept in one index key per
+-- player. One UpdateAsync allocates the next number and records it, which is
+-- also what makes the allocation safe across servers.
+DataStoreAdapter.LEDGER_PAGES_KEPT = 32
+
+function DataStoreAdapter:ledgerIndexKey(userId)
+	return "li:" .. tostring(userId)
+end
+
+-- Allocate the next page number for this player and record it in the index.
+-- Returns (true, pageNumber, droppedPages) where `droppedPages` are page
+-- numbers that fell outside the retention window and whose keys the caller
+-- should delete. Returns (false, reason) on failure -- and a failed
+-- allocation must NOT be followed by a page write, or the page would be
+-- orphaned under a number nothing indexes.
+function DataStoreAdapter:allocLedgerPage(userId)
+	local store, err = self:store(STORE_LEDGER)
+	if store == nil then
+		return false, err
+	end
+	if not self:awaitBudget(Enum.DataStoreRequestType.UpdateAsync) then
+		return false, "no write budget"
+	end
+	local key = self:ledgerIndexKey(userId)
+	local allocated = nil
+	local dropped = {}
+	local ok, message = self:attempt("write", function()
+		-- Reset on retry: UpdateAsync may run the transform more than once.
+		allocated = nil
+		for i = #dropped, 1, -1 do
+			dropped[i] = nil
+		end
+		return store:UpdateAsync(key, function(old)
+			local idx = old or { next = 1, pages = {} }
+			local n = idx.next or 1
+			allocated = n
+			idx.next = n + 1
+			local pages = idx.pages or {}
+			pages[#pages + 1] = n
+			-- Retention. The oldest page numbers leave the index and their
+			-- keys are handed back to be deleted -- the ledger reaper that
+			-- doc 05 section 9 said was never written.
+			while #pages > DataStoreAdapter.LEDGER_PAGES_KEPT do
+				dropped[#dropped + 1] = table.remove(pages, 1)
+			end
+			idx.pages = pages
+			return idx
+		end)
+	end)
+	if not ok then
+		return false, message
+	end
+	return true, allocated, dropped
+end
+
+-- The page numbers this player has, oldest first. Returns (true, pages).
+-- A player who has never overflowed has no index key at all, which is not an
+-- error: it is an empty history.
+function DataStoreAdapter:loadLedgerIndex(userId)
+	local store, err = self:store(STORE_LEDGER)
+	if store == nil then
+		return false, err
+	end
+	if not self:awaitBudget(Enum.DataStoreRequestType.GetAsync) then
+		return false, "no read budget"
+	end
+	local key = self:ledgerIndexKey(userId)
+	local ok, value = self:attempt("read", function()
+		return store:GetAsync(key)
+	end)
+	if not ok then
+		return false, value
+	end
+	if value == nil then
+		return true, {}
+	end
+	return true, value.pages or {}
+end
+
+function DataStoreAdapter:removeLedgerPage(userId, page)
+	local store, err = self:store(STORE_LEDGER)
+	if store == nil then
+		return false, err
+	end
+	if not self:awaitBudget(Enum.DataStoreRequestType.RemoveAsync) then
+		return false, "no remove budget"
+	end
+	local key = self:ledgerKey(userId, page)
+	return self:attempt("remove", function()
+		return store:RemoveAsync(key)
+	end)
+end
+
 function DataStoreAdapter:saveLedgerPage(userId, page, entries)
 	local store, err = self:store(STORE_LEDGER)
 	if store == nil then

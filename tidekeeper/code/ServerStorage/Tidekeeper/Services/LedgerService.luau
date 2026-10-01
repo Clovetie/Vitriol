@@ -42,7 +42,15 @@ LedgerService.__index = LedgerService
 local PAGE_SIZE = 200
 
 local function newStats()
-	return { appended = 0, pagesWritten = 0, pagesRead = 0, pageWriteFailures = 0, dropped = 0 }
+	return {
+		appended = 0,
+		pagesWritten = 0,
+		pagesRead = 0,
+		pagesReaped = 0,
+		pageWriteFailures = 0,
+		historyReads = 0,
+		dropped = 0,
+	}
 end
 
 function LedgerService.new(options)
@@ -188,9 +196,28 @@ function LedgerService:flushPending()
 			-- so a page key can never collide with a different batch, and
 			-- the key is derivable from an entry's own epoch when reading
 			-- history back.
-			local pageIndex = Tide.epoch(self.clock())
+			-- OD22. The page number comes from an atomic counter in the
+			-- player's index key, NOT from the epoch. The epoch looked
+			-- safe -- "one page per tide epoch per player" -- but
+			-- saveLedgerPage overwrites, so two servers flushing inside
+			-- one 6.2-hour epoch (an ordinary server hop) would destroy
+			-- one of the two pages. Allocating first also means a page is
+			-- only ever written under a number the index knows about.
+			local allocOk, pageIndex, droppedPages = self.data:allocLedgerPage(userId)
+			if not allocOk then
+				self.stats.pageWriteFailures = self.stats.pageWriteFailures + 1
+				return
+			end
 			local ok = self.data:saveLedgerPage(userId, pageIndex, page)
 			if ok then
+				-- Pages that fell out of the retention window. Deleting
+				-- them here is the ledger reaper, and it costs nothing
+				-- extra: we already know exactly which keys they are.
+				for i = 1, #(droppedPages or {}) do
+					if self.data:removeLedgerPage(userId, droppedPages[i]) then
+						self.stats.pagesReaped = self.stats.pagesReaped + 1
+					end
+				end
 				self.stats.pagesWritten = self.stats.pagesWritten + 1
 				local kept = {}
 				for j = PAGE_SIZE + 1, #overflow do
@@ -203,6 +230,56 @@ function LedgerService:flushPending()
 			return
 		end
 	end
+end
+
+-- ---------------------------------------------------------- history (OD22)
+--
+-- The Ledger carries this game's whole emotional argument -- "absence is
+-- content", doc 00 -- and until iteration 10 it quietly forgot. Entries
+-- evicted past MAX_LEDGER_RESIDENT (200) were archived to pages and
+-- `loadLedgerPage` was called by nothing, so every entry older than the most
+-- recent 200 was unreadable forever. A game whose premise is "look at what
+-- happened while you were away" must not be the thing that loses it.
+--
+-- PAGING. `cursor` is the index into the player's page list counted from the
+-- NEWEST page: 0 is "the most recent archived page", 1 the one before it,
+-- and so on. Counting from the newest is what makes the cursor stable while
+-- new pages are being written at the other end -- a cursor counted from the
+-- oldest would slide under the reader every time a page was reaped.
+--
+-- Returns (entries, nextCursor, total). `nextCursor` is nil at the end of
+-- history, which is how the client knows to stop asking and say so.
+LedgerService.HISTORY_PAGE_MAX = 200
+
+function LedgerService:history(userId, cursor)
+	local c = math.floor(cursor or 0)
+	if c < 0 then
+		c = 0
+	end
+	local ok, pages = self.data:loadLedgerIndex(userId)
+	if not ok or pages == nil or #pages == 0 then
+		return {}, nil, 0
+	end
+	local total = #pages
+	-- Newest first.
+	local which = total - c
+	if which < 1 then
+		return {}, nil, total
+	end
+	local readOk, entries = self.data:loadLedgerPage(userId, pages[which])
+	self.stats.historyReads = self.stats.historyReads + 1
+	if not readOk or entries == nil then
+		-- A page in the index that will not load is a hole, not the end of
+		-- history: report it as empty but keep the cursor moving, so one
+		-- unreadable page cannot hide every older page behind it.
+		return {}, (which > 1) and (c + 1) or nil, total
+	end
+	self.stats.pagesRead = self.stats.pagesRead + 1
+	local out = {}
+	for i = 1, math.min(#entries, LedgerService.HISTORY_PAGE_MAX) do
+		out[i] = entries[i]
+	end
+	return out, (which > 1) and (c + 1) or nil, total
 end
 
 function LedgerService:forget(userId)

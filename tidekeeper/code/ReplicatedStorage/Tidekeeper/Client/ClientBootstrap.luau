@@ -28,6 +28,8 @@ local PostView = require(script.Parent.PostView)
 local OrdersView = require(script.Parent.OrdersView)
 local DispatchView = require(script.Parent.DispatchView)
 local LetterView = require(script.Parent.LetterView)
+local ChartView = require(script.Parent.ChartView)
+local AlmanacView = require(script.Parent.AlmanacView)
 local NetContract = require(script.Parent.Parent.Shared.NetContract)
 
 local ClientBootstrap = {}
@@ -64,6 +66,13 @@ function ClientBootstrap.start(opts)
 	self.renderer = opts.renderer
 
 	self.screen = ClientBootstrap.SCREEN_WORLD
+	-- One action at a time; see :act.
+	self.inFlight = false
+	-- Archive pager state (OD22).
+	self.historyCursor = nil
+	self.historyMore = false
+	self.historyPages = 0
+	self.almanacPage = 1
 	self.seq = 0
 	self.snapshot = nil
 	self.ledger = nil
@@ -75,6 +84,8 @@ function ClientBootstrap.start(opts)
 		snapshots = 0,
 		ledgerBatches = 0,
 		renders = 0,
+		busy = 0,
+		historyPages = 0,
 	}
 
 	self.views = {
@@ -84,6 +95,8 @@ function ClientBootstrap.start(opts)
 		orders = OrdersView,
 		dispatch = DispatchView,
 		letter = LetterView,
+		chart = ChartView,
+		almanac = AlmanacView,
 		format = Format,
 	}
 
@@ -123,7 +136,7 @@ function ClientBootstrap:requestSession()
 		return nil, Format.label("ERR_OFFLINE")
 	end
 	if reply.status ~= 0 then
-		return nil, self:statusText(reply.status, NetContract.RF_SESSION)
+		return nil, self:statusText(reply.status)
 	end
 	self:applySnapshot(reply)
 	return reply
@@ -157,12 +170,23 @@ ClientBootstrap.AUTHORITATIVE_FIELDS = { "tier", "coin", "renown", "nextCost", "
 -- is either zero or a sentence the player can read. Writing it five times
 -- would be five chances to forget the status check.
 function ClientBootstrap:act(remoteName, payload)
+	-- ONE ACTION AT A TIME. `invoke` yields on a RemoteFunction, so a second
+	-- tap while the first is still in flight would spend a second sequence
+	-- number and race the first reply into the snapshot. The server's rate
+	-- limiter would eventually refuse it, but it would refuse it as
+	-- "rejected" -- a confusing word for "you tapped twice".
+	if self.inFlight then
+		self.stats.busy = self.stats.busy + 1
+		return nil, Format.label("ERR_BUSY")
+	end
+	self.inFlight = true
 	local reply = self:invoke(remoteName, payload)
+	self.inFlight = false
 	if reply == nil then
 		return nil, Format.label("ERR_OFFLINE")
 	end
 	if reply.status ~= 0 then
-		return nil, self:statusText(reply.status, remoteName)
+		return nil, self:statusText(reply.status)
 	end
 	-- Fold whatever authoritative values came back into the snapshot, so the
 	-- screen can never drift from the server's idea of the post. Only fields
@@ -208,7 +232,14 @@ end
 -- knows the post, the post knows its tier, and the cost is server-side
 -- config. A payload naming a target tier or a price would be worth forging.
 function ClientBootstrap:upgrade()
-	return self:act(NetContract.RF_UPGRADE, { seq = self:nextSeq() })
+	local reply, why = self:act(NetContract.RF_UPGRADE, { seq = self:nextSeq() })
+	if reply == nil then
+		return nil, why
+	end
+	-- The tier changes now; the BUILDING arrives on the next low water. Say
+	-- so, or the player presses the button, sees the coin leave and nothing
+	-- else happen, and files it as a bug.
+	return reply, nil, Format.label("UPGRADE_DONE")
 end
 
 -- What the upgrade button should say, and whether it can be pressed. Read
@@ -233,38 +264,68 @@ function ClientBootstrap:upgradeOffer()
 		affordable = coin >= cost,
 		text = Format.label("UPGRADE_OFFER", { tier + 1, cost }),
 		shortfall = (coin < cost) and (cost - coin) or 0,
+		-- Say how far short, not just "no". A number is a plan; a disabled
+		-- button is a wall.
+		shortText = (coin < cost) and Format.label("UPGRADE_SHORT", { cost - coin }) or nil,
 	}
 end
 
--- Turn a handler status code into a sentence.
+-- Read one page of archived Ledger entries (OD22). `cursor` counts back from
+-- the newest archived page: 0 is the most recent, and nil/absent means
+-- "start at the beginning of the archive".
 --
--- THIS USED TO LIE. Only codes 1 and 2 were mapped and everything else fell
--- through to ERR_OFFLINE -- "Can't reach the post right now". So a comb
--- refused because the tide was wrong (code 3), or a node still regrowing
--- (code 4), told the player their connection had dropped. Nothing noticed,
--- because no client code ever called a remote that could return a 3 or a 4.
---
--- Code 4 is the awkward one and is worth stating plainly: PostHandler calls
--- it E_COOLDOWN and DispatchHandler calls it E_ALREADY_OUT. The same number
--- means two different things depending on which remote answered, so the
--- remote name has to come in with it. That is a wart in the contract rather
--- than in this function -- see OD23 -- but the client must not mistranslate
--- it in the meantime.
-function ClientBootstrap:statusText(status, remoteName)
-	if status == 1 then
-		return Format.label("ERR_REJECTED")
-	elseif status == 2 then
-		return Format.label("ERR_NO_POST")
-	elseif status == 3 then
-		return Format.label("ERR_ILLEGAL")
-	elseif status == 4 then
-		if remoteName == NetContract.RF_DISPATCH then
-			return Format.label("DISPATCH_ALREADY")
-		end
-		return Format.label("ERR_COOLDOWN")
+-- The client never guesses how many pages there are. The server reports
+-- `more`, and the pager stops when it is false -- which is also how the
+-- screen knows to show the end-of-history line rather than an empty list
+-- that looks like a loading bug.
+function ClientBootstrap:history(cursor)
+	local reply, why = self:act(NetContract.RF_HISTORY, {
+		seq = self:nextSeq(),
+		cursor = math.floor(cursor or 0),
+	})
+	if reply == nil then
+		return nil, why
 	end
-	return Format.label("ERR_OFFLINE")
+	self.historyPages = reply.pages or 0
+	self.historyMore = reply.more == true
+	self.historyCursor = reply.more and reply.nextCursor or nil
+	self.stats.historyPages = self.stats.historyPages + 1
+	return reply
 end
+
+-- Turn a handler status code into a sentence. A pure mapping, as it should
+-- always have been.
+--
+-- TWO THINGS WERE WRONG HERE BEFORE ITERATION 10.
+--
+-- First it LIED: only codes 1 and 2 were mapped and everything else fell
+-- through to ERR_OFFLINE -- "Can't reach the post right now". So a comb
+-- refused because the tide was wrong, or a node still regrowing, told the
+-- player their connection had dropped. Nothing noticed, because until
+-- iteration 9 no client code could reach a remote that returns those codes.
+--
+-- Then it needed the REMOTE NAME to disambiguate, because code 4 meant
+-- E_COOLDOWN in PostHandler and E_ALREADY_OUT in DispatchHandler. That
+-- worked, and it was the client carrying a workaround for an ambiguity in
+-- the contract. OD23 fixed the contract instead: NetContract owns one status
+-- enum with non-overlapping codes, E_ALREADY_OUT moved to 5, and this is a
+-- mapping again with nothing to disambiguate.
+--
+-- An unknown code still reads as ERR_OFFLINE, which is the right default for
+-- a client talking to a server newer than itself: say the post is
+-- unreachable, never invent a reason.
+local STATUS_LABEL = {
+	[NetContract.E_REJECTED] = "ERR_REJECTED",
+	[NetContract.E_NO_POST] = "ERR_NO_POST",
+	[NetContract.E_ILLEGAL] = "ERR_ILLEGAL",
+	[NetContract.E_COOLDOWN] = "ERR_COOLDOWN",
+	[NetContract.E_ALREADY_OUT] = "DISPATCH_ALREADY",
+}
+
+function ClientBootstrap:statusText(status)
+	return Format.label(STATUS_LABEL[status] or "ERR_OFFLINE")
+end
+
 
 function ClientBootstrap:applySnapshot(snapshot)
 	self.snapshot = snapshot
@@ -299,6 +360,36 @@ function ClientBootstrap:setScreen(screen)
 	return self.screen
 end
 
+-- THE NAVIGATION BAR.
+--
+-- Four tabs. TAB_WORLD, TAB_POST, TAB_CHART and TAB_ALMANAC were written in
+-- iteration 5 and no code displayed any of them, which is to say the client
+-- had six screens and no way to move between them. The dead-content scan
+-- found the whole bar at once.
+--
+-- The Ledger and Orders are deliberately NOT tabs: the Ledger is pushed in
+-- front of you when you arrive (doc 08 section 3) and Orders is reached from
+-- the Post, because it is a thing you do to your post rather than a place.
+ClientBootstrap.TABS = {
+	{ screen = 1, label = "TAB_WORLD" },
+	{ screen = 3, label = "TAB_POST" },
+	{ screen = 5, label = "TAB_CHART" },
+	{ screen = 6, label = "TAB_ALMANAC" },
+}
+
+function ClientBootstrap:tabs()
+	local out = {}
+	for i = 1, #ClientBootstrap.TABS do
+		local tab = ClientBootstrap.TABS[i]
+		out[i] = {
+			screen = tab.screen,
+			text = Format.label(tab.label),
+			active = self.screen == tab.screen,
+		}
+	end
+	return out
+end
+
 -- The whole render model for the current screen. Pure: given the same
 -- snapshot and the same `now`, it returns the same table every time, which is
 -- what makes it assertable in a test with no GUI anywhere.
@@ -307,6 +398,7 @@ function ClientBootstrap:render(now)
 	local model = {
 		screen = self.screen,
 		tide = TideView.header(t),
+		tabs = self:tabs(),
 	}
 	if self.screen == ClientBootstrap.SCREEN_LEDGER then
 		model.ledger = self:ledgerModel(true)
@@ -315,6 +407,10 @@ function ClientBootstrap:render(now)
 		model.post = PostView.build(self.snapshot)
 	elseif self.screen == ClientBootstrap.SCREEN_ORDERS and self.snapshot ~= nil then
 		model.orders = OrdersView.build(self.snapshot.orders, self.snapshot.tier)
+	elseif self.screen == ClientBootstrap.SCREEN_CHART and self.snapshot ~= nil then
+		model.chart = ChartView.build(self.snapshot.tier, self.snapshot.current)
+	elseif self.screen == ClientBootstrap.SCREEN_ALMANAC and self.snapshot ~= nil then
+		model.almanac = AlmanacView.build(self.snapshot.almanac, self.almanacPage)
 	end
 	self.stats.renders = self.stats.renders + 1
 	self.dirty = false

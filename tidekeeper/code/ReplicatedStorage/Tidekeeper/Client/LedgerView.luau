@@ -23,7 +23,6 @@
 local Tide = require(script.Parent.Parent.Lib.Tide)
 local Ledger = require(script.Parent.Parent.Domain.Ledger)
 local Format = require(script.Parent.Format)
-local Strings = require(script.Parent.Strings)
 
 local LedgerView = {}
 
@@ -88,6 +87,10 @@ function LedgerView.build(entries, names, options)
 			group = {
 				epoch = epoch,
 				tideState = Tide.stateForEpoch(epoch),
+				-- The group's heading. A tide name, not a date: this game
+				-- measures time in water, and "{tide:1}" is the only
+				-- timestamp the Ledger ever shows.
+				heading = Format.label("LEDGER_GROUP_EPOCH", { Tide.codeForEpoch(epoch) }),
 				lines = {},
 				silhouette = nil,
 			}
@@ -130,6 +133,10 @@ function LedgerView.build(entries, names, options)
 		title = Format.label("LEDGER_TITLE"),
 		emptyText = Format.label("LEDGER_EMPTY"),
 		badge = unread > 0 and Format.label("LEDGER_UNREAD", { unread }) or nil,
+		-- The replay runs itself; this is the way out of it. Doc 08 section 3
+		-- is explicit that the Ledger must never hold the player hostage, and
+		-- a skip affordance with no label is a button nobody can find.
+		skipText = Format.label("LEDGER_SKIP"),
 		-- Doc 08 section 3: ~20 s for a 12-entry Ledger if you let it run.
 		runtimeSeconds = unread * LedgerView.SECONDS_PER_ENTRY,
 		isEmpty = unread == 0,
@@ -172,6 +179,29 @@ function LedgerView.highlight(model)
 	return best
 end
 
+-- One page of the ARCHIVE, rendered (OD22).
+--
+-- Archived entries are the same shape as resident ones, so this reuses
+-- `build` rather than growing a second renderer that could drift from it.
+-- What differs is the frame around them: an archive page is history, so it
+-- never carries an unread badge and never claims a runtime -- you are
+-- reading, not watching a replay.
+--
+-- `more` comes from the server. When it is false this is the oldest page
+-- there is, and `atEnd` lets the screen say so instead of showing an empty
+-- list that reads as a loading failure.
+function LedgerView.archive(entries, names, reply)
+	local model = LedgerView.build(entries or {}, names, { withSilhouettes = false })
+	model.badge = nil
+	model.runtimeSeconds = 0
+	model.isArchive = true
+	model.cursor = (reply and reply.cursor) or 0
+	model.more = (reply and reply.more) == true
+	model.atEnd = not model.more
+	model.pages = (reply and reply.pages) or 0
+	return model
+end
+
 -- Every distinct template id the model actually rendered. The coverage test
 -- uses this to prove the suite exercised the prose it claims to cover, rather
 -- than trusting that 200 entries happened to hit all 15 templates.
@@ -185,7 +215,5 @@ function LedgerView.templatesUsed(model, into)
 	end
 	return seen
 end
-
-LedgerView.PHRASES = Strings.PHRASE
 
 return LedgerView

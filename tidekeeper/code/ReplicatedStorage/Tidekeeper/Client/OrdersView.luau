@@ -19,6 +19,7 @@
 --      the whole feature.
 
 local Orders = require(script.Parent.Parent.Domain.Orders)
+local OrdersConfig = require(script.Parent.Parent.Config.OrdersConfig)
 local Drifter = require(script.Parent.Parent.Domain.Drifter)
 local Format = require(script.Parent.Format)
 local Strings = require(script.Parent.Strings)
@@ -79,8 +80,18 @@ function OrdersView.build(program, tier)
 		}
 	end
 	local ok, why = Orders.validate(program or Orders.empty(), tier or 1)
+	-- How many rules this tier may hold. The limit is per tier, so the
+	-- screen must read it per tier rather than hard-coding the ceiling --
+	-- and the player is told they are full rather than finding out when the
+	-- server refuses the next one.
+	local limit = OrdersConfig.MAX_RULES_BY_TIER[tier or 1] or 0
+	local full = #rows >= limit
 	return {
 		rows = rows,
+		limit = limit,
+		isFull = full,
+		addText = Format.label("ORDERS_ADD"),
+		fullText = full and Format.label("ORDERS_FULL") or nil,
 		isEmpty = #rows == 0,
 		emptyText = Format.label("ORDERS_EMPTY"),
 		title = Format.label("ORDERS_TITLE"),

@@ -35,11 +35,6 @@ local Post = require(Tidekeeper.Domain.Post)
 
 local DispatchHandler = {}
 
-local OK = 0
-local E_REJECTED = 1
-local E_NO_POST = 2
-local E_ILLEGAL = 3
-local E_ALREADY_OUT = 4
 
 -- One traveller out at a time, per epoch. The scarcity is what makes the
 -- choice mean anything, and it is also what bounds the exchange's write
@@ -63,15 +58,15 @@ function DispatchHandler.handle(app, player, payload)
 	local ok, why = NetContract.accept(app.guard, userId, NetContract.RF_DISPATCH, payload, now)
 	if not ok then
 		app.logger("DispatchHandler", "rejected RF_Dispatch from " .. tostring(userId) .. ": " .. tostring(why))
-		return { status = E_REJECTED }
+		return { status = NetContract.E_REJECTED }
 	end
 	local S = app.posts:get(userId)
 	if S == nil then
-		return { status = E_NO_POST }
+		return { status = NetContract.E_NO_POST }
 	end
 	local epoch = Tide.epoch(now)
 	if S.dispatchedAt ~= nil and S.dispatchedAt >= epoch then
-		return { status = E_ALREADY_OUT, epoch = epoch }
+		return { status = NetContract.E_ALREADY_OUT, epoch = epoch }
 	end
 
 	-- Cargo is validated against what is actually in the store. The client
@@ -80,20 +75,20 @@ function DispatchHandler.handle(app, player, payload)
 	-- silently-trimmed request is indistinguishable from a working exploit.
 	local cargo = payload.cargo
 	if #cargo > DrifterConfig.MAX_CARGO then
-		return { status = E_ILLEGAL }
+		return { status = NetContract.E_ILLEGAL }
 	end
 	for i = 1, #cargo do
 		if Post.stockOf(S, cargo[i]) <= 0 then
-			return { status = E_ILLEGAL }
+			return { status = NetContract.E_ILLEGAL }
 		end
 		for j = 1, i - 1 do
 			if cargo[j] == cargo[i] then
-				return { status = E_ILLEGAL }
+				return { status = NetContract.E_ILLEGAL }
 			end
 		end
 	end
 	if payload.letterId > 0 and payload.letterId > DispatchHandler.MAX_LETTER_ID then
-		return { status = E_ILLEGAL }
+		return { status = NetContract.E_ILLEGAL }
 	end
 
 	-- The dispatch is recorded on the post and published at LOGOUT, not
@@ -104,7 +99,7 @@ function DispatchHandler.handle(app, player, payload)
 	S.dispatchLetter = payload.letterId
 	S.dispatchCargo = cargo
 	app.posts:markDirty(userId)
-	return { status = OK, epoch = epoch, cargo = #cargo }
+	return { status = NetContract.OK, epoch = epoch, cargo = #cargo }
 end
 
 -- The authored phrase list lives in Config/LettersConfig, which is under
@@ -116,10 +111,10 @@ end
 -- again: add a phrase and the validator follows.
 DispatchHandler.MAX_LETTER_ID = LettersConfig.MAX_LETTER_ID
 
-DispatchHandler.OK = OK
-DispatchHandler.E_REJECTED = E_REJECTED
-DispatchHandler.E_NO_POST = E_NO_POST
-DispatchHandler.E_ILLEGAL = E_ILLEGAL
-DispatchHandler.E_ALREADY_OUT = E_ALREADY_OUT
+DispatchHandler.OK = NetContract.OK
+DispatchHandler.E_REJECTED = NetContract.E_REJECTED
+DispatchHandler.E_NO_POST = NetContract.E_NO_POST
+DispatchHandler.E_ILLEGAL = NetContract.E_ILLEGAL
+DispatchHandler.E_ALREADY_OUT = NetContract.E_ALREADY_OUT
 
 return DispatchHandler

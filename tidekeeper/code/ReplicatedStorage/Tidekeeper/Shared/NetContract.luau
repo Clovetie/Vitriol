@@ -39,11 +39,43 @@ NetContract.RF_ARRANGE = "RF_Arrange"
 NetContract.RF_UPGRADE = "RF_Upgrade"
 NetContract.RF_COMB = "RF_Comb"
 NetContract.RF_DISPATCH = "RF_Dispatch"
+NetContract.RF_HISTORY = "RF_History"
 NetContract.RE_POST_SNAPSHOT = "RE_PostSnapshot"
 NetContract.RE_LEDGER_BATCH = "RE_LedgerBatch"
 
 -- doc 01 section 4. { name, direction, burst, perMinute }
 -- direction 1 = client -> server function, 2 = server -> client event.
+-- ------------------------------------------------------- status codes
+--
+-- ONE enum, owned here, with no overlapping values (OD23).
+--
+-- Until iteration 10 each handler declared its own locals, and they
+-- collided: code 4 meant E_COOLDOWN in PostHandler and E_ALREADY_OUT in
+-- DispatchHandler. The client could not translate a 4 without also knowing
+-- which remote had answered, so `ClientBootstrap:statusText` took the remote
+-- name as a second argument -- correct, and a smell: it was the client
+-- carrying a workaround for an ambiguity the contract should never have had.
+--
+-- Numbers are part of the wire format. They are append-only: never reuse or
+-- renumber one, because an old client reads the number, not the name.
+NetContract.OK = 0
+NetContract.E_REJECTED = 1
+NetContract.E_NO_POST = 2
+NetContract.E_ILLEGAL = 3
+NetContract.E_COOLDOWN = 4
+NetContract.E_ALREADY_OUT = 5
+
+-- Every status the server may send, so a test can walk them and the client
+-- can prove it has a sentence for each.
+NetContract.STATUSES = {
+	NetContract.OK,
+	NetContract.E_REJECTED,
+	NetContract.E_NO_POST,
+	NetContract.E_ILLEGAL,
+	NetContract.E_COOLDOWN,
+	NetContract.E_ALREADY_OUT,
+}
+
 NetContract.REMOTES = {
 	{ "RF_Session", 1, 2, 1 },
 	{ "RF_SetOrders", 1, 3, 6 },
@@ -53,6 +85,11 @@ NetContract.REMOTES = {
 	-- Buying a tier is rare and expensive; 1 burst / 3 per minute is
 	-- generous for a thing a player does four times in their whole life.
 	{ "RF_Upgrade", 1, 1, 3 },
+	-- Reading back the archive (OD22). Paging is a deliberate, one-tap-at-a-
+	-- time act, and each page is a DataStore read, so this is throttled
+	-- harder than the actions: a player cannot scroll the archive faster
+	-- than the budget can serve it.
+	{ "RF_History", 1, 2, 10 },
 	{ "RE_PostSnapshot", 2, 0, 0 },
 	{ "RE_LedgerBatch", 2, 0, 0 },
 }
@@ -105,6 +142,14 @@ local SPEC_UPGRADE = Schema.map({
 	seq = Schema.int(1, 4294967295),
 }, true)
 
+-- `cursor` counts BACK from the newest archived page: 0 is the most recent.
+-- 4096 pages is far past the 32 the retention window keeps, so the ceiling
+-- is a sanity bound rather than a policy.
+local SPEC_HISTORY = Schema.map({
+	seq = Schema.int(1, 4294967295),
+	cursor = Schema.int(0, 4096),
+}, true)
+
 local SPEC_SESSION = Schema.map({
 	seq = Schema.int(1, 4294967295),
 }, true)
@@ -116,6 +161,7 @@ NetContract.SPECS = {
 	RF_Comb = SPEC_COMB,
 	RF_Dispatch = SPEC_DISPATCH,
 	RF_Upgrade = SPEC_UPGRADE,
+	RF_History = SPEC_HISTORY,
 }
 
 -- ------------------------------------------------------------- the checker

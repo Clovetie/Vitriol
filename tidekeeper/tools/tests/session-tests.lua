@@ -1579,3 +1579,215 @@ do -- 23. THE POOL REAPER RUNS, AND ONLY ON ONE SERVER (OD21)
 	eq("...because it lost the lease", appB.exchange.stats.reapLeasesWon, 0)
 	ge("...and said so", appB.exchange.stats.reapLeasesLost, 1)
 end
+
+do -- 24. THE LEDGER REMEMBERS (OD22)
+	-- Entries evicted past MAX_LEDGER_RESIDENT (200) were archived to pages
+	-- by LedgerService:flushPending, and DataStoreAdapter:loadLedgerPage was
+	-- called by NOTHING. Nine iterations of history were written to
+	-- DataStore and could not be read back by any code path that existed.
+	--
+	-- For this game specifically that is the worst available bug: doc 00's
+	-- first pillar is "absence is content", and the Ledger is where absence
+	-- becomes content. A Ledger that forgets is the game failing at the one
+	-- thing it says it is for.
+	local ClientBootstrap = TidekeeperRequire("ClientBootstrap")
+	local NetContract = TidekeeperRequire("NetContract")
+	local HistoryHandler = TidekeeperRequire("HistoryHandler")
+	local SessionHandler = TidekeeperRequire("SessionHandler")
+	local LedgerView = TidekeeperRequire("LedgerView")
+	local Ledger = TidekeeperRequire("Ledger")
+
+	local app, env = newServer({ seed = 909 })
+	local userId = 6100
+	env:addPlayer(userId)
+	settle(app, env)
+
+	local S = app.posts:get(userId)
+	ok("the player has a post", S ~= nil)
+
+	-- Overflow the resident ledger hard enough to force three archive pages.
+	local made = 0
+	for i = 1, 850 do
+		local entry = Ledger.entry(Ledger.T_EPOCH_QUIET, 10 + (i % 7), userId, { i % 5 })
+		if entry ~= nil then
+			made = made + 1
+			app.ledger:appendAll(userId, S, { entry })
+		end
+	end
+	ge("entries were appended", made, 800)
+	for _ = 1, 40 do
+		app.ledger:flushPending()
+	end
+	ge("pages were archived", app.ledger.stats.pagesWritten, 3)
+
+	-- THE READ PATH. Drive it the way a player would: through the real
+	-- handler, over a fake RemoteFunction, from the real client.
+	local function remoteTo(fn)
+		return {
+			InvokeServer = function(_, payload)
+				return fn(app, { UserId = userId }, payload)
+			end,
+		}
+	end
+	local client = ClientBootstrap.start({
+		clock = function() return env.clock.now end,
+		userId = userId,
+		remotes = {
+			[NetContract.RF_SESSION] = remoteTo(SessionHandler.handle),
+			[NetContract.RF_HISTORY] = remoteTo(HistoryHandler.handle),
+		},
+	})
+	ok("the session starts", client:requestSession() ~= nil)
+
+	-- RF_History is throttled to 2 burst / 10 per minute: each call is two
+	-- DataStore reads, and paging is a deliberate tap rather than a scroll.
+	-- So the test has to page at a human rate. Hammering it is how the first
+	-- run of this scenario discovered the limiter was doing its job.
+	env:advance(10)
+	local page0 = client:history(0)
+	ok("the archive answers", page0 ~= nil)
+	ge("...with entries in it", #(page0.entries or {}), 1)
+	ge("...and reports how many pages exist", page0.pages, 3)
+	ok("...and says there is more", page0.more)
+
+	-- Page through to the end. The cursor counts back from the newest, and
+	-- the server -- not the client -- decides when history stops.
+	local seen = #page0.entries
+	local cursor = page0.nextCursor
+	local guard = 0
+	local last = page0
+	while last ~= nil and last.more and guard < 50 do
+		guard = guard + 1
+		env:advance(10)
+		local nextPage = client:history(cursor)
+		ok("page " .. tostring(cursor) .. " loads", nextPage ~= nil)
+		if nextPage == nil then
+			break
+		end
+		last = nextPage
+		seen = seen + #(last.entries or {})
+		cursor = last.nextCursor
+	end
+	ok("paging terminates", guard < 50)
+	ok("the oldest page says it is the last", last.more == false)
+	ge("the archive gave back real history", seen, 400)
+
+	-- The view renders it, and knows it is history rather than a replay.
+	local model = LedgerView.archive(page0.entries, {}, page0)
+	ok("the archive renders", model ~= nil and #model.groups >= 1)
+	ok("...marked as archive", model.isArchive)
+	eq("...with no unread badge", model.badge, nil)
+	eq("...and no replay runtime", model.runtimeSeconds, 0)
+
+	-- A cursor past the end is answered, not crashed into.
+	env:advance(10)
+	local past = client:history(400)
+	ok("a cursor past the end is handled", past ~= nil)
+	eq("...and reports no more", past.more, false)
+end
+
+do -- 25. PAGE NUMBERS ARE ALLOCATED, NOT GUESSED (OD22)
+	-- The page key used to be the tide epoch, and saveLedgerPage overwrites.
+	-- Two servers flushing a page for the same player inside one 6.2-hour
+	-- epoch -- an ordinary server hop -- would silently destroy one of them.
+	local Ledger = TidekeeperRequire("Ledger")
+	local Bootstrap = TidekeeperRequire("Bootstrap")
+
+	local appA, env = newServer({ seed = 77, jobId = "server-A" })
+	local userId = 6200
+	env:addPlayer(userId)
+	settle(appA, env)
+	local S = appA.posts:get(userId)
+
+	local appB = Bootstrap.start({
+		dataStoreService = env.services.DataStoreService,
+		memoryStoreService = env.services.MemoryStoreService,
+		policyService = env.services.PolicyService,
+		players = env.PlayersService,
+		runService = env.RunService,
+		clock = function() return env.clock.now end,
+		monotonic = function() return env.clock.now end,
+		waiter = function(seconds) return env:wait(seconds) end,
+		jobId = "server-B",
+		headless = true,
+		autoStart = false,
+		bindPlayers = false,
+		silent = true,
+		seed = 77,
+	})
+
+	-- Both servers archive a page for the same player, in the same epoch.
+	for _, a in ipairs({ appA, appB }) do
+		for i = 1, 420 do
+			local e = Ledger.entry(Ledger.T_EPOCH_QUIET, 11, userId, { i % 5 })
+			if e ~= nil then
+				a.ledger:appendAll(userId, S, { e })
+			end
+		end
+		for _ = 1, 10 do
+			a.ledger:flushPending()
+		end
+	end
+
+	local okIdx, pages = appA.data:loadLedgerIndex(userId)
+	ok("the index loads", okIdx)
+	ge("both servers' pages survive", #pages, 2)
+	-- Distinct numbers is the whole point.
+	local seenNums = {}
+	local distinct = 0
+	for i = 1, #pages do
+		if not seenNums[pages[i]] then
+			seenNums[pages[i]] = true
+			distinct = distinct + 1
+		end
+	end
+	eq("every page number is distinct", distinct, #pages)
+end
+
+do -- 26. ONE STATUS ENUM, AND A SENTENCE FOR EVERY CODE (OD23)
+	-- Code 4 used to mean E_COOLDOWN from PostHandler and E_ALREADY_OUT from
+	-- DispatchHandler, so the client needed to know WHICH remote answered
+	-- before it could translate a number. NetContract now owns the enum.
+	local NetContract = TidekeeperRequire("NetContract")
+	local ClientBootstrap = TidekeeperRequire("ClientBootstrap")
+	local Format = TidekeeperRequire("Format")
+
+	local seen = {}
+	local collisions = 0
+	for i = 1, #NetContract.STATUSES do
+		local code = NetContract.STATUSES[i]
+		if seen[code] then
+			collisions = collisions + 1
+		end
+		seen[code] = true
+	end
+	eq("no two statuses share a number", collisions, 0)
+	eq("E_ALREADY_OUT moved off 4", NetContract.E_ALREADY_OUT, 5)
+	eq("E_COOLDOWN keeps 4", NetContract.E_COOLDOWN, 4)
+
+	local client = ClientBootstrap.start({
+		clock = function() return 1000 end,
+		userId = 1,
+	})
+	-- Every non-OK status must produce a DISTINCT, non-empty sentence, and
+	-- none of them may be the offline message -- that was the bug: every
+	-- unmapped code claimed the connection had dropped.
+	local offline = Format.label("ERR_OFFLINE")
+	local texts = {}
+	local distinct = 0
+	for i = 1, #NetContract.STATUSES do
+		local code = NetContract.STATUSES[i]
+		if code ~= NetContract.OK then
+			local text = client:statusText(code)
+			ok("status " .. tostring(code) .. " has a sentence", text ~= nil and #text > 0)
+			ok("status " .. tostring(code) .. " is not the offline message", text ~= offline)
+			if not texts[text] then
+				texts[text] = true
+				distinct = distinct + 1
+			end
+		end
+	end
+	eq("every status reads differently", distinct, #NetContract.STATUSES - 1)
+	-- An unknown code from a newer server still degrades honestly.
+	eq("an unknown status falls back to offline", client:statusText(99), offline)
+end

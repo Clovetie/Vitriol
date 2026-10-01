@@ -28,9 +28,6 @@ local Post = require(Tidekeeper.Domain.Post)
 local SessionHandler = {}
 
 -- Status codes. The client maps these to sentences.
-local OK = 0
-local E_REJECTED = 1
-local E_NO_POST = 2
 
 function SessionHandler.bind(app)
 	if app.remotes == nil then
@@ -53,7 +50,7 @@ function SessionHandler.handle(app, player, payload)
 	local ok, why = NetContract.accept(app.guard, userId, NetContract.RF_SESSION, payload, now)
 	if not ok then
 		app.logger("SessionHandler", "rejected RF_Session from " .. tostring(userId) .. ": " .. tostring(why))
-		return { status = E_REJECTED }
+		return { status = NetContract.E_REJECTED }
 	end
 
 	local S = app.posts:get(userId)
@@ -61,12 +58,12 @@ function SessionHandler.handle(app, player, payload)
 		-- The join is still in flight, or it failed and the player was told
 		-- to rejoin. Either way there is nothing to hand over, and INVENTING
 		-- an empty post here is how save systems eat people's progress.
-		return { status = E_NO_POST }
+		return { status = NetContract.E_NO_POST }
 	end
 
 	local session = app.players:sessionOf(userId)
 	return {
-		status = OK,
+		status = NetContract.OK,
 		tier = S.tier,
 		season = S.season,
 		current = S.current,
@@ -89,13 +86,18 @@ function SessionHandler.handle(app, player, payload)
 		-- exists.
 		nextCost = Post.promotionCost(S),
 		stock = Post.totalStock(S),
+		-- The 32-byte almanac bitset, for the almanac screen. Bytes, not a
+		-- list of names: 200 find names would be 200 strings crossing the
+		-- wire for a screen the player may never open, and the client
+		-- already owns the names.
+		almanac = S.almanac,
 		chunks = session and session.chunkCount or 0,
 		pending = app.cadence:pendingResolves(),
 	}
 end
 
-SessionHandler.OK = OK
-SessionHandler.E_REJECTED = E_REJECTED
-SessionHandler.E_NO_POST = E_NO_POST
+SessionHandler.OK = NetContract.OK
+SessionHandler.E_REJECTED = NetContract.E_REJECTED
+SessionHandler.E_NO_POST = NetContract.E_NO_POST
 
 return SessionHandler
