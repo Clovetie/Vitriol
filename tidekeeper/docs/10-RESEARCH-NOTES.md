@@ -479,6 +479,51 @@ rather than a war story.
 syntactically perfect, pass a 13-rule determinism scan, be reviewed, and still throw on
 the first line of real use. The only thing that catches that is running it.
 
+## 10. Iteration-6 verification pass — 2026-10-01
+
+### 10.1 Turn-based notifications — the beta window opened today, and it is still empty
+
+OD7 has been "absent" for five iterations. This is the first check that is worth
+anything, because RDC 2026 promised **Studio Beta in October 2026** and October
+2026 began today.
+
+Re-verified against the machine-readable API dump
+(`robloxapi.github.io/ref/class/ExperienceNotificationService.html`), which tracks
+per-version member history rather than prose:
+
+- Members: `CanPromptOptInAsync`, `PromptOptIn`, `OptInPromptClosed`,
+  `PromptOptInRequested`, `InvokeOptInPromptClosed` — all added in **v615**.
+- `CreateUserNotificationAsync` — added **v591**, **removed v616**. Still removed.
+
+So the opt-in half of the feature exists and the *send* half does not. There is no
+API by which this game could notify an absent player, today, on 2026-10-01.
+
+Independently reconfirmed from the primary source
+(`about.roblox.com/newsroom/2026/09/rdc-2026-the-world-needs-more-play`): "a new
+notification system will alert players when it's their turn, arriving in Studio
+Beta in October, and in full release by the end of the year."
+
+**Conclusion, unchanged and now five-for-five:** `NotifyAdapter` stays
+capability-flagged and the game must be fully playable with zero notifications
+(requirement R5). But iteration 7 is the first iteration with a *real* chance of
+this landing mid-window, so it should re-check rather than assume — and this is
+the only item on which that is true.
+
+**Correction to a prior note.** Iteration 5 recorded the official roadmap page as
+returning HTTP 502 and flagged it for retry. Retried: it is a **404**, not a 502.
+`create.roblox.com/docs/en-us/resources/roadmap` does not exist. The newsroom post
+and the API dump are the two sources that actually work, and the transient-looking
+502 would have had us waiting for a page that is never coming back.
+
+### 10.2 Why no other research was done this iteration
+
+The iteration-5 pass ran on the same calendar date. Re-fetching the performance and
+LibMP pages to produce a longer section would have been theatre: nothing on the
+platform changed between two checks on 2026-10-01, and a research note that says
+"reconfirmed, no change" for items nobody is blocked on is a way of looking busy.
+The one item with a date attached to it — the October notification beta — was
+checked, and it is recorded above. Iteration 6 spent its effort on content instead.
+
 ## 9. Known unknowns
 
 Recorded so later iterations do not mistake absence of evidence for evidence.

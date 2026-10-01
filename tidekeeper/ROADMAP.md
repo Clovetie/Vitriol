@@ -126,10 +126,32 @@ took the no-Studio branch of its own prompt: tooling truth first, then content.
 the test harness trustworthy, and ran the client for the first time. Content volume,
 economy tuning and everything requiring a human or an engine move to iteration 6.
 
-## Iteration 6+ ⬜
+## Iteration 6 ✅ — the client could never have worked, and the content was a placeholder
 
-Contingency, live telemetry, then the idea bank in doc 00 §9. Scope is defined by
-`HANDOFF.md`, not by this table.
+| Goal | Status |
+| --- | --- |
+| Audit the only never-executed file (`Main.client.luau`) | ✅ found it fatally broken |
+| Fix remote acquisition | ✅ now uses `Remotes.await(30)` |
+| A check for the recurring bug class (cross-module member typos) | ✅ `tidekeeper-member-scan.js`, 14th gate check |
+| Finds 24 → 200 (doc 07 §5) | ✅ data complete, validated row by row |
+| Ledger prose 67 → 180 variants (doc 07 §5) | ✅ every variant render-tested |
+| Re-pin content assertions from it2 placeholders to v1 targets | ✅ |
+| OD7 notification re-check (beta window opened October 2026) | ✅ still not shipped |
+| Letters, Seed Drifters, badges, décor | ⬜ iteration 7 |
+| Economy tuning against the 200-find table | ⬜ iteration 7 |
+
+**The headline is a bug, not a feature.** `Main.client.luau` looked for the seven
+remotes under `ReplicatedStorage/Tidekeeper`; `Remotes.build` parents them under the
+sibling `ReplicatedStorage/TidekeeperRemotes`. Every lookup returned nil. The game
+was **100% non-functional for every player** and had been for two iterations, while
+all 13 gate checks stayed green — because nothing in the toolchain constructs an
+Instance, so no Instance-path bug is visible to any of it. That limit is now
+written down rather than discovered again.
+
+## Iteration 7+ ⬜
+
+Content that needs a human or an engine, economy tuning, then the idea bank in doc
+00 §9. Scope is defined by `HANDOFF.md`, not by this table.
 
 ---
 

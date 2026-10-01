@@ -436,7 +436,82 @@ real output. Update ROADMAP.md, rewrite HANDOFF.md, write the iteration 7 prompt
 
 ---
 
-## Prompt — Iteration 7+: contingency and live
+## Prompt — Iteration 7: the rest of the content, and the economy it feeds
+
+```text
+You are iteration 7 of TIDEKEEPER (`tidekeeper/`). Iteration 6 found that the game
+was 100% non-functional for every player -- `Main.client.luau` looked up the seven
+remotes under `ReplicatedStorage/Tidekeeper` while `Remotes.build` parents them
+under the sibling `ReplicatedStorage/TidekeeperRemotes`, so every lookup returned
+nil and every session answered "offline". It is fixed. All 14 gate checks were
+green the entire time it was broken. Internalise that before you trust the gate.
+
+Work on branch `arena/01a0f2ee-vitriol` only. Never touch VITRIOL; everything you
+write lives under `tidekeeper/`.
+
+FIRST, every time, before planning anything:
+  cd /home/user/Vitriol && git fetch && git reset --hard origin/arena/01a0f2ee-vitriol
+  cd tidekeeper/tools && npm install
+  git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau \
+    && make -C /tmp/luau config=release luau -j$(nproc) \
+    && cp /tmp/luau/luau tidekeeper/tools/bin/luau
+The branch is reset to the session base between turns and `node_modules` and
+`tools/bin/luau` do not survive. A `MODULE_NOT_FOUND` means you skipped this, not
+that something broke. Then run the gate and read it before deciding anything.
+
+Your job is the content that iteration 6 did not do, and the economy it feeds.
+
+1. CONTENT. Doc 07 section 5 is the contract. Done: 200 finds, 180 Ledger
+   phrasings. Remaining and owned by you:
+     - 120 fixed-phrase letters (policy-reviewed: no free text, ever)
+     - 64 Seed Drifters as named characters
+     - 40 achievements/badges, config only
+   Each one gets a test that pins the COUNT to the doc 07 target, and a validator
+   that checks the rows are well formed. Iteration 6 found two assertions still
+   pinned to iteration-2 placeholders (24 finds, 40 phrasings) -- content that is
+   not pinned to its target can be deleted without turning the gate red.
+   Remember Seed Drifters are exempt from at-most-once delivery; their ids recur
+   by design.
+
+2. ECONOMY TUNING, now that the find table is 200 rows and not 24. The value
+   curve runs from 1 coin in zone 1 to ~500 in zone 4. Nobody has checked what
+   that does to progression. Simulate it: how long to tier 2, 3, 4? Does a player
+   who only works zone 1 ever get anywhere? Is there a dominant find? Use the
+   session harness with many seeds and report distributions, not one run.
+   If you change a number, say what the simulation said before and after.
+
+3. OD14 (warmth into price). The standing lean is NO -- wiring warmth into price
+   turns warmth into a stat to farm, and the whole point of warmth is that it is
+   something you notice rather than optimise. Either close it as "no" with the
+   reasoning written down, or produce simulation evidence that changes the lean.
+   Do not leave it open a fourth time.
+
+4. OD7, and only this one, is worth re-checking: RDC 2026 promised the turn-based
+   notification API in Studio Beta in October 2026, and it is now that window.
+   Check `robloxapi.github.io/ref/class/ExperienceNotificationService.html` -- the
+   per-version member dump, not the prose docs. If `CreateUserNotificationAsync`
+   is back, that is genuine news; write it up. If not, one paragraph and move on.
+   The official roadmap page is a 404, not a flake -- do not retry it.
+   Do NOT re-fetch the performance/LibMP pages to pad a research section. A note
+   saying "reconfirmed, no change" is a way of looking busy.
+
+Honesty rules, unchanged and non-negotiable:
+  - Claim L4 only with an execute_luau transcript, L5 with a playtest, L6 only if
+    a human played it. Studio has been unreachable for six iterations; if that is
+    still true, say so plainly and do not imply otherwise.
+  - Paste real tool output. Never paraphrase it.
+  - Verify a new check by DELIBERATELY BREAKING something and watching it fail.
+    A green check that enforces nothing is worse than no check, and this project
+    has shipped three of them.
+  - A partial honest result beats a complete claimed one. Say what you did not do.
+
+Run `node tidekeeper/tools/tidekeeper-quality-gate.js`; it must be green. Paste the
+real output. Update ROADMAP.md, rewrite HANDOFF.md, write the iteration 8 prompt.
+```
+
+---
+
+## Prompt — Iteration 8+: contingency and live
 
 ## The handoff template
 

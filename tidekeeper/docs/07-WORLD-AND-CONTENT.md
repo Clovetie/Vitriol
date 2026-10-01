@@ -77,17 +77,28 @@ game's texture.
 
 | Content | Count | Author | Iteration |
 | --- | --- | --- | --- |
-| Finds (mesh + icon + taste vector + value) | 200 | AI-generated, human-curated (doc 09) | 5 |
-| Ledger prose templates | 180 | human-written | 5 (40 by it4) |
-| Fixed-phrase letters | 120 | human-written, policy-reviewed | 4 |
-| Seed Drifters (named characters) | 64 | human-written | 5 |
-| Post décor pieces | 90 | AI-generated, human-curated | 5 |
-| Post tier structures | 4 | human-modelled | 5 |
+| Finds (mesh + icon + taste vector + value) | 200 | AI-generated, human-curated (doc 09) | **6 ✅ data** |
+| Ledger prose templates | 180 | human-written | **6 ✅** |
+| Fixed-phrase letters | 120 | human-written, policy-reviewed | 7 |
+| Seed Drifters (named characters) | 64 | human-written | 7 |
+| Post décor pieces | 90 | AI-generated, human-curated | 7 (needs an engine) |
+| Post tier structures | 4 | human-modelled | 7 (needs an engine) |
 | Zones | 4 | human-built | 4 |
 | Currents | 5 | config only | 3 |
-| Achievements / badges | 40 | config only | 5 |
-| Music cues | 6 | human/licensed | 5 |
-| SFX | ~70 | human/licensed | 5 |
+| Achievements / badges | 40 | config only | 7 |
+| Music cues | 6 | human/licensed | 7 (needs a human) |
+| SFX | ~70 | human/licensed | 7 (needs a human) |
+
+**Iteration 6 status.** The two content lines that are pure data — the 200 finds and
+the 180 Ledger phrasings — are **done and enforced by the suite**, not merely
+planned. `pure-tests.lua` asserts `#FindsConfig.FINDS == 200` and validates every
+row's id uniqueness, group, zone, perishable flag, rarity and all eight taste axes;
+session scenario 15 renders *every variant of every template* and asserts zero
+unresolved directives, then asserts `totalVariants >= 180`. Both thresholds were
+previously pinned to the iteration-2 placeholder values (24 finds, 40 phrasings),
+which meant the content could have been deleted wholesale without turning the gate
+red. The remaining rows in the table above all need either a running engine
+(meshes, décor, tier structures) or a human (music, SFX), and are honestly marked.
 
 ### 5.1 The 200 finds — the asset problem, and its answer
 
