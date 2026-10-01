@@ -613,6 +613,26 @@ do -- 15. CLIENT-SIDE LOCALISATION COVERAGE
 	eq("every letter in the content set has text", #wordless, 0)
 	eq("no fallback fired while covering finds and letters", Format.totalMisses(), 0)
 
+	-- Seed Drifters must render as PEOPLE. They are the majority of arrivals
+	-- at a quiet post, they are never in the caller's names map because they
+	-- are not players, and until iteration 7 every one of them rendered as
+	-- "Someone" -- which made the Ledger, the surface carrying this game's
+	-- whole emotional argument, mostly a list of anonymous Someones.
+	local SeedsConfig = TidekeeperRequire("SeedsConfig")
+	local anonymous = 0
+	for i = 1, SeedsConfig.SEED_COUNT do
+		local ownerId = SeedsConfig.SEED_OWNER_BASE + i - 1
+		local name = Format.actorName(ownerId, nil)
+		if name == nil or name == "Someone" then
+			anonymous = anonymous + 1
+		end
+	end
+	eq("every Seed Drifter renders as a named person", anonymous, 0)
+
+	-- ...and a real player's name still wins over any seed mapping.
+	eq("a real player name is used when supplied", Format.actorName(4242, { [4242] = "Ada" }), "Ada")
+	eq("an unknown non-seed actor has no name", Format.actorName(4242, nil), nil)
+
 	-- ------------------------------------------------- then the real thing
 	local app, env = newServer({ seed = 77 })
 	local userId = 5150

@@ -48,6 +48,7 @@ local DrifterCodec = require(Tidekeeper.Shared.DrifterCodec)
 local ReceiptCodec = require(Tidekeeper.Shared.ReceiptCodec)
 local Drifter = require(Tidekeeper.Domain.Drifter)
 local LettersConfig = require(Tidekeeper.Config.LettersConfig)
+local SeedsConfig = require(Tidekeeper.Config.SeedsConfig)
 local Post = require(Tidekeeper.Domain.Post)
 
 local ExchangeService = {}
@@ -70,8 +71,12 @@ local MAX_PER_OWNER_PER_DAY = 3
 -- 64 hand-authored Seed Drifters (doc 03 section 8). Iteration 5 gives them
 -- names and letters; here they are a deterministic, stable population whose
 -- ids cannot collide with a real account.
-local SEED_OWNER_BASE = 1000000
-local SEED_COUNT = 64
+-- These used to be local literals here, duplicating the content. They are
+-- now read from the one place the 64 Seed characters are defined, so adding
+-- a Seed cannot leave the exchange addressing a different population than
+-- the Ledger names.
+local SEED_OWNER_BASE = SeedsConfig.SEED_OWNER_BASE
+local SEED_COUNT = SeedsConfig.SEED_COUNT
 
 local function newStats()
 	return {
@@ -498,6 +503,13 @@ function ExchangeService:seedDrifter(S, epoch, index)
 	-- Seeds are recognisable: modest budgets, no cargo, and they recur.
 	d.budget = math.floor(d.budget * 700 / 1000) + 25
 	d.cargo = {}
+	-- ...and each one leans hard on a single taste axis, which is what makes
+	-- a Seed a character you learn rather than another anonymous shopper.
+	-- `which` is 0-based; the config is 1-based.
+	local seed = SeedsConfig.SEEDS[which + 1]
+	if seed ~= nil and d.taste ~= nil then
+		d.taste[seed[3]] = seed[4]
+	end
 	return d
 end
 

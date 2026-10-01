@@ -32,6 +32,8 @@ const PURE = {
 	OrdersConfig: `${CODE}/Config/OrdersConfig.luau`,
 	FindsConfig: `${CODE}/Config/FindsConfig.luau`,
 	LettersConfig: `${CODE}/Config/LettersConfig.luau`,
+	SeedsConfig: `${CODE}/Config/SeedsConfig.luau`,
+	BadgesConfig: `${CODE}/Config/BadgesConfig.luau`,
 	NotifyConfig: `${CODE}/Config/NotifyConfig.luau`,
 	// Lib
 	MathExt: `${CODE}/Lib/MathExt.luau`,

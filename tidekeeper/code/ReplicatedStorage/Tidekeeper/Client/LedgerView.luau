@@ -96,7 +96,9 @@ function LedgerView.build(entries, names, options)
 			groups[#groups + 1] = group
 		end
 
-		local actorName = names and names[entry.actorId] or nil
+		-- Format.actorName also resolves Seed Drifters, who are never in
+		-- the names map because they are not players.
+		local actorName = Format.actorName(entry.actorId, names)
 		group.lines[#group.lines + 1] = {
 			templateId = entry.templateId,
 			actorId = entry.actorId,

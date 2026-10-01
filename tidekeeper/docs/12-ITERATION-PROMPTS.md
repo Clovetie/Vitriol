@@ -511,7 +511,94 @@ real output. Update ROADMAP.md, rewrite HANDOFF.md, write the iteration 8 prompt
 
 ---
 
-## Prompt — Iteration 8+: contingency and live
+## Prompt — Iteration 8: make the new systems reachable by a player
+
+```text
+You are iteration 8 of TIDEKEEPER (`tidekeeper/`). Read this part twice.
+
+Iteration 7 found FOUR features that were shipped and completely inert, and
+all 14 gate checks were green the whole time:
+  1. RF_Dispatch: the handler recorded the player's cargo and letter choice
+     on the post; ExchangeService read neither. No letter had ever reached a
+     player and cargo selection was silently discarded.
+  2. Tier promotion did not exist. S.tier was set to 1 at creation and no
+     code anywhere ever changed it, so 24-shelf posts, three of the five
+     currents, the passive caps and the entire doc 06 progression table
+     described a game nobody could play.
+  3. Post.setShelf let a client-supplied slot leave a gap, and a gap makes
+     the post UNSAVEABLE -- remotely triggerable data loss.
+  4. app.logger could be nil while seven handler rejection paths called it
+     unconditionally, so every validation failure threw instead of returning
+     a status.
+Iteration 6 found the same shape (the client looked for remotes in the wrong
+folder). The pattern is now established beyond argument: THE BUGS IN THIS
+PROJECT LIVE IN THE GAP BETWEEN TWO MODULES THAT ARE EACH INDIVIDUALLY
+CORRECT. Spend your first hour looking for another one before you write
+anything. Two scans now help: member-scan (a field read but never written)
+and dead-write-scan (a field written but never read).
+
+Work on branch `arena/01a0f2ee-vitriol` only. Never touch VITRIOL.
+
+FIRST, every time:
+  cd /home/user/Vitriol && git fetch && git reset --hard origin/arena/01a0f2ee-vitriol
+  cd tidekeeper/tools && npm install
+  git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau \
+    && make -C /tmp/luau config=release luau -j$(nproc) \
+    && cp /tmp/luau/luau tidekeeper/tools/bin/luau
+The branch is reset to the session base between turns and node_modules and
+tools/bin/luau do not survive. Then run the gate and READ it.
+
+Your job: the systems iteration 7 built are reachable by code but not by a
+player. Close that.
+
+1. AWARD THE BADGES. BadgesConfig ships 40 rows and 12 lifetime stats and
+   nothing increments a stat or awards anything. Note the design constraint
+   in the module header: a badge tests ONE stat against a threshold, and
+   that restriction is deliberate -- do not "improve" it into a rules
+   engine. The stats are LIFETIME counters, never balances, because doc 06
+   section 2 says an achievement is never revoked. They need to persist, so
+   this touches PostCodec: that means a SCHEMA_VERSION bump and a migration,
+   and Version.migrate already exists for exactly this. Returning nil from
+   an UpdateAsync transform ABORTS the write -- this project has shipped
+   that bug twice.
+
+2. CLIENT UI for the things that now exist: the upgrade button (RF_Upgrade,
+   which has no client caller at all), the letter picker (120 phrases, and
+   DispatchView must send the id the player chose), and the letter the
+   Ledger receives (LedgerView already carries `letterText`; nothing shows
+   it). Remember Main.client.luau was broken for three iterations because no
+   test constructs an Instance. That limit has not changed. Anything you
+   write in the client layer is unverified by construction -- say so.
+
+3. ECONOMY, if you change any income number: re-run
+   `node tidekeeper/tools/tidekeeper-session-test.js --tests tools/tests/economy-sim.lua`
+   and update both EconomyConfig's comment and doc 06 section 7. The costs
+   there were measured over 12 seeds x 70 days, and promotion COMPOUNDS, so
+   a small income change moves tier 4 by a week. pure-tests pins the three
+   calibrated numbers so you cannot change them silently.
+
+4. RESEARCH: OD7 is CLOSED (not available for v1, six iterations, confirmed
+   against the per-version API dump). Do not re-open it unless
+   CreateUserNotificationAsync reappears. Do not pad a research section with
+   "reconfirmed, no change".
+
+Honesty rules, unchanged:
+  - L4 needs an execute_luau transcript, L5 a playtest, L6 a human. Studio
+    has been unreachable for seven iterations; if that is still true, say so
+    plainly and do not imply otherwise.
+  - Paste real tool output. Never paraphrase it.
+  - Verify every new check by DELIBERATELY BREAKING something and watching
+    it fail. This project has shipped three checks that enforced nothing.
+  - A partial honest result beats a complete claimed one.
+
+Run `node tidekeeper/tools/tidekeeper-quality-gate.js`; it must be green.
+Paste the real output. Update ROADMAP.md, rewrite HANDOFF.md, write the
+iteration 9 prompt.
+```
+
+---
+
+## Prompt — Iteration 9+: contingency and live
 
 ## The handoff template
 

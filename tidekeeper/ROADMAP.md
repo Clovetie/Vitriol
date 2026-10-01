@@ -148,10 +148,41 @@ all 13 gate checks stayed green — because nothing in the toolchain constructs 
 Instance, so no Instance-path bug is visible to any of it. That limit is now
 written down rather than discovered again.
 
-## Iteration 7+ ⬜
+## Iteration 7 ✅ — four features that did not work, and the content to fill them
 
-Content that needs a human or an engine, economy tuning, then the idea bank in doc
-00 §9. Scope is defined by `HANDOFF.md`, not by this table.
+| Goal | Status |
+| --- | --- |
+| 120 letters, pinned to target | ✅ |
+| 64 Seed Drifters as named characters | ✅ |
+| 40 badges (config only) | ✅ |
+| Economy tuning against the 200-find table | ✅ measured, 12 seeds × 70 days |
+| Close OD14 (warmth into price) | ✅ closed **no** |
+| Re-check OD7 once | ✅ closed **not available for v1** |
+| Display names for the 176 finds added in it6 | ✅ they had none |
+| Awarding badges | ⬜ iteration 8 |
+| Client UI for upgrade / letters | ⬜ iteration 8 |
+
+**Four things were shipped-but-inert, all found by asking what nothing reads:**
+
+1. **`RF_Dispatch` was decoration.** `S.dispatchCargo` and `S.dispatchLetter` were
+   written by the handler and read by nothing; `ExchangeService` recomputed cargo
+   and hard-coded `letterId = 0`. No letter had ever reached a player.
+2. **No post could ever be promoted.** `S.tier` was set to 1 at creation and never
+   changed by any code. Every tier-gated system — 24 shelves, the four currents,
+   passive caps, the order-rule limits, the whole of doc 06 §7 — was unreachable.
+3. **Shelf density was a comment, not a rule.** A client-supplied slot could leave
+   a gap, and a gap makes the post **unsaveable**: remotely triggerable data loss.
+4. **`app.logger` could be nil** while seven handler rejection paths called it
+   unconditionally, so every validation failure threw instead of returning a status.
+
+All 14 checks were green while all four were true. Two new scans now close both
+directions of the cross-module field contract: `member-scan` (read, never written)
+and `dead-write-scan` (written, never read).
+
+## Iteration 8+ ⬜
+
+Award the badges, build the client UI for the systems that now exist, and the idea
+bank in doc 00 §9. Scope is defined by `HANDOFF.md`, not by this table.
 
 ---
 
@@ -174,7 +205,7 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD11 | Rewarded Video Ads at all? (doc 13 §4) | post-it5 | Not at launch; the tone is fragile |
 | OD12 | Is `Visit.resolve` actually inside 18 µs in Luau? | ~~it4~~ | **Closed at L3.5 (doc 04 §6.1).** Real Luau 0.700, median **15.9 µs** against an 18 µs budget — inside, but only 1.1×. p99 26.3 µs and full catch-up 2.9 ms both have room. `--codegen` is *slower*, so the hot path is table-bound, not arithmetic-bound |
 | OD13 | Arrival scheduling is window-width dependent (see below) | ~~it3~~ | **Closed.** `CadenceService.planChunks` and `chunkForDrifter` are pure; at-most-once is asserted by session scenario 8 |
-| OD14 | Should `warmth` feed the price a Drifter will accept, not just the prose? | **it5** | **Lean: no — keep it prose-only.** Now that the client exists, `warmth` reads as memory and courtesy. Wiring it into price turns it into a stat to farm and makes every visitor an optimisation problem, which is the opposite of doc 00's pillars. Decide against a playtest, not in the abstract |
+| OD14 ✅ | Should `warmth` feed the price a Drifter will accept, not just the prose? | **it7** | **CLOSED: no.** Held for three iterations waiting for a playtest that six iterations without Studio access make clear is not coming soon. Deciding it costs nothing to reverse and leaving it open was costing a decision every iteration. The reasoning has not changed and is not really empirical: wiring warmth into price turns it into a stat to farm, makes every visitor an optimisation problem, and contradicts doc 00's pillars directly. Warmth stays prose-only — it is something you notice, not something you optimise. Re-open only if a playtest shows players cannot tell warmth does anything at all, and fix that with better prose first. |
 | OD15 | DataStore compresses values itself; does our base64 packing still pay? (doc 10 §6.2) | it4 | Binary packing is not compression, but base64 inflates 33 %. Sizes are far inside budget — measure, do not redesign |
 | OD17 | Run the correctness suite in real Luau instead of transformed Lua 5.3 | ~~it5~~ | **Closed (doc 10 §8.4), and without Lute.** `tidekeeper-luau-test.js` runs the suite shim-free; 887 = 887 against fengari, 0.7 s vs 72 s. Lute release binaries remain unreachable and turned out not to be needed — it would have added a test runner and a profiler, not a different measurement |
 | OD18 | Adopt **LibMP** to measure the client frame budget on real devices (doc 10 §7.2) | it6 | Yes for the Ledger replay, sampled on a fraction of sessions — Roblox warns it raises memory. **Blocked on Studio**, like L4/L5 |

@@ -29,6 +29,7 @@
 local Hash = require(script.Parent.Parent.Lib.Hash)
 local Ledger = require(script.Parent.Parent.Domain.Ledger)
 local Strings = require(script.Parent.Strings)
+local SeedsConfig = require(script.Parent.Parent.Config.SeedsConfig)
 
 local Format = {}
 
@@ -91,6 +92,30 @@ function Format.letterText(id)
 		return Strings.LETTER_FALLBACK
 	end
 	return text
+end
+
+-- Resolve the name to print for an actor id.
+--
+-- Real players come from the `names` map the caller supplies. Seed Drifters
+-- are not players and will never be in that map, so until iteration 7 every
+-- one of them rendered as "Someone" -- and seeds are the majority of
+-- arrivals at a quiet post. Naming them here, at the one place the Ledger
+-- asks for a name, means no caller has to know seeds exist.
+function Format.actorName(actorId, names)
+	if actorId == nil then
+		return nil
+	end
+	if names ~= nil and names[actorId] ~= nil then
+		return names[actorId]
+	end
+	local index = actorId - SeedsConfig.SEED_OWNER_BASE + 1
+	if index >= 1 and index <= SeedsConfig.SEED_COUNT then
+		local seed = SeedsConfig.SEEDS[index]
+		if seed ~= nil then
+			return seed[2]
+		end
+	end
+	return nil
 end
 
 function Format.tideName(code)

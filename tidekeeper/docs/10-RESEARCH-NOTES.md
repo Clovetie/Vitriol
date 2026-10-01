@@ -524,6 +524,38 @@ platform changed between two checks on 2026-10-01, and a research note that says
 The one item with a date attached to it — the October notification beta — was
 checked, and it is recorded above. Iteration 6 spent its effort on content instead.
 
+## 11. Iteration-7 verification pass — 2026-10-01
+
+### 11.1 OD7 — the October beta window is open and the API is still not there
+
+Checked once, against the per-version machine-readable dump
+(`robloxapi.github.io/ref/class/ExperienceNotificationService.html`) rather than the
+prose docs, because it records *when* each member appeared and disappeared.
+
+`ExperienceNotificationService` still exposes exactly five members, all added in
+**v615** (2024-03-06): `CanPromptOptInAsync`, `InvokeOptInPromptClosed`,
+`PromptOptIn`, `OptInPromptClosed`, `PromptOptInRequested`.
+`CreateUserNotificationAsync` — added v591, removed v616 — is **still absent**. The
+same page shows `Instance` members changing as recently as **v734 (2026-08-10)**,
+so the dump is current; this is not a stale mirror.
+
+The opt-in half of the feature exists. The *send* half does not. There is still no
+API by which this game could notify an absent player.
+
+**OD7 resolution: closed as "not available for v1."** Six iterations is enough. The
+design has never depended on it — requirement R5 says the game must be fully
+playable with zero notifications, and it is — and `NotifyAdapter` stays
+capability-flagged so that the day the API ships, wiring it is a adapter change and
+nothing else. Re-open it only if `CreateUserNotificationAsync` reappears in the
+version dump.
+
+### 11.2 Nothing else was researched, deliberately
+
+The iteration-6 pass ran on this same calendar date and the iteration-7 prompt
+explicitly forbids re-fetching the performance and LibMP pages to pad a section.
+Everything else this iteration was found by reading the project's own code, which
+is where all four of its real defects were hiding.
+
 ## 9. Known unknowns
 
 Recorded so later iterations do not mistake absence of evidence for evidence.

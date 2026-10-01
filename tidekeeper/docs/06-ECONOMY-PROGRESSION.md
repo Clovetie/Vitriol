@@ -179,7 +179,40 @@ Almanac is a record of other people.
 
 ## 7. Progression pacing
 
-Targets, to be validated in iteration 5 against real data.
+**Measured in iteration 7.** These were targets with no mechanism behind them for
+six iterations: `S.tier` was set to 1 when a post was created and *nothing in the
+game ever changed it*, so every tier-gated system below was unreachable and this
+table described a game that could not be played. Iteration 7 added
+`EconomyConfig.TIER_COST`, `Post.promote`, the `RF_Upgrade` remote and
+`PostHandler.upgrade`, then calibrated the costs against the targets.
+
+`tools/tests/economy-sim.lua` simulates 12 seeds × 70 days of a
+diligent-but-not-optimal player (2 sessions/day, naive base-value pricing, buys the
+next tier as soon as it can afford it) and reports the day each seed arrived:
+
+| Tier | Cost | p10 | **median** | p90 | Target |
+| --- | --- | --- | --- | --- | --- |
+| 2 | 320 | 3 | **3** | 5 | day 3 |
+| 3 | 3 400 | 14 | **17** | 20 | day 16 |
+| 4 | 15 500 | 49 | **50** | 55 | day 52 |
+
+All 12 seeds reach tier 4. Three rounds of calibration were needed because
+**promotion compounds** — a promoted post has more shelves, a higher passive cap and
+richer currents, so each tier makes the next arrive sooner. The first costs were read
+off a curve measured with every post locked at tier 1 (the only curve obtainable at
+the time) and put tier 4 at day 22 instead of 52. *A progression curve cannot be
+calibrated against a simulation that cannot progress.*
+
+The model is the **fast end** of the distribution: it never hesitates and never
+spends on anything else, so these are a floor on time-to-tier, not a promise.
+
+Re-run after any change to income, find values or passive caps:
+
+```
+node tidekeeper/tools/tidekeeper-session-test.js --tests tools/tests/economy-sim.lua
+```
+
+The original targets, for comparison:
 
 | Milestone | Target time | Sessions |
 | --- | --- | --- |

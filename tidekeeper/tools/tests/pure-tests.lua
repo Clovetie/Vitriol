@@ -2375,6 +2375,61 @@ end
 eq(badFind, 0, "every find row is well formed")
 eq(Tables.count(idsSeen), #FindsConfig.FINDS, "every find id is unique")
 
+-- ---------------------------------------------------------------- badges
+-- Config only in iteration 7: awarding is iteration 8's job. The data still
+-- has to be correct now, because the ids are persisted as bit indices and
+-- an id that moves later silently re-awards or revokes a badge.
+local BadgesConfig = TidekeeperRequire("BadgesConfig")
+eq(#BadgesConfig.BADGES, 40, "doc 07 section 5 wants 40 badges for v1")
+
+local badgeNames = {}
+local badBadge = 0
+for i = 1, #BadgesConfig.BADGES do
+	local row = BadgesConfig.BADGES[i]
+	if row[1] ~= i then badBadge = badBadge + 1 end
+	if type(row[2]) ~= "string" or #row[2] == 0 then badBadge = badBadge + 1 end
+	if badgeNames[row[2]] then badBadge = badBadge + 1 end
+	badgeNames[row[2]] = true
+	if row[3] < 1 or row[3] > 3 then badBadge = badBadge + 1 end
+	if row[4] < 1 or row[4] > #BadgesConfig.STAT_NAMES then badBadge = badBadge + 1 end
+	-- A threshold of zero would award the badge to a brand-new post that has
+	-- done nothing, which is the one thing an achievement must never do.
+	if row[5] < 1 then badBadge = badBadge + 1 end
+	if row[6] ~= 0 and row[6] ~= 1 then badBadge = badBadge + 1 end
+end
+eq(badBadge, 0, "every badge row is well formed")
+eq(Tables.count(badgeNames), #BadgesConfig.BADGES, "every badge has a distinct name")
+
+-- Every declared stat must be used by at least one badge, or it is a column
+-- nobody reads -- the same dead-config problem the gate already checks for.
+local statUsed = {}
+for i = 1, #BadgesConfig.BADGES do
+	statUsed[BadgesConfig.BADGES[i][4]] = true
+end
+eq(Tables.count(statUsed), #BadgesConfig.STAT_NAMES, "every badge stat is used by at least one badge")
+
+-- ----------------------------------------------------------------- seeds
+-- Seeds are the floor under the exchange and the majority of arrivals at a
+-- quiet post. They were anonymous until iteration 7, which meant most Ledger
+-- lines read "Someone".
+local SeedsConfig = TidekeeperRequire("SeedsConfig")
+eq(#SeedsConfig.SEEDS, 64, "doc 07 section 5 wants 64 Seed Drifters for v1")
+eq(SeedsConfig.SEED_COUNT, #SeedsConfig.SEEDS, "the exchange population matches the named cast")
+
+local seedNames = {}
+local badSeed = 0
+for i = 1, #SeedsConfig.SEEDS do
+	local row = SeedsConfig.SEEDS[i]
+	if row[1] ~= i then badSeed = badSeed + 1 end
+	if type(row[2]) ~= "string" or #row[2] == 0 then badSeed = badSeed + 1 end
+	if seedNames[row[2]] then badSeed = badSeed + 1 end
+	seedNames[row[2]] = true
+	if row[3] < 1 or row[3] > #DrifterConfig.AXIS_NAMES then badSeed = badSeed + 1 end
+	if row[4] < DrifterConfig.TASTE_MIN or row[4] > DrifterConfig.TASTE_MAX then badSeed = badSeed + 1 end
+end
+eq(badSeed, 0, "every Seed row is well formed")
+eq(Tables.count(seedNames), #SeedsConfig.SEEDS, "every Seed has a distinct name")
+
 -- --------------------------------------------------------------- letters
 -- The letter list is the other half of the dispatch feature that iteration 7
 -- found inert: the ids were validated against a hard-coded ceiling of 96 and
