@@ -768,6 +768,21 @@ Strings.UI = {
 	ERR_NO_POST = "Your post is still coming out of the water. One moment.",
 	ERR_BUSY = "Too quick. Give it a second.",
 	ERR_OFFLINE = "Can't reach the post right now. Nothing you did is lost.",
+	ERR_ILLEGAL = "That can't be done just now.",
+	ERR_COOLDOWN = "You've already been over that ground. Give it a few tides.",
+
+	-- Buying a tier. The cost comes from the server in the snapshot, never
+	-- from a local copy of the table.
+	UPGRADE_OFFER = "Make it a tier {1} post — {2} coin",
+	UPGRADE_MAXED = "The post is as big as it gets.",
+	UPGRADE_SHORT = "You need {1} more.",
+	UPGRADE_DONE = "The builders come in on the next low water.",
+
+	-- Choosing a letter to send out with a drifter.
+	LETTER_TITLE = "Send a note",
+	LETTER_NONE = "No note",
+	LETTER_CATEGORY = "{1}",
+	LETTER_CHOSEN = "You wrote: {1}",
 }
 
 -- Authored phrases a player may attach to a dispatched Drifter. THE COMPLETE

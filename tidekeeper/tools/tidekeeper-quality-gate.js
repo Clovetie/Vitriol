@@ -39,7 +39,7 @@ const MAX_CAPTURE = 200000;
  * constant on purpose: a gate that infers how far along the project is will
  * eventually infer wrongly and let a missing harness through.
  */
-const CURRENT_ITERATION = 8;
+const CURRENT_ITERATION = 9;
 
 function die(message) {
 	console.error(`tidekeeper-quality-gate: ${message}`);
@@ -200,6 +200,7 @@ run("member-scan", "tidekeeper-member-scan.js", [], { requiredFrom: 6, needsSour
 // nothing reads. Caught the inert RF_Dispatch feature. Required from 7.
 run("dead-write-scan", "tidekeeper-dead-write-scan.js", [], { requiredFrom: 7, needsSource: true });
 run("orphan-scan", "tidekeeper-orphan-scan.js", [], { requiredFrom: 8, needsSource: true });
+run("remote-scan", "tidekeeper-remote-scan.js", [], { requiredFrom: 9, needsSource: true });
 
 run("determinism-scan", "tidekeeper-determinism-scan.js", ["--src", rel(args.src)], { needsSource: true });
 

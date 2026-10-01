@@ -798,10 +798,15 @@ do -- 15. CLIENT-SIDE LOCALISATION COVERAGE
 
 	-- NO FREE TEXT, proved on the client side of the wire too. The server
 	-- side is asserted by NetContract.hasNoStringFields in the smoke suite.
+	-- The note crosses the wire as a LETTER ID. Until iteration 9 this
+	-- builder sent a `phrase` index into Strings.PHRASE, which is a
+	-- different table with a different ceiling from the one SPEC_DISPATCH
+	-- validates against -- so the payload asserted here could never have
+	-- been accepted by the server. See scenario 21.
 	local payload = DispatchView.payload(1, 2, 7, { { findId = 3, qty = 1 } })
 	ok("a dispatch payload carries no strings", DispatchView.payloadHasNoStrings(payload))
-	eq("the phrase crosses the wire as an index", type(payload.phrase), "number")
-	ok("the phrase index names a real authored phrase", Strings.PHRASE[payload.phrase] ~= nil)
+	eq("the note crosses the wire as an index", type(payload.letterId), "number")
+	ok("the letter index names a real authored letter", Strings.LETTER[payload.letterId] ~= nil)
 
 	REPORT.ledgerTemplates = 0
 	for _ in pairs(Strings.LEDGER) do
@@ -1264,4 +1269,228 @@ do -- 20. A BADGE IS EARNED IN PLAY AND SURVIVES THE SAVE
 	ok("the post loaded back", reloaded ~= nil)
 	ok("the badge survived the save and the load", Badges.has(reloaded, 1))
 	ge("...and the lifetime counter came back too", reloaded.stats.served, 1)
+end
+
+do -- 21. EVERY CLIENT PAYLOAD IS ACCEPTED BY THE SERVER'S OWN CONTRACT
+	-- Iteration 9 found that two of the three payload builders the client
+	-- owned produced payloads the server would have rejected outright, and
+	-- that nothing had noticed because NO CLIENT CODE EVER SENT ONE.
+	--
+	--   PostView.arrangePayload sent `find`; SPEC_ARRANGE wants `findId`,
+	--     and the spec is strict. Every arrange would have been malformed.
+	--     It also clamped price to 4294967295, the u32 of the STORAGE
+	--     format, rather than EconomyConfig.MAX_PRICE (4294967), the ceiling
+	--     the CONTRACT enforces -- a thousand times too generous.
+	--   DispatchView.payload sent `slot` and `phrase`; SPEC_DISPATCH wants
+	--     `targets` (an array) and `letterId` (a different table with a
+	--     different ceiling), and wanted cargo as plain ids, not {id, qty}.
+	--
+	-- A comment cannot keep two modules in agreement. This runs each client
+	-- builder's output through NetContract.accept -- the real server gate,
+	-- including rate limit, sequence and schema -- so the halves cannot
+	-- drift apart again without a red test.
+	local NetContract = TidekeeperRequire("NetContract")
+	local PostView = TidekeeperRequire("PostView")
+	local OrdersView = TidekeeperRequire("OrdersView")
+	local DispatchView = TidekeeperRequire("DispatchView")
+	local LetterView = TidekeeperRequire("LetterView")
+	local EconomyConfig = TidekeeperRequire("EconomyConfig")
+	local LettersConfig = TidekeeperRequire("LettersConfig")
+	local Orders = TidekeeperRequire("Orders")
+
+	local userId = 6001
+	local now = 1700000000
+
+	-- A fresh guard per remote: the rate limiter is per player per remote,
+	-- and this test cares about SHAPE, not about throttling.
+	local function accepts(name, payload)
+		local guard = NetContract.newGuard()
+		return NetContract.accept(guard, userId, name, payload, now)
+	end
+
+	-- RF_Arrange
+	local arrange = PostView.arrangePayload(1, 3, 41, 12)
+	local okArrange, whyArrange = accepts(NetContract.RF_ARRANGE, arrange)
+	ok("the client's arrange payload is accepted: " .. tostring(whyArrange), okArrange)
+	eq("...and names the find the way the contract does", arrange.findId, 41)
+	ok("...and sends no key called 'find'", arrange.find == nil)
+
+	-- The clamp must match the CONTRACT's ceiling, not the storage format's.
+	local clamped = PostView.arrangePayload(2, 1, 1, 999999999)
+	eq("an absurd price is clamped to MAX_PRICE", clamped.price, EconomyConfig.MAX_PRICE)
+	ok("...and the clamped payload is still accepted", accepts(NetContract.RF_ARRANGE, clamped))
+	local negative = PostView.arrangePayload(3, 1, 1, -5)
+	eq("a negative price is clamped to zero", negative.price, 0)
+	ok("...and is accepted", accepts(NetContract.RF_ARRANGE, negative))
+	-- findId 0 means "clear this shelf" and must remain legal.
+	ok("clearing a shelf is accepted", accepts(NetContract.RF_ARRANGE, PostView.arrangePayload(4, 2, 0, 0)))
+
+	-- RF_Dispatch
+	local dispatch = DispatchView.payload(1, { 1, 3 }, 42, { 7, 9 })
+	local okDispatch, whyDispatch = accepts(NetContract.RF_DISPATCH, dispatch)
+	ok("the client's dispatch payload is accepted: " .. tostring(whyDispatch), okDispatch)
+	eq("...with targets as an array", #dispatch.targets, 2)
+	eq("...and a letterId, not a phrase index", dispatch.letterId, 42)
+	ok("...and no key called 'phrase'", dispatch.phrase == nil)
+	ok("...and no key called 'slot'", dispatch.slot == nil)
+	eq("...and cargo as plain find ids", dispatch.cargo[1], 7)
+
+	-- The picker's shape must also survive: {findId=} is what a UI builds.
+	local fromPicker = DispatchView.payload(2, 2, 0, { { findId = 11 }, { findId = 12 } })
+	ok("a payload built from the picker's shape is accepted", accepts(NetContract.RF_DISPATCH, fromPicker))
+	eq("...and still puts plain ids on the wire", fromPicker.cargo[2], 12)
+	-- A single target, not a list, is the common case and must work.
+	ok("a single target is accepted", accepts(NetContract.RF_DISPATCH, DispatchView.payload(3, 1, 0, {})))
+	-- An out-of-range letter is dropped to "no note" rather than rejected.
+	local badLetter = DispatchView.payload(4, 1, LettersConfig.MAX_LETTER_ID + 500, {})
+	eq("an impossible letter becomes no letter", badLetter.letterId, 0)
+	ok("...and the payload is still accepted", accepts(NetContract.RF_DISPATCH, badLetter))
+
+	-- RF_SetOrders
+	-- A program is { version, rules }, not a bare rule list.
+	local program = Orders.empty()
+	local orders = OrdersView.setOrdersPayload(1, program)
+	ok("the client's orders payload is accepted", accepts(NetContract.RF_SET_ORDERS, orders))
+
+	-- RF_Comb and RF_Upgrade are built inline by ClientBootstrap; assert the
+	-- same shapes it sends.
+	ok("a comb payload is accepted", accepts(NetContract.RF_COMB, { seq = 1, zoneId = 1, nodeId = 1 }))
+	ok("an upgrade payload is accepted", accepts(NetContract.RF_UPGRADE, { seq = 1 }))
+
+	-- And the letter picker only ever offers ids the contract allows.
+	local cats = LetterView.categories()
+	eq("the picker offers seven categories", #cats, #LettersConfig.CATEGORY_NAMES)
+	local total = 0
+	for i = 1, #cats do
+		local letters = LetterView.lettersIn(i)
+		total = total + #letters
+		for j = 1, #letters do
+			ok("letter " .. letters[j].id .. " is valid", LetterView.isValid(letters[j].id))
+			ok("letter " .. letters[j].id .. " has words", letters[j].text ~= nil and #letters[j].text > 0)
+		end
+	end
+	eq("every letter is reachable through exactly one category", total, LettersConfig.MAX_LETTER_ID)
+	ok("'no note' is valid", LetterView.isValid(LetterView.NONE))
+	ok("an out-of-range letter is not", not LetterView.isValid(LettersConfig.MAX_LETTER_ID + 1))
+end
+
+do -- 22. A PLAYER CAN ACTUALLY DO THINGS
+	-- Scenario 16 proves the client can ask for a session and render every
+	-- screen. Until iteration 9 that was the whole of what a player could
+	-- do: five of the six client -> server remotes had no caller anywhere in
+	-- the client, so arranging a shelf, combing, setting orders, dispatching
+	-- and buying a tier were unreachable.
+	--
+	-- This drives each verb through ClientBootstrap into the REAL handlers
+	-- with the REAL app, so a payload the contract would reject fails here.
+	local ClientBootstrap = TidekeeperRequire("ClientBootstrap")
+	local NetContract = TidekeeperRequire("NetContract")
+	local Format = TidekeeperRequire("Format")
+	local SessionHandler = TidekeeperRequire("SessionHandler")
+	local PostHandler = TidekeeperRequire("PostHandler")
+	local DispatchHandler = TidekeeperRequire("DispatchHandler")
+	local Post = TidekeeperRequire("Post")
+	local EconomyConfig = TidekeeperRequire("EconomyConfig")
+
+	local app, env = newServer({ seed = 777001 })
+	local userId = 6150
+	local player = env:addPlayer(userId)
+	settle(app, env, 200)
+
+	local function now()
+		return env.clock.now
+	end
+	local function remoteTo(handler)
+		return { InvokeServer = function(_, payload) return handler(app, player, payload) end }
+	end
+
+	local clientLog = {}
+	local client = ClientBootstrap.start({
+		clock = now,
+		userId = userId,
+		logger = function(tag, msg) clientLog[#clientLog + 1] = tostring(tag) .. ": " .. tostring(msg) end,
+		remotes = {
+			[NetContract.RF_SESSION] = remoteTo(SessionHandler.handle),
+			[NetContract.RF_ARRANGE] = remoteTo(PostHandler.arrange),
+			[NetContract.RF_COMB] = remoteTo(PostHandler.comb),
+			[NetContract.RF_SET_ORDERS] = remoteTo(PostHandler.setOrders),
+			[NetContract.RF_UPGRADE] = remoteTo(PostHandler.upgrade),
+			[NetContract.RF_DISPATCH] = remoteTo(DispatchHandler.handle),
+		},
+	})
+
+	local reply = client:requestSession()
+	ok("the client has a session", reply ~= nil)
+
+	local S = app.posts:get(userId)
+	ok("the server has the post", S ~= nil)
+
+	-- ------------------------------------------------------------- arrange
+	Post.addStock(S, 7, 5)
+	local arranged, arrangeWhy = client:arrange(1, 7, 25)
+	ok("the player can put a find on a shelf: " .. tostring(arrangeWhy), arranged ~= nil)
+	eq("...and the server really shelved it", S.shelves[1] ~= nil and S.shelves[1].id or 0, 7)
+	eq("...at the price asked", S.shelves[1] ~= nil and S.shelves[1].price or 0, 25)
+
+	-- ---------------------------------------------------------------- comb
+	env:advance(60)
+	-- Zone 1 is the tide line and only exists at low water, so it is NOT a
+	-- good test of "can the player comb at all". Zone 2 always exists.
+	local combed, combWhy = client:comb(2, 1)
+	ok("the player can comb the beach: " .. tostring(combWhy), combed ~= nil)
+
+	-- A refusal must say the right thing. Until iteration 9 every status
+	-- above 2 rendered as "Can't reach the post right now", so a tide-gated
+	-- zone told the player their connection had dropped.
+	env:advance(60)
+	local Tide = TidekeeperRequire("Tide")
+	if Tide.stateForEpoch(Tide.epoch(now())) ~= "LOW" then
+		local blocked, blockedWhy = client:comb(1, 1)
+		ok("combing the tide line off-tide is refused", blocked == nil)
+		ok("...and does NOT claim the connection is down", blockedWhy ~= Format.label("ERR_OFFLINE"))
+	end
+
+	-- -------------------------------------------------------------- orders
+	env:advance(60)
+	local Orders = TidekeeperRequire("Orders")
+	local ordered, ordersWhy = client:setOrders(Orders.empty())
+	ok("the player can set standing orders: " .. tostring(ordersWhy), ordered ~= nil)
+
+	-- ------------------------------------------------------------ dispatch
+	env:advance(60)
+	local sent, sentWhy = client:dispatch({ 1 }, 42, { 7 })
+	ok("the player can dispatch a drifter with a letter: " .. tostring(sentWhy), sent ~= nil)
+	eq("...and the server recorded the letter", S.dispatchLetter, 42)
+
+	-- ------------------------------------------------------------- upgrade
+	-- The offer is read from the snapshot the server sent, never computed
+	-- locally. A client that shows a different price from the one charged is
+	-- how a cozy game gets a reputation for lying.
+	local offer = client:upgradeOffer()
+	ok("there is an upgrade offer to show", offer ~= nil)
+	eq("...quoting the server's price for tier 2", offer.cost, EconomyConfig.TIER_COST[2])
+	ok("...and it is not affordable while broke", offer.affordable == false)
+	ge("...and it says how much more is needed", offer.shortfall, 1)
+
+	-- Too poor: refused, with a sentence the player can read.
+	env:advance(60)
+	local poor, poorWhy = client:upgrade()
+	ok("buying a tier while broke is refused", poor == nil)
+	ok("...with a readable reason", type(poorWhy) == "string" and #poorWhy > 0)
+	eq("...and the post is still tier 1", S.tier, 1)
+
+	-- Rich enough: it goes through, and the offer updates from the reply.
+	S.coin = EconomyConfig.TIER_COST[2] + 10
+	env:advance(60)
+	local bought, boughtWhy = client:upgrade()
+	ok("buying a tier works when affordable: " .. tostring(boughtWhy), bought ~= nil)
+	eq("...and the post is tier 2 on the server", S.tier, 2)
+	local after = client:upgradeOffer()
+	eq("...and the client now quotes tier 3's price", after.cost, EconomyConfig.TIER_COST[3])
+	eq("...from a snapshot that tracked the server", client.snapshot.tier, 2)
+
+	-- Every verb above went through NetContract.accept inside the handler,
+	-- so this count is also proof that none of them was silently rejected.
+	ge("the client made at least six invokes", client.stats.invokes, 6)
+	eq("no invoke failed at the transport level", client.stats.failures, 0)
 end

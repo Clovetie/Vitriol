@@ -27,6 +27,7 @@ local TideView = require(script.Parent.TideView)
 local PostView = require(script.Parent.PostView)
 local OrdersView = require(script.Parent.OrdersView)
 local DispatchView = require(script.Parent.DispatchView)
+local LetterView = require(script.Parent.LetterView)
 local NetContract = require(script.Parent.Parent.Shared.NetContract)
 
 local ClientBootstrap = {}
@@ -82,6 +83,7 @@ function ClientBootstrap.start(opts)
 		post = PostView,
 		orders = OrdersView,
 		dispatch = DispatchView,
+		letter = LetterView,
 		format = Format,
 	}
 
@@ -121,17 +123,145 @@ function ClientBootstrap:requestSession()
 		return nil, Format.label("ERR_OFFLINE")
 	end
 	if reply.status ~= 0 then
-		return nil, self:statusText(reply.status)
+		return nil, self:statusText(reply.status, NetContract.RF_SESSION)
 	end
 	self:applySnapshot(reply)
 	return reply
 end
 
-function ClientBootstrap:statusText(status)
+-- ---------------------------------------------------------------- actions
+--
+-- THE CLIENT COULD NOT DO ANYTHING UNTIL ITERATION 9.
+--
+-- Six client -> server remotes existed. All six were bound on the server,
+-- rate limited, schema checked and covered by session tests. The client
+-- called exactly ONE of them, `RF_Session`, and then listened. Arranging a
+-- shelf, combing the beach, setting orders, dispatching a drifter and buying
+-- a tier -- every verb in the game -- had no path from a player's hands to
+-- the server at all.
+--
+-- Nothing caught it because each half was complete and correct on its own:
+-- the handlers are real and tested, the payload builders are real and
+-- tested, and no check asked whether anybody ever CALLED one.
+-- `tidekeeper-remote-scan.js` now asks exactly that.
+--
+-- Every action returns (reply, errorText). The error text is already
+-- localised, so a caller can put it straight on the screen.
+
+-- The scalar fields an action reply may carry back. `nextCost` is here
+-- because the upgrade reply is the only place the new price appears, and a
+-- stale price on the button is a lie the player can see.
+ClientBootstrap.AUTHORITATIVE_FIELDS = { "tier", "coin", "renown", "nextCost", "shelfCount", "maxShelves", "stock" }
+
+-- Shared tail: an action is a sequence number, an invoke, and a status that
+-- is either zero or a sentence the player can read. Writing it five times
+-- would be five chances to forget the status check.
+function ClientBootstrap:act(remoteName, payload)
+	local reply = self:invoke(remoteName, payload)
+	if reply == nil then
+		return nil, Format.label("ERR_OFFLINE")
+	end
+	if reply.status ~= 0 then
+		return nil, self:statusText(reply.status, remoteName)
+	end
+	-- Fold whatever authoritative values came back into the snapshot, so the
+	-- screen can never drift from the server's idea of the post. Only fields
+	-- the reply actually carries are touched: an action that returns just a
+	-- status leaves the snapshot alone rather than blanking it.
+	local snap = self.snapshot
+	if snap ~= nil then
+		for _, key in ipairs(ClientBootstrap.AUTHORITATIVE_FIELDS) do
+			if reply[key] ~= nil then
+				snap[key] = reply[key]
+			end
+		end
+	end
+	self.dirty = true
+	return reply
+end
+
+-- Put a find on a shelf, change its price, or clear the shelf with findId 0.
+function ClientBootstrap:arrange(slot, findId, price)
+	return self:act(NetContract.RF_ARRANGE, PostView.arrangePayload(self:nextSeq(), slot, findId, price))
+end
+
+-- Comb a node for finds.
+function ClientBootstrap:comb(zoneId, nodeId)
+	return self:act(NetContract.RF_COMB, {
+		seq = self:nextSeq(),
+		zoneId = math.floor(zoneId or 0),
+		nodeId = math.floor(nodeId or 0),
+	})
+end
+
+-- Replace the standing orders with a compiled program.
+function ClientBootstrap:setOrders(program)
+	return self:act(NetContract.RF_SET_ORDERS, OrdersView.setOrdersPayload(self:nextSeq(), program))
+end
+
+-- Send a drifter out, optionally carrying one of the 120 letters.
+function ClientBootstrap:dispatch(targets, letterId, cargo)
+	return self:act(NetContract.RF_DISPATCH, DispatchView.payload(self:nextSeq(), targets, letterId, cargo or {}))
+end
+
+-- Buy the next tier. The payload carries no arguments on purpose: the server
+-- knows the post, the post knows its tier, and the cost is server-side
+-- config. A payload naming a target tier or a price would be worth forging.
+function ClientBootstrap:upgrade()
+	return self:act(NetContract.RF_UPGRADE, { seq = self:nextSeq() })
+end
+
+-- What the upgrade button should say, and whether it can be pressed. Read
+-- from the snapshot the server sent, never computed from a local copy of the
+-- cost table -- the client showing a different price from the one charged is
+-- how a cozy game gets a reputation for lying.
+function ClientBootstrap:upgradeOffer()
+	local snap = self.snapshot
+	if snap == nil then
+		return nil
+	end
+	local cost = snap.nextCost
+	local tier = snap.tier or 1
+	if cost == nil or cost <= 0 then
+		return { tier = tier, affordable = false, maxed = true, text = Format.label("UPGRADE_MAXED") }
+	end
+	local coin = snap.coin or 0
+	return {
+		tier = tier,
+		cost = cost,
+		maxed = false,
+		affordable = coin >= cost,
+		text = Format.label("UPGRADE_OFFER", { tier + 1, cost }),
+		shortfall = (coin < cost) and (cost - coin) or 0,
+	}
+end
+
+-- Turn a handler status code into a sentence.
+--
+-- THIS USED TO LIE. Only codes 1 and 2 were mapped and everything else fell
+-- through to ERR_OFFLINE -- "Can't reach the post right now". So a comb
+-- refused because the tide was wrong (code 3), or a node still regrowing
+-- (code 4), told the player their connection had dropped. Nothing noticed,
+-- because no client code ever called a remote that could return a 3 or a 4.
+--
+-- Code 4 is the awkward one and is worth stating plainly: PostHandler calls
+-- it E_COOLDOWN and DispatchHandler calls it E_ALREADY_OUT. The same number
+-- means two different things depending on which remote answered, so the
+-- remote name has to come in with it. That is a wart in the contract rather
+-- than in this function -- see OD23 -- but the client must not mistranslate
+-- it in the meantime.
+function ClientBootstrap:statusText(status, remoteName)
 	if status == 1 then
 		return Format.label("ERR_REJECTED")
 	elseif status == 2 then
 		return Format.label("ERR_NO_POST")
+	elseif status == 3 then
+		return Format.label("ERR_ILLEGAL")
+	elseif status == 4 then
+		if remoteName == NetContract.RF_DISPATCH then
+			return Format.label("DISPATCH_ALREADY")
+		end
+		return Format.label("ERR_COOLDOWN")
 	end
 	return Format.label("ERR_OFFLINE")
 end

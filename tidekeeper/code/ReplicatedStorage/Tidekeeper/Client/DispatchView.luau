@@ -19,6 +19,7 @@
 
 local Format = require(script.Parent.Format)
 local Strings = require(script.Parent.Strings)
+local LettersConfig = require(script.Parent.Parent.Config.LettersConfig)
 
 local DispatchView = {}
 
@@ -61,20 +62,55 @@ function DispatchView.build(slots, held, alreadyOut)
 	}
 end
 
--- The RF_Dispatch payload. Integers only, and the phrase is an INDEX.
-function DispatchView.payload(seq, slotIndex, phraseIndex, cargo)
+-- The RF_Dispatch payload. Integers only, and the letter is an ID, never text.
+--
+-- THIS FUNCTION BUILT A PAYLOAD THE SERVER COULD NEVER HAVE ACCEPTED, in
+-- three separate ways, from iteration 6 until iteration 9 -- and nothing
+-- noticed because no client code ever sent one. Against `SPEC_DISPATCH`:
+--
+--   * it sent `slot`, the spec wants `targets`, an ARRAY of 1..3 indices
+--     (you may send one drifter to several destinations);
+--   * it sent `phrase`, indexing `Strings.PHRASE`; the spec wants `letterId`,
+--     indexing the 120 letters in LettersConfig. Two different tables with
+--     two different ceilings;
+--   * cargo elements were tables `{id, qty}`; the spec wants plain find ids,
+--     because quantity is not the client's to choose -- the server moves what
+--     the shelf actually holds.
+--
+-- The spec is strict, so each of these alone was a guaranteed rejection.
+-- Iteration 9's conformance test now validates this function's output against
+-- the server's own schema, so the three halves cannot drift apart again.
+function DispatchView.payload(seq, targets, letterId, cargo)
+	local out = {}
+	local list = type(targets) == "table" and targets or { targets }
+	for i = 1, math.min(DispatchView.SLOT_COUNT, #list) do
+		local t = math.floor(list[i] or 0)
+		if t >= 1 and t <= DispatchView.SLOT_COUNT then
+			out[#out + 1] = t
+		end
+	end
+	if #out == 0 then
+		out[1] = 1
+	end
+
 	local items = {}
 	for i = 1, math.min(DispatchView.MAX_CARGO, #cargo) do
-		items[i] = { id = math.floor(cargo[i].findId or 0), qty = math.floor(cargo[i].qty or 0) }
+		local entry = cargo[i]
+		-- Accept either a plain id or the {findId=} shape the picker builds,
+		-- and put a plain id on the wire either way.
+		local id = type(entry) == "table" and (entry.findId or entry.id) or entry
+		items[i] = math.floor(id or 0)
 	end
-	local phrase = math.floor(phraseIndex or 0)
-	if phrase < 0 or phrase > #Strings.PHRASE then
-		phrase = 0
+
+	local letter = math.floor(letterId or 0)
+	if letter < 0 or letter > LettersConfig.MAX_LETTER_ID then
+		letter = 0
 	end
+
 	return {
 		seq = seq,
-		slot = math.floor(slotIndex or 0),
-		phrase = phrase,
+		targets = out,
+		letterId = letter,
 		cargo = items,
 	}
 end

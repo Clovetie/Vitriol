@@ -83,10 +83,14 @@ const ALLOWED_ORPHANS = new Map([
 	// --- blocked on a client that does not exist yet --------------------
 	// These are the payload builders for UI nobody has built. They are real
 	// unfinished work, tracked in doc 07, NOT library surface.
-	["OrdersView.setOrdersPayload", "client UI not built; doc 07 row Orders"],
+	//
+	// Iteration 9 wired the ACTIONS up, so arrangePayload and
+	// setOrdersPayload left this list -- and the scan made them leave by
+	// failing on the stale entries rather than letting them sit here
+	// looking like excuses. What remains is presentation: the preview and
+	// layout helpers that need a real screen.
 	["OrdersView.preview", "client UI not built; doc 07 row Orders"],
 	["OrdersView.domainValues", "client UI not built; doc 07 row Orders"],
-	["PostView.arrangePayload", "client UI not built; doc 07 row Arrange"],
 	["TideView.dayCurve", "client UI not built; doc 07 row Tide dial"],
 
 	// --- blocked on a platform capability that does not exist -----------

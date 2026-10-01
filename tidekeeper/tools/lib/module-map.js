@@ -69,6 +69,7 @@ const CLIENT = {
 	TideView: `${CODE}/Client/TideView.luau`,
 	PostView: `${CODE}/Client/PostView.luau`,
 	OrdersView: `${CODE}/Client/OrdersView.luau`,
+	LetterView: `${CODE}/Client/LetterView.luau`,
 	DispatchView: `${CODE}/Client/DispatchView.luau`,
 	ClientBootstrap: `${CODE}/Client/ClientBootstrap.luau`,
 };

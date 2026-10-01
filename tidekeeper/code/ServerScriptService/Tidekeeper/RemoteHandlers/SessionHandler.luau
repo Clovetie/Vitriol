@@ -82,6 +82,12 @@ function SessionHandler.handle(app, player, payload)
 		shelfCount = Post.shelfCount(S),
 		shelves = S.shelves,
 		maxShelves = Post.maxShelves(S.tier),
+		-- What the next tier costs, or nil at the top. The client must never
+		-- compute this from its own copy of the table: a client showing a
+		-- different price from the one charged is how a cozy game gets a
+		-- reputation for lying. The server is the only place the number
+		-- exists.
+		nextCost = Post.promotionCost(S),
 		stock = Post.totalStock(S),
 		chunks = session and session.chunkCount or 0,
 		pending = app.cadence:pendingResolves(),

@@ -12,6 +12,7 @@
 
 local Post = require(script.Parent.Parent.Domain.Post)
 local Format = require(script.Parent.Format)
+local EconomyConfig = require(script.Parent.Parent.Config.EconomyConfig)
 
 local PostView = {}
 
@@ -60,18 +61,31 @@ end
 -- impossible request never leaves the device -- not because the server trusts
 -- us (it re-checks everything) but because a rejected round trip costs the
 -- player a second for nothing.
+--
+-- TWO BUGS LIVED HERE UNTIL ITERATION 9, AND ONLY BECAUSE NOTHING SENT IT.
+-- The key was `find`; `SPEC_ARRANGE` has always called it `findId`, and the
+-- spec is strict, so every arrange this function could ever have built would
+-- have been rejected by the server as malformed. The clamp was also wrong:
+-- it used the u32 ceiling of the storage format (4294967295) rather than
+-- `EconomyConfig.MAX_PRICE` (4294967), the ceiling the contract actually
+-- enforces -- a thousand times too generous.
+--
+-- Clamping client-side is not the server trusting us: the server re-checks
+-- everything. It is so that an obviously impossible request never costs the
+-- player a round trip. That only works if the client clamps to the SAME
+-- number the server does, which is why the constant is imported rather than
+-- written out.
 function PostView.arrangePayload(seq, slot, findId, price)
-	local maxPrice = 4294967295 -- the u32 the PostCodec shelf price is stored in
 	local p = math.floor(price or 0)
 	if p < 0 then
 		p = 0
-	elseif p > maxPrice then
-		p = maxPrice
+	elseif p > EconomyConfig.MAX_PRICE then
+		p = EconomyConfig.MAX_PRICE
 	end
 	return {
 		seq = seq,
 		slot = math.floor(slot or 0),
-		find = math.floor(findId or 0),
+		findId = math.floor(findId or 0),
 		price = p,
 	}
 end
