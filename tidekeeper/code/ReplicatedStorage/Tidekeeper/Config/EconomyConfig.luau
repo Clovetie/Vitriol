@@ -80,6 +80,39 @@ return {
 	WARMTH_MAX = 127,
 
 	-- Passive income (doc 06 section 4) ---------------------------------------
+	-- Coin to reach each tier, indexed BY THE TIER BEING BOUGHT. Index 1 is
+	-- zero because every post starts at tier 1.
+	--
+	-- THESE NUMBERS WERE MEASURED, NOT INVENTED.
+	-- tools/tests/economy-sim.lua simulates 12 seeds x 70 days of a
+	-- diligent-but-not-optimal player (2 sessions/day, naive base-value
+	-- pricing, buys the next tier the moment it can afford it) and reports
+	-- the day each seed reached each tier. Final calibration against the
+	-- pacing targets in doc 06 section 7:
+	--
+	--   tier    p10   median   p90      doc 06 target
+	--   2         3        3     5      day 3
+	--   3        14       17    20      day 16
+	--   4        49       50    55      day 52
+	--
+	-- All 12 seeds reach tier 4. Three rounds of calibration were needed
+	-- because PROMOTION COMPOUNDS: a promoted post has more shelves, a
+	-- higher passive cap and access to richer currents, so each tier makes
+	-- the next one arrive faster. The first attempt was read off a curve
+	-- measured with every post locked at tier 1 -- which was the only curve
+	-- obtainable at the time, since nothing in the game could promote a post
+	-- -- and it put tier 4 at day 22 instead of day 52. A progression curve
+	-- cannot be calibrated against a simulation that cannot progress.
+	--
+	-- The model is the FAST end of the distribution: it never hesitates and
+	-- never spends on anything else. Real players will be slower, so these
+	-- are a floor on the time-to-tier, not a promise.
+	--
+	-- Re-run after ANY change to income, find values or passive caps:
+	--   node tidekeeper/tools/tidekeeper-session-test.js \
+	--     --tests tools/tests/economy-sim.lua
+	TIER_COST = { 0, 320, 3400, 15500 },
+
 	PASSIVE_CAP_BY_TIER = { 40, 130, 420, 1200 },
 	-- Passive coin is a per-mille share of the coin value actually shelved, so
 	-- an empty post earns nothing even at tier 4.

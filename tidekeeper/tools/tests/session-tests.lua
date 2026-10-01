@@ -41,55 +41,11 @@ REPORT = {}
 
 local FakePlatform = TidekeeperRequire("FakePlatform")
 
--- Build a server. Returns (app, env). `opts` is passed through to the fake.
-local function newServer(opts)
-	local o = opts or {}
-	local env = FakePlatform.new(o)
-	FakePlatform.install(env)
-	-- The module cache is global to this VM, so every server in this file
-	-- shares one set of loaded modules -- exactly like a real place, where
-	-- the ModuleScripts are shared and only the instances differ.
-	local Bootstrap = TidekeeperRequire("Bootstrap")
-	local app = Bootstrap.start({
-		dataStoreService = env.services.DataStoreService,
-		memoryStoreService = env.services.MemoryStoreService,
-		policyService = env.services.PolicyService,
-		players = env.PlayersService,
-		runService = env.RunService,
-		serverScriptService = env.services.ServerScriptService,
-		clock = function()
-			return env.clock.now
-		end,
-		monotonic = function()
-			return env.clock.now
-		end,
-		waiter = function(seconds)
-			return env:wait(seconds)
-		end,
-		jobId = o.jobId or "server-A",
-		headless = true,
-		autoStart = false,
-		bindPlayers = true,
-		silent = o.verbose ~= true,
-		logger = o.verbose and function(scope, message)
-			print("[" .. scope .. "] " .. message)
-		end or nil,
-		seed = o.seed or 7,
-	})
-	return app, env
-end
-
--- Drive the scheduler until every queued resolve has drained.
-local function settle(app, env, ticks)
-	for _ = 1, (ticks or 64) do
-		app.cadence:step(0.25)
-		env:advance(0.25)
-		if app.cadence:pendingResolves() == 0 then
-			break
-		end
-	end
-	app.cadence:flushResolves()
-end
+-- Server construction lives in the shared prelude so economy-sim.lua can use
+-- the identical setup; see tools/tests/session-prelude.lua.
+local Prelude = TidekeeperRequire("SessionPrelude")
+local newServer = Prelude.newServer
+local settle = Prelude.settle
 
 -- A whole session: join, do a few things, leave.
 local function playSession(app, env, userId, actions)
@@ -1083,6 +1039,70 @@ do -- 17. THE DISPATCH PIPELINE ACTUALLY CARRIES WHAT THE PLAYER CHOSE
 	local d4 = app.exchange:buildDrifter(S, epoch)
 	eq("a post that never dispatched carries no letter", d4.letterId, 0)
 	ok("...but still carries cargo off its shelves", #d4.cargo > 0)
+end
+
+do -- 18. TIER PROMOTION, THROUGH THE REAL HANDLER
+	-- Until iteration 7 a post's tier was set to 1 at creation and nothing
+	-- ever changed it, so 24-shelf tier-4 posts, the currents behind
+	-- CURRENT_MIN_TIER and the whole of doc 06's progression table described
+	-- a game that could not be played. There was no remote to buy a tier.
+	--
+	-- This drives PostHandler.upgrade, which is the real server path,
+	-- including the NetContract rate guard.
+	local Post = TidekeeperRequire("Post")
+	local EconomyConfig = TidekeeperRequire("EconomyConfig")
+	local PostHandler = TidekeeperRequire("PostHandler")
+
+	local app, env = newServer({ seed = 4242 })
+	local userId = 8800
+	env:addPlayer(userId)
+	settle(app, env, 200)
+
+	local player = { UserId = userId }
+	local S = app.posts:get(userId)
+	ok("the upgrading post exists", S ~= nil)
+	eq("a new post starts at tier 1", S.tier, 1)
+
+	-- Too poor: refused, and nothing changes.
+	S.coin = 0
+	local res = PostHandler.upgrade(app, player, { seq = 1 })
+	eq("a post that cannot pay is refused", res.status, PostHandler.E_ILLEGAL)
+	eq("...and is still tier 1", S.tier, 1)
+
+	-- Rich enough: promoted, and the coin is really gone.
+	-- RF_Upgrade is deliberately throttled to 1 burst / 3 per minute, so the
+	-- clock has to move between attempts. That the refused attempt above
+	-- consumed the burst is correct behaviour, not a test artefact.
+	env:advance(60)
+	settle(app, env, 20)
+	S = app.posts:get(userId)
+	S.coin = EconomyConfig.TIER_COST[2] + 5
+	local res2 = PostHandler.upgrade(app, player, { seq = 2 })
+	eq("a post that can pay is promoted", res2.status, PostHandler.OK)
+	eq("the handler reports the new tier", res2.tier, 2)
+	eq("the coin was spent", S.coin, 5)
+	eq("the handler quotes the next price", res2.nextCost, EconomyConfig.TIER_COST[3])
+
+	-- The extra shelves are genuinely usable, which is the entire point of
+	-- paying: tier 1 caps at 6, so slot 7 must have been impossible before.
+	for i = 1, 7 do
+		Post.addStock(S, i, 1)
+	end
+	local placed = 0
+	for i = 1, 7 do
+		if Post.setShelf(S, i, i, 5) then
+			placed = placed + 1
+		end
+	end
+	eq("a tier-2 post can fill seven shelves", placed, 7)
+	ok("the promoted post is still structurally valid", Post.checkInvariants(S))
+
+	-- And the promotion survives a save/load round trip, or it is worth
+	-- nothing: tier is persisted in PostCodec as a u8.
+	local PostCodec = TidekeeperRequire("PostCodec")
+	local blob = PostCodec.encode(S)
+	local back = PostCodec.decode(blob)
+	eq("the tier survives the codec round trip", back.tier, 2)
 end
 
 print(string.format(

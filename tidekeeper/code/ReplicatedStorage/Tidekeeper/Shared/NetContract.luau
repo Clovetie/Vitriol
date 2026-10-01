@@ -36,6 +36,7 @@ local NetContract = {}
 NetContract.RF_SESSION = "RF_Session"
 NetContract.RF_SET_ORDERS = "RF_SetOrders"
 NetContract.RF_ARRANGE = "RF_Arrange"
+NetContract.RF_UPGRADE = "RF_Upgrade"
 NetContract.RF_COMB = "RF_Comb"
 NetContract.RF_DISPATCH = "RF_Dispatch"
 NetContract.RE_POST_SNAPSHOT = "RE_PostSnapshot"
@@ -49,6 +50,9 @@ NetContract.REMOTES = {
 	{ "RF_Arrange", 1, 8, 30 },
 	{ "RF_Comb", 1, 10, 40 },
 	{ "RF_Dispatch", 1, 2, 4 },
+	-- Buying a tier is rare and expensive; 1 burst / 3 per minute is
+	-- generous for a thing a player does four times in their whole life.
+	{ "RF_Upgrade", 1, 1, 3 },
 	{ "RE_PostSnapshot", 2, 0, 0 },
 	{ "RE_LedgerBatch", 2, 0, 0 },
 }
@@ -94,6 +98,13 @@ local SPEC_DISPATCH = Schema.map({
 	cargo = Schema.array(Schema.int(1, FindsConfig.MAX_FIND_ID), 0, 4),
 }, true)
 
+-- Upgrading carries no arguments: the server knows the post, the post knows
+-- its tier, and the cost is server-side config. A payload that let the client
+-- name a target tier or a price would be a payload worth forging.
+local SPEC_UPGRADE = Schema.map({
+	seq = Schema.int(1, 4294967295),
+}, true)
+
 local SPEC_SESSION = Schema.map({
 	seq = Schema.int(1, 4294967295),
 }, true)
@@ -104,6 +115,7 @@ NetContract.SPECS = {
 	RF_Arrange = SPEC_ARRANGE,
 	RF_Comb = SPEC_COMB,
 	RF_Dispatch = SPEC_DISPATCH,
+	RF_Upgrade = SPEC_UPGRADE,
 }
 
 -- ------------------------------------------------------------- the checker

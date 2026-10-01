@@ -48,9 +48,15 @@ end
 -- substitute a fake without the services knowing.
 function Bootstrap.start(opts)
 	local o = opts or {}
+	-- `app.logger` MUST always be callable. Seven rejection paths across the
+	-- remote handlers call `app.logger(...)` unconditionally, so a nil logger
+	-- turns every validation failure into a thrown error instead of a clean
+	-- E_ILLEGAL -- the client gets an exception where it should get a status,
+	-- and the one code path that only runs when something is already wrong is
+	-- the one that breaks. `silent` means "say nothing", not "be nil".
 	local logger = o.logger
-	if logger == nil and o.silent ~= true then
-		logger = defaultLogger
+	if logger == nil then
+		logger = (o.silent ~= true) and defaultLogger or function() end
 	end
 	local clock = o.clock or os.time
 

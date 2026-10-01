@@ -243,6 +243,24 @@ function Post.setShelf(S, slot, findId, price)
 	if price ~= floor(price) then
 		return false, "price must be an integer"
 	end
+	-- DENSITY IS A CONTRACT, AND IT HAS TO BE ENFORCED HERE.
+	--
+	-- `clearShelf` compacts with table.remove, and PostCodec writes `#shelves`
+	-- then indexes 1..n, so a hole is not a cosmetic problem: it makes the
+	-- post UNSAVEABLE. The encoder hits a nil shelf and throws, the save
+	-- fails, and the player loses the session.
+	--
+	-- Until iteration 7 this was only a comment. `PostHandler` passes a
+	-- client-supplied slot straight in, so any client could place into slot 6
+	-- of an empty post and permanently break its own save -- remotely
+	-- triggerable data loss, reachable from the normal game UI by anyone
+	-- willing to edit a number.
+	--
+	-- The rule: you may overwrite an occupied slot, or append exactly one
+	-- past the end. You may not leave a gap.
+	if slot > #S.shelves + 1 then
+		return false, string.format("slot %d would leave a gap after %d", slot, #S.shelves)
+	end
 	S.shelves[slot] = { id = findId, price = price }
 	return true
 end
@@ -254,6 +272,51 @@ function Post.clearShelf(S, slot)
 	-- Shelves are a dense array so the codec can write a count; removing from
 	-- the middle compacts, which is also what the UI does.
 	table.remove(S.shelves, slot)
+	return true
+end
+
+-- ------------------------------------------------------------- promotion
+--
+-- Until iteration 7 a post's tier was set to 1 when it was created and
+-- NOTHING ever changed it. Every tier-gated system in the game -- 24 shelves
+-- at tier 4, the four currents behind CURRENT_MIN_TIER, PASSIVE_CAP_BY_TIER,
+-- the 6/10/16/24 order-rule limits -- was unreachable, and doc 06's whole
+-- progression table described a thing that did not exist.
+
+-- Coin needed to reach the next tier, or nil at the cap.
+function Post.promotionCost(S)
+	local next_ = S.tier + 1
+	if next_ > GameConfig.MAX_TIER then
+		return nil
+	end
+	return EconomyConfig.TIER_COST[next_]
+end
+
+function Post.canPromote(S)
+	local cost = Post.promotionCost(S)
+	if cost == nil then
+		return false, "already at the highest tier"
+	end
+	if S.coin < cost then
+		return false, string.format("needs %d coin, has %d", cost, S.coin)
+	end
+	return true
+end
+
+-- Spend the coin and raise the tier. Returns (true) or (false, why).
+--
+-- Shelves are NOT touched: a tier only ever raises the limit, so nothing has
+-- to be discarded, and `maxShelves` is read fresh everywhere rather than
+-- cached on the post. Demotion does not exist and must not be added casually
+-- -- Post.checkInvariants already rejects a post holding more shelves than
+-- its tier allows, so a demotion would have to compact them first.
+function Post.promote(S)
+	local allowed, why = Post.canPromote(S)
+	if not allowed then
+		return false, why
+	end
+	S.coin = S.coin - Post.promotionCost(S)
+	S.tier = S.tier + 1
 	return true
 end
 

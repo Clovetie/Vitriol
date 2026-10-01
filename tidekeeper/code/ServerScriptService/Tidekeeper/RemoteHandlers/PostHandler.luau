@@ -61,6 +61,12 @@ function PostHandler.bind(app)
 			return PostHandler.comb(app, player, payload)
 		end
 	end
+	local upgrade = app.remotes[NetContract.RF_UPGRADE]
+	if upgrade ~= nil then
+		upgrade.OnServerInvoke = function(player, payload)
+			return PostHandler.upgrade(app, player, payload)
+		end
+	end
 end
 
 local function begin(app, player, name, payload)
@@ -107,6 +113,30 @@ function PostHandler.arrange(app, player, payload)
 	end
 	app.posts:markDirty(userId)
 	return { status = OK, shelfCount = Post.shelfCount(S) }
+end
+
+-- ------------------------------------------------------------- upgrade
+
+-- Buy the next tier. The payload carries nothing but a sequence number: the
+-- server knows which post this is, the post knows its own tier, and the cost
+-- is server-side config. There is nothing here for a client to forge.
+--
+-- This is the remote that did not exist until iteration 7, which is why no
+-- post in the game had ever been anything other than tier 1.
+function PostHandler.upgrade(app, player, payload)
+	local S, failure = begin(app, player, NetContract.RF_UPGRADE, payload)
+	if S == nil then
+		return failure
+	end
+	local userId = player.UserId
+
+	local ok, why = Post.promote(S)
+	if not ok then
+		app.logger("PostHandler", "refused upgrade for " .. tostring(userId) .. ": " .. tostring(why))
+		return { status = E_ILLEGAL }
+	end
+	app.posts:markDirty(userId)
+	return { status = OK, tier = S.tier, coin = S.coin, nextCost = Post.promotionCost(S) }
 end
 
 -- ------------------------------------------------------------ setOrders

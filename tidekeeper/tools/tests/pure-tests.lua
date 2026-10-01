@@ -1097,6 +1097,51 @@ eq(#Post.tasteOf(1), 8, "a find's taste vector has eight axes")
 eq(Post.tasteOf(999), nil, "an unknown find has no taste vector")
 eq(Post.knownFindCount(), 200, "the v1 content set ships 200 finds")
 
+-- The calibrated tier costs. economy-sim.lua is too slow (~2 min) to run on
+-- every build, so this is the cheap guard that the curve it calibrated has
+-- not been edited away: the costs must stay strictly increasing and must
+-- match the values doc 06 quotes. Change them and you must re-run the sim.
+eq(#EconomyConfig.TIER_COST, GameConfig.MAX_TIER, "there is a price for every tier")
+eq(EconomyConfig.TIER_COST[1], 0, "tier 1 is free -- every post starts there")
+local risingCost = true
+for t = 2, GameConfig.MAX_TIER do
+	if EconomyConfig.TIER_COST[t] <= EconomyConfig.TIER_COST[t - 1] then
+		risingCost = false
+	end
+end
+ok(risingCost, "each tier costs strictly more than the one below it")
+eq(EconomyConfig.TIER_COST[2], 320, "the measured tier 2 price (doc 06: ~day 3)")
+eq(EconomyConfig.TIER_COST[3], 3400, "the measured tier 3 price (doc 06: ~day 16)")
+eq(EconomyConfig.TIER_COST[4], 15500, "the measured tier 4 price (doc 06: ~day 52)")
+
+-- ------------------------------------------------------------- promotion
+-- Nothing in the game promoted a post until iteration 7, so every tier-gated
+-- system was dead. These pin the arithmetic.
+local promo = mkPost(1)
+promo.tier = 1
+promo.coin = 0
+eq(Post.promotionCost(promo), EconomyConfig.TIER_COST[2], "tier 1 quotes the tier 2 price")
+notOk(Post.promote(promo), "a post that cannot afford the next tier is refused")
+eq(promo.tier, 1, "a refused promotion does not change the tier")
+
+promo.coin = EconomyConfig.TIER_COST[2]
+ok(Post.promote(promo), "a post that can afford it is promoted")
+eq(promo.tier, 2, "the tier went up by exactly one")
+eq(promo.coin, 0, "the coin was actually spent")
+ok(Post.maxShelves(promo.tier) > Post.maxShelves(1), "a promoted post really does get more shelves")
+
+-- Walk it to the cap and check the cap holds.
+promo.coin = EconomyConfig.TIER_COST[3]
+ok(Post.promote(promo), "tier 3 is reachable")
+promo.coin = EconomyConfig.TIER_COST[4]
+ok(Post.promote(promo), "tier 4 is reachable")
+eq(promo.tier, GameConfig.MAX_TIER, "the walk ends at MAX_TIER")
+eq(Post.promotionCost(promo), nil, "there is no price above the cap")
+promo.coin = 999999
+notOk(Post.promote(promo), "a maxed post cannot be promoted again however rich it is")
+eq(promo.coin, 999999, "...and refusing it does not take the coin")
+ok(Post.checkInvariants(promo), "a promoted post is structurally valid")
+
 eq(Post.maxShelves(1), 6, "tier 1 has six shelves")
 eq(Post.maxShelves(4), 24, "tier 4 has twenty-four shelves")
 eq(Post.shelfCount(P), 6, "the fixture uses six shelves")
@@ -1105,6 +1150,19 @@ notOk(Post.setShelf(P, 1, 999, 5), "setShelf refuses an unknown find")
 notOk(Post.setShelf(P, 1, 1, 0), "setShelf refuses a price below the minimum")
 notOk(Post.setShelf(P, 1, 1, 1.5), "setShelf refuses a fractional price")
 ok(Post.setShelf(P, 1, 1, 5), "setShelf accepts a valid placement")
+-- A gap makes the post unsaveable: PostCodec writes `#shelves` and then
+-- indexes 1..n, so a nil in the middle throws during encode. `PostHandler`
+-- hands a client-supplied slot straight to setShelf, so this is the check
+-- that stops a client breaking its own save.
+local gapPost = mkPost(4)
+gapPost.shelves = {}
+notOk(Post.setShelf(gapPost, 3, 1, 5), "setShelf refuses a slot that would leave a gap")
+ok(Post.setShelf(gapPost, 1, 1, 5), "setShelf accepts the first slot")
+ok(Post.setShelf(gapPost, 2, 2, 5), "setShelf accepts the next slot in sequence")
+ok(Post.setShelf(gapPost, 2, 3, 7), "setShelf accepts overwriting an occupied slot")
+eq(#gapPost.shelves, 2, "a dense shelf array stays dense")
+local encoded = PostCodec.encode(gapPost)
+ok(encoded ~= nil and #encoded > 0, "a post arranged through setShelf always encodes")
 ok(Post.clearShelf(P, 1), "clearShelf removes a shelf")
 eq(Post.shelfCount(P), 5, "the shelves compacted")
 notOk(Post.clearShelf(P, 99), "clearing an empty slot is a no-op")

@@ -146,5 +146,6 @@ module.exports = {
 	SESSION_REL: {
 		...toRelative({ ...PURE, ...CLIENT, ...SERVER }),
 		FakePlatform: "tools/tests/fake-platform.lua",
+		SessionPrelude: "tools/tests/session-prelude.lua",
 	},
 };
