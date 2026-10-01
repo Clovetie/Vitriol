@@ -1095,7 +1095,7 @@ notOk(Post.isPerishable(1), "cockle_shell is not perishable")
 eq(Post.groupOf(3), 2, "sea_glass_green is in the Glass group")
 eq(#Post.tasteOf(1), 8, "a find's taste vector has eight axes")
 eq(Post.tasteOf(999), nil, "an unknown find has no taste vector")
-eq(Post.knownFindCount(), 24, "the iteration-2 subset ships 24 finds")
+eq(Post.knownFindCount(), 200, "the v1 content set ships 200 finds")
 
 eq(Post.maxShelves(1), 6, "tier 1 has six shelves")
 eq(Post.maxShelves(4), 24, "tier 4 has twenty-four shelves")
@@ -2289,7 +2289,7 @@ invalid = Tables.deepCopy(synth)
 invalid.extra = 1
 notOk(Drifter.validate(invalid), "an unexpected field is caught")
 
-eq(#FindsConfig.FINDS, 24, "the iteration-2 find subset has 24 rows")
+eq(#FindsConfig.FINDS, 200, "doc 07 section 5 wants 200 finds for v1")
 local idsSeen = {}
 local badFind = 0
 for i = 1, #FindsConfig.FINDS do
@@ -2301,9 +2301,21 @@ for i = 1, #FindsConfig.FINDS do
 	if #row[8] ~= 8 then badFind = badFind + 1 end
 	if row[5] < 1 or row[5] > #FindsConfig.GROUP_NAMES then badFind = badFind + 1 end
 	if row[6] < 1 or row[6] > FindsConfig.ZONE_COUNT then badFind = badFind + 1 end
+	-- Added with the 176 iteration-6 rows. The loop above never looked
+	-- inside the taste vector or at the perishable flag, so a typo'd axis
+	-- (-700 instead of -70) or a perishable value of 2 would have been
+	-- waved through into the economy.
+	if row[4] ~= 0 and row[4] ~= 1 then badFind = badFind + 1 end
+	if row[7] < 1 then badFind = badFind + 1 end
+	for axis = 1, #row[8] do
+		local v = row[8][axis]
+		if v ~= math.floor(v) or v < DrifterConfig.TASTE_MIN or v > DrifterConfig.TASTE_MAX then
+			badFind = badFind + 1
+		end
+	end
 end
 eq(badFind, 0, "every find row is well formed")
-eq(Tables.count(idsSeen), 24, "every find id is unique")
+eq(Tables.count(idsSeen), #FindsConfig.FINDS, "every find id is unique")
 
 -- =============================================================== benchmark
 end

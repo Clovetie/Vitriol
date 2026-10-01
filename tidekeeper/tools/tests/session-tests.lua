@@ -611,7 +611,11 @@ do -- 15. CLIENT-SIDE LOCALISATION COVERAGE
 		end
 	end
 	eq("every Ledger template id has prose", #missingProse, 0)
-	ge("doc 04 section 4.1 wants >= 40 phrasings by iteration 4", totalVariants, 40)
+	-- The v1 target from doc 07 section 5, reached in iteration 6. This was
+	-- `>= 40` while the content was being written; leaving it there would
+	-- have let the Ledger quietly rot back to a receipt printer, since
+	-- deleting 140 phrasings would still have passed.
+	ge("doc 07 section 5 wants 180 phrasings for v1", totalVariants, 180)
 
 	-- ...and no prose for a template the domain does not declare. An orphan
 	-- string is dead weight that a translator will nonetheless translate.
