@@ -150,6 +150,14 @@ end
 
 function FakeDataStore:SetAsync(key, value)
 	self:charge("set")
+	-- Real Roblox refuses this: "Argument 2 is missing or nil". Only
+	-- RemoveAsync deletes an entry. The fake used to accept it and quietly
+	-- behave like a remove, so code that lost a value on the way to a save
+	-- would have looked like a successful delete here and thrown in
+	-- production.
+	if value == nil then
+		error("SetAsync: Argument 2 is missing or nil", 0)
+	end
 	self.data[key] = store(value)
 	self.keys[key] = true
 	return true
@@ -160,8 +168,37 @@ end
 -- makes at-most-once Drifter delivery possible.
 function FakeDataStore:UpdateAsync(key, transform)
 	self:charge("update")
+
+	-- ROBLOX MAY CALL THE TRANSFORM MORE THAN ONCE WITHIN ONE UpdateAsync.
+	--
+	-- From the API reference: "In cases where another game server updated the
+	-- key in the short timespan between retrieving the key's current value
+	-- and setting the key's value, UpdateAsync will call the function again,
+	-- discarding the result of the previous call. The function will be called
+	-- as many times as needed until the data is saved."
+	--
+	-- Until iteration 12 this fake called it EXACTLY ONCE, which made it more
+	-- forgiving than the real thing in the most dangerous possible way: a
+	-- transform that accumulates into an upvalue is correct here and wrong in
+	-- production. Two adapters were doing exactly that (see
+	-- `drainReceipts` and `allocLedgerPage`), and the suite could not see it.
+	--
+	-- `transformRetries` is a deterministic count, not a random one: the
+	-- whole harness is seeded and reproducible (doc 04 section 5), and a
+	-- flaky re-run would be worse than none. The discarded first result is
+	-- genuinely discarded, exactly as Roblox describes.
+	local retries = self.env.inject.transformRetries or 1
 	local old = store(self.data[key])
-	local new = transform(old)
+	local new
+	for _ = 1, retries do
+		-- The value the key held when the losing attempt read it. Passing the
+		-- same `old` is the realistic case for our access patterns (one
+		-- writer per key, retrying against itself); what matters for
+		-- correctness is that the transform RUNS AGAIN and its earlier
+		-- return value is thrown away.
+		new = transform(store(self.data[key]))
+	end
+	new = transform(old)
 	if new == nil then
 		return nil
 	end
@@ -236,10 +273,31 @@ function FakeHashMap:GetAsync(key)
 	return store(self.data[key])
 end
 
+-- EXPIRATION IS NOT OPTIONAL. The real signature is
+-- SetAsync(key, value, expiration) with expiration in seconds, capped at
+-- 3 888 000 (45 days). This fake used to default a missing ttl to 45
+-- seconds, so a call that simply forgot the argument worked in the suite and
+-- would have thrown in production -- and, worse, a key meant to live for
+-- hours would have evaporated in under a minute.
+local MEMORY_MAX_TTL = 3888000
+
+local function requireTtl(where, ttl)
+	if ttl == nil then
+		error(where .. ": expiration is a required argument", 0)
+	end
+	if type(ttl) ~= "number" or ttl ~= ttl or ttl <= 0 then
+		error(where .. ": expiration must be a positive number", 0)
+	end
+	if ttl > MEMORY_MAX_TTL then
+		error(where .. ": expiration exceeds the 45-day maximum (3888000 s)", 0)
+	end
+end
+
 function FakeHashMap:SetAsync(key, value, ttl)
 	self:charge("set", 2)
+	requireTtl("MemoryStoreHashMap:SetAsync", ttl)
 	self.data[key] = store(value)
-	self.expiry[key] = self.env.clock.now + (ttl or 45)
+	self.expiry[key] = self.env.clock.now + ttl
 	return true
 end
 
@@ -248,16 +306,29 @@ end
 -- design in doc 03 turns on that fact.
 function FakeHashMap:UpdateAsync(key, transform, ttl)
 	self:charge("update", 2)
+	requireTtl("MemoryStoreHashMap:UpdateAsync", ttl)
 	local old = nil
 	if self:live(key) then
 		old = store(self.data[key])
 	end
-	local new = transform(old)
+	-- MemoryStore re-runs a contended transform too: "the transform function
+	-- is invoked again with the most recent item value... This cycle repeats
+	-- until the value is saved successfully or the transform returns nil."
+	local retries = self.env.inject.transformRetries or 1
+	local new
+	for _ = 1, retries do
+		local current = nil
+		if self:live(key) then
+			current = store(self.data[key])
+		end
+		new = transform(current)
+	end
+	new = transform(old)
 	if new == nil then
 		return nil
 	end
 	self.data[key] = store(new)
-	self.expiry[key] = self.env.clock.now + (ttl or 45)
+	self.expiry[key] = self.env.clock.now + ttl
 	return store(new)
 end
 

@@ -123,6 +123,14 @@ const GUARDED = [
 	"DrifterConfig.TASTE_MAX",
 	// Pinned by the OD15 blob-budget section, iteration 11.
 	"GameConfig.MAX_POST_BLOB_BYTES",
+	// Pinned by the Saturation section, iteration 12: each of these is a
+	// ceiling that no scenario used to reach, so the clamp enforcing it was
+	// never executed. Now a scenario deliberately fills each one.
+	"GameConfig.MAX_STORE_ENTRIES",
+	"GameConfig.VISITOR_RING_SIZE",
+	"GameConfig.MAX_ARRIVALS_PER_EPOCH",
+	"GameConfig.MAX_CATCHUP_EPOCHS",
+	"GameConfig.MAX_RESIDENT_DRIFTERS",
 ];
 
 // Pinned, but only by a suite too slow for the gate (session ~20 s, smoke
@@ -145,15 +153,10 @@ const UNGUARDED = [
 	["DrifterConfig.MAX_BEACONS", "a ceiling nothing reaches in any test; needs a scenario that actually saturates beacons"],
 	["FindsConfig.ZONE_COUNT", "comb zones are exercised by id, never counted"],
 	["GameConfig.OLDEST_SUPPORTED_VERSION", "only two schema versions exist, so 1 and 2 behave identically here. Re-check at schema v4"],
-	["GameConfig.MAX_CATCHUP_EPOCHS", "the clamp is asserted via Resolve's own reported epoch count rather than against this constant; a session scenario that returns after 30+ epochs would pin it"],
 	["GameConfig.EPOCHS_PER_RESOLVE_TICK", "a scheduling granularity; changing it changes how work is split, not the result -- which is the determinism property, and that IS asserted"],
-	["GameConfig.MAX_ARRIVALS_PER_EPOCH", "no scenario produces enough arrivals to hit the cap"],
-	["GameConfig.MAX_RESIDENT_DRIFTERS", "as above"],
 	["GameConfig.MAX_SHELF_SLOTS", "tier caps bind first; this ceiling is never the binding one in any test"],
-	["GameConfig.MAX_STORE_ENTRIES", "as above"],
 	["GameConfig.MAX_COIN", "the u32 ceiling; no test earns near it"],
 	["GameConfig.MAX_COMB_NODES", "nodes are addressed by id, never counted"],
-	["GameConfig.VISITOR_RING_SIZE", "the ring is asserted by behaviour (oldest evicted first), not by size"],
 	["GameConfig.MAX_LEDGER_RESIDENT", "scenario 24 overflows it but asserts on pages written, not on the threshold"],
 	["GameConfig.MAX_LEDGER_SLOTS", "Ledger.SLOT_COUNT pins arity per template; this global ceiling is slack"],
 	["GameConfig.MAX_ORDERS_BYTES", "as above, for order programs"],

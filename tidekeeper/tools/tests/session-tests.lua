@@ -1954,3 +1954,94 @@ do -- 28. THE SCREENS DO SOMETHING (the last "UI not built" allowlist entries)
 	ok("...and it says so in words", preview.text ~= nil and #preview.text > 0)
 	ok("the editor can list a domain's values", client:orderChoices("tide") ~= nil)
 end
+
+do -- 29. ROBLOX RUNS A TRANSFORM MORE THAN ONCE (the fake platform was lying)
+	-- From the UpdateAsync reference: "In cases where another game server
+	-- updated the key in the short timespan between retrieving the key's
+	-- current value and setting the key's value, UpdateAsync will call the
+	-- function again, DISCARDING THE RESULT OF THE PREVIOUS CALL."
+	--
+	-- tools/tests/fake-platform.lua called every transform exactly once for
+	-- eleven iterations. That made it more forgiving than Roblox in the most
+	-- dangerous available way: a transform that accumulates into an upvalue
+	-- is correct against the fake and silently wrong in production, and no
+	-- amount of staring at the suite would show it.
+	--
+	-- Two adapters were doing exactly that. Both reset their accumulator in
+	-- the `attempt` retry wrapper -- which covers the adapter calling
+	-- UpdateAsync again -- and NOT inside the transform, which is where
+	-- Roblox's own re-run happens.
+	local Ledger = TidekeeperRequire("Ledger")
+
+	-- transformRetries = 2 means every transform body runs three times and
+	-- only the last result is kept, which is what Roblox does under
+	-- contention.
+	local app, env = newServer({ seed = 4242, inject = { transformRetries = 2 } })
+	local userId = 9100
+	env:addPlayer(userId)
+	settle(app, env)
+	local S = app.posts:get(userId)
+	ok("the post exists under transform retries", S ~= nil)
+
+	-- allocLedgerPage: `dropped` is appended to inside the transform. Run the
+	-- transform three times and a naive implementation reports each dropped
+	-- page three times -- so the ledger reaper deletes pages that are still
+	-- in the index, which is silent history loss.
+	local okAlloc, firstPage = app.data:allocLedgerPage(userId)
+	ok("a page number is allocated", okAlloc)
+	eq("...and it is the first one", firstPage, 1)
+
+	-- Allocate past the retention window so pages really do fall out.
+	local kept = app.data.LEDGER_PAGES_KEPT
+	local lastDropped = nil
+	for _ = 1, kept + 2 do
+		local okN, _, dropped = app.data:allocLedgerPage(userId)
+		ok("allocation keeps succeeding", okN)
+		lastDropped = dropped
+	end
+	ok("pages fell out of the retention window", #lastDropped >= 1)
+	-- THE ASSERTION THAT CATCHES IT: each dropped page must appear once.
+	local seen = {}
+	local dupes = 0
+	for i = 1, #lastDropped do
+		if seen[lastDropped[i]] then dupes = dupes + 1 end
+		seen[lastDropped[i]] = true
+	end
+	eq("a dropped page is reported exactly once, not once per transform run", dupes, 0)
+
+	-- And the index must agree: page numbers are still strictly increasing
+	-- with no gaps caused by a discarded attempt being counted.
+	local okIdx, pages = app.data:loadLedgerIndex(userId)
+	ok("the index loads", okIdx)
+	le("the index never exceeds the retention window", #pages, kept)
+	local strictlyIncreasing = true
+	for i = 2, #pages do
+		if pages[i] <= pages[i - 1] then strictlyIncreasing = false end
+	end
+	ok("page numbers are strictly increasing", strictlyIncreasing)
+
+	-- drainReceipts: `drained` is filled by index inside the transform. If a
+	-- later run yields fewer entries than an earlier one, the leftovers from
+	-- the discarded run survive -- receipts that were never really there.
+	local encoded = {}
+	for i = 1, 5 do encoded[i] = "receipt-" .. tostring(i) end
+	ok("receipts are published", app.data:appendReceipts(userId, encoded))
+	local okDrain, drained = app.data:drainReceipts(userId)
+	ok("receipts drain", okDrain)
+	eq("exactly the receipts that were published come back", #drained, 5)
+
+	-- Draining again must yield nothing, not the ghosts of the first drain.
+	local okDrain2, drained2 = app.data:drainReceipts(userId)
+	ok("the second drain succeeds", okDrain2)
+	eq("...and is empty", #drained2, 0)
+
+	-- The whole server still works with retries on, which is the point: this
+	-- is not an exotic mode, it is what production does.
+	local before = app.ledger.stats.pagesWritten
+	for i = 1, 420 do
+		local e = Ledger.entry(Ledger.T_EPOCH_QUIET, 11, userId, { i % 5 })
+		if e ~= nil then app.ledger:appendAll(userId, S, { e }) end
+	end
+	for _ = 1, 10 do app.ledger:flushPending() end
+	ge("pages still archive under transform retries", app.ledger.stats.pagesWritten, before + 1)
+end

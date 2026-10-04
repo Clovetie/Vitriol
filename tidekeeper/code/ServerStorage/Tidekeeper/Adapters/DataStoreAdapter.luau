@@ -585,10 +585,25 @@ function DataStoreAdapter:drainReceipts(ownerId)
 	local field = tostring(ownerId)
 	local drained = {}
 	local ok, message = self:attempt("write", function()
-		for i = #drained, 1, -1 do
-			drained[i] = nil
-		end
 		return store:UpdateAsync(key, function(old)
+			-- CLEARED INSIDE THE TRANSFORM, not outside it.
+			--
+			-- Roblox may call this transform more than once within a single
+			-- UpdateAsync, discarding the result of the previous call, and
+			-- `drained` is filled by index. If a later run saw fewer entries
+			-- than an earlier one, the leftovers from the discarded run
+			-- survived past #mine and this function returned receipts that
+			-- were never really there -- duplicate rewards, and entries in a
+			-- player's Ledger for visits that did not happen.
+			--
+			-- The reset used to live in the `attempt` wrapper, which only
+			-- covers THIS adapter retrying the whole call. It did not cover
+			-- Roblox's own internal re-run, and the fake platform called
+			-- every transform exactly once, so nothing could see the
+			-- difference until iteration 12 made the fake faithful.
+			for i = #drained, 1, -1 do
+				drained[i] = nil
+			end
 			if old == nil then
 				return nil
 			end
@@ -653,12 +668,21 @@ function DataStoreAdapter:allocLedgerPage(userId)
 	local allocated = nil
 	local dropped = {}
 	local ok, message = self:attempt("write", function()
-		-- Reset on retry: UpdateAsync may run the transform more than once.
-		allocated = nil
-		for i = #dropped, 1, -1 do
-			dropped[i] = nil
-		end
 		return store:UpdateAsync(key, function(old)
+			-- RESET INSIDE THE TRANSFORM. Roblox re-runs this body on
+			-- contention and throws the earlier result away; `dropped` is
+			-- APPENDED to, so a re-run used to report every evicted page
+			-- once per attempt. The caller deletes exactly the keys this
+			-- list names, so a duplicated entry meant deleting pages that
+			-- were still in the index -- silent loss of a player's history,
+			-- in the one system whose entire purpose is remembering.
+			--
+			-- Session scenario 29 fails with "got 2.0, expected 0.0" if this
+			-- moves back outside.
+			allocated = nil
+			for i = #dropped, 1, -1 do
+				dropped[i] = nil
+			end
 			local idx = old or { next = 1, pages = {} }
 			local n = idx.next or 1
 			allocated = n

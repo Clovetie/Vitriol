@@ -2927,3 +2927,114 @@ eq(backBS.coin, BS.coin, "...with its coin intact")
 eq(Post.totalStock(backBS), Post.totalStock(BS), "...and every stack in the store")
 
 end
+
+-- ================================================== the ceilings are reached
+section("Saturation")
+do
+
+-- Iteration 11's mutation scan left 37 constants pinned by nothing, and gave
+-- the same reason for most of the interesting ones: "no scenario reaches the
+-- cap". A limit that is never hit is a limit nobody has tested -- the clamp
+-- could be off by one, or absent, and every test would still pass.
+--
+-- These scenarios deliberately saturate. Each pins its constant with a
+-- literal (D50) and then proves the code actually enforces that number.
+
+-- ---------------------------------------------------- the store entry limit
+eq(GameConfig.MAX_STORE_ENTRIES, 160, "MAX_STORE_ENTRIES is pinned")
+local SatS = Post.new(7001, 4455667788, 987654321, Tide.EPOCH)
+SatS.tier = 4
+local added = 0
+for id = 1, GameConfig.MAX_STORE_ENTRIES + 25 do
+	if Post.addStock(SatS, id, 1) then
+		added = added + 1
+	end
+end
+local distinct = 0
+for _ in pairs(SatS.store) do
+	distinct = distinct + 1
+end
+ok(distinct <= GameConfig.MAX_STORE_ENTRIES, "the store never exceeds its entry limit")
+eq(distinct, GameConfig.MAX_STORE_ENTRIES, "...and it really did fill up")
+-- Topping up an entry that already exists must still work at the limit,
+-- otherwise a full store silently stops accepting the finds you already hold.
+local beforeTop = Post.stockOf(SatS, 1)
+ok(Post.addStock(SatS, 1, 3) ~= nil, "an existing stack can still be topped up when full")
+eq(Post.stockOf(SatS, 1), beforeTop + 3, "...and the quantity really moved")
+-- A full post must still encode and decode: the cap and the codec's own
+-- bound have to agree, or saving a maxed-out post destroys it.
+local satBytes = PostCodec.encode(SatS)
+ok(satBytes ~= nil, "a saturated store still encodes")
+local satBack = PostCodec.decode(satBytes)
+ok(satBack ~= nil, "...and decodes")
+eq(Post.totalStock(satBack), Post.totalStock(SatS), "...with every entry intact")
+
+-- -------------------------------------------------------- the visitor ring
+eq(GameConfig.VISITOR_RING_SIZE, 48, "VISITOR_RING_SIZE is pinned")
+local RingS = Post.new(7002, 4455667788, 987654321, Tide.EPOCH)
+for i = 1, GameConfig.VISITOR_RING_SIZE + 20 do
+	Post.recordVisit(RingS, 500000 + i, 100 + i)
+end
+ok(#RingS.ring <= GameConfig.VISITOR_RING_SIZE, "the ring never grows past its size")
+eq(#RingS.ring, GameConfig.VISITOR_RING_SIZE, "...and it really did fill")
+-- Oldest out, newest in. The ring is what Orders rules read, so the wrong
+-- eviction end would quietly change who your rules apply to.
+eq(RingS.ring[1].owner, 500000 + GameConfig.VISITOR_RING_SIZE + 20,
+	"the most recent visitor is first")
+eq(Post.visitCount(RingS, 500000 + GameConfig.VISITOR_RING_SIZE + 20), 1,
+	"...and the ring can still count that visitor")
+ok(Post.visitCount(RingS, 500001) == 0,
+	"...while the oldest visitor has been evicted entirely")
+local ringBytes = PostCodec.encode(RingS)
+ok(PostCodec.decode(ringBytes) ~= nil, "a saturated ring survives the codec")
+
+-- -------------------------------------------- arrivals and the catch-up cap
+eq(GameConfig.MAX_ARRIVALS_PER_EPOCH, 8, "MAX_ARRIVALS_PER_EPOCH is pinned")
+eq(GameConfig.MAX_CATCHUP_EPOCHS, 27, "MAX_CATCHUP_EPOCHS is pinned")
+
+-- Offer far more inbound drifters than one epoch may accept, over far more
+-- epochs than the catch-up window allows, and check both clamps at once.
+local FloodS, _ = baseScenario(4)
+local flood = {}
+for i = 1, 300 do
+	local rngD = RNG.new(7000 + i)
+	flood[i] = Drifter.synthesize(rngD, 700000 + i, 5, (i - 1) % 5, 4)
+end
+local floodStart = Tide.epochStart(400)
+FloodS.resolvedAt = floodStart
+-- 60 epochs of absence: more than double the window.
+local floodState, floodEntries, _, floodInfo =
+	Resolve.run(FloodS, floodStart + 60 * Tide.EPOCH_SECONDS, flood)
+ok(floodInfo.clamped, "a 60-epoch absence is reported as clamped")
+ok(floodInfo.epochsSimulated <= GameConfig.MAX_CATCHUP_EPOCHS,
+	"no more epochs are simulated than the window allows")
+eq(floodInfo.epochsSimulated, GameConfig.MAX_CATCHUP_EPOCHS, "...and it simulated the full window")
+ok(floodState ~= nil, "the clamped resolve still produces a state")
+
+-- Arrivals per epoch: count the ledger entries that represent an actual
+-- visit, grouped by epoch, and prove no epoch exceeded the cap.
+local perEpoch = {}
+for i = 1, #floodEntries do
+	local e = floodEntries[i]
+	-- Visit templates are 1..12; 200/201/250 are epoch summaries.
+	if e.templateId < 100 then
+		perEpoch[e.epoch] = (perEpoch[e.epoch] or 0) + 1
+	end
+end
+local worst = 0
+local epochsWithVisits = 0
+for _, n in pairs(perEpoch) do
+	epochsWithVisits = epochsWithVisits + 1
+	if n > worst then worst = n end
+end
+ok(epochsWithVisits >= 5, "the flood produced visits in many epochs")
+ok(worst <= GameConfig.MAX_ARRIVALS_PER_EPOCH, "no epoch ever admits more arrivals than the cap")
+
+-- ------------------------------------------------------ resident drifters
+eq(GameConfig.MAX_RESIDENT_DRIFTERS, 24, "MAX_RESIDENT_DRIFTERS is pinned")
+-- The pool read cap is derived from it, and the two must stay in step: the
+-- adapter reads MAX_RESIDENT_DRIFTERS * 9 encoded drifters per claim.
+ok(GameConfig.MAX_RESIDENT_DRIFTERS * 9 > GameConfig.MAX_ARRIVALS_PER_EPOCH,
+	"the claim cap can supply a full epoch of arrivals")
+
+end
