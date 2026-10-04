@@ -1032,7 +1032,112 @@ FINISH BY.
   - Committing and pushing to your branch.
 ```
 
-## Prompt — Iteration 13+: contingency and live
+## Prompt — Iteration 13: run the fake platform on the real VM
+
+```
+You are iteration 13 of TIDEKEEPER, a Roblox game being built inside the
+Clovetie/Vitriol repository. Work only on your session's fixed branch. Never
+touch the VITRIOL tree: TIDEKEEPER is entirely inside tidekeeper/.
+
+START HERE, IN THIS ORDER.
+
+1.  git fetch && git reset --hard origin/<your branch>. The working tree is
+    reset to the session base between turns, so the previous iteration's
+    commits exist only on the remote. CHECK `git log` BEFORE YOU RESET: if
+    the previous turn could not push, the commits exist only in the working
+    tree and a hard reset destroys them. This happened between iterations 11
+    and 12.
+2.  cd tidekeeper/tools && npm install
+3.  Build Luau 0.700 into tidekeeper/tools/bin/luau (about 3-4 minutes):
+      git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau
+      make -C /tmp/luau config=release luau -j$(nproc)
+      cp /tmp/luau/luau tidekeeper/tools/bin/luau
+4.  node tidekeeper/tools/tidekeeper-quality-gate.js
+    It must print 19/19 before you change anything.
+5.  Read tidekeeper/HANDOFF.md, then docs/10-RESEARCH-NOTES.md section 15 and
+    docs/05-PERSISTENCE.md section 9.3.
+
+STUDIO FIRST, IF YOU CAN. L4/L5 have been blocked since iteration 4. Nothing
+here has ever created an Instance, made a real DataStore call, or drawn a
+frame. If you can run real Roblox, that outranks everything below: build the
+place (tools/lib/module-map.js is the single source of truth for where each
+file belongs), press play, and report exactly what breaks. If you cannot,
+say so in one plain sentence and do the work below instead. Do not dress up
+a substitute as the real thing.
+
+YOUR MAIN JOB: PORT THE SESSION HARNESS TO REAL LUAU.
+
+Iteration 12 closed OD19 by discovering that fengari is load-bearing:
+
+    smoke      1267 assertions   fengari only
+    session     634 assertions   fengari only
+    luau-test  1266 assertions   real Luau 0.700 (bundled pure suite)
+
+So two thirds of this project's evidence runs on a Lua 5.3 VM that is NOT
+the target runtime, with four shims and every numeric literal rewritten to a
+float. The pure suite already proves the bundling approach works
+(tidekeeper-luau-test.js builds one .luau file and runs it). Extend it to
+the session suite: bundle fake-platform.lua and session-tests.lua the same
+way and run them under tools/bin/luau.
+
+Why this is worth an iteration: iteration 12 found that the fake platform
+had been lying about UpdateAsync semantics, and that this hid a real
+data-loss bug. The fake is the floor under everything. Running it on the
+actual target VM removes a whole class of "works in fengari" from under that
+floor -- and the number semantics differ, which is exactly where a game that
+is integer-only by decree (D14) should want certainty.
+
+Expect this to find real divergences. Report them; they are the point. If
+the port turns out to be genuinely impossible, say WHY in specific terms
+(which global, which shim, which primitive) rather than giving up vaguely,
+and that write-up is itself a good result.
+
+THEN, IF THERE IS TIME.
+
+  a. 32 constants remain unguarded (the UNGUARDED table in
+     tools/tidekeeper-mutation-scan.js). The NotifyConfig block is inert
+     until OD7's send API exists and can stay. The interesting ones left are
+     MAX_COIN, MAX_LEDGER_RESIDENT, MAX_ORDERS_BYTES and
+     GameConfig.OWNER_ID_MAX -- each needs a scenario that actually reaches
+     the limit, which is where iteration 12 found its bugs.
+
+  b. Audit the REST of fake-platform.lua the way iteration 12 audited
+     UpdateAsync: the queue, ListKeysAsync/ListItemsAsync pagination,
+     GetRangeAsync bounds, and what each call returns on a missing key.
+     Divergences in the forgiving direction are bugs (D54). Use web search
+     and cite what you check.
+
+RULES THAT HAVE NOT CHANGED.
+
+  - Determinism (doc 04 section 5) is not negotiable.
+  - No free text over the wire. Ids only.
+  - The server owns prices (D46). The client displays, never computes.
+  - Content is reachable or it does not exist (D48).
+  - A pinned constant needs a literal AND a behavioural link (D50).
+  - Test a new scan against a legitimate but unusual idiom (D51).
+  - Compare like with like, and say what you excluded (D52).
+  - An UpdateAsync transform must be re-entrant (D53).
+  - A test double must never be more permissive than the real thing (D54).
+  - Paste real tool output. Never paraphrase it.
+  - A partial honest result beats a complete claimed one. Always.
+
+ON THE BENCH. Best-of-3, every sample printed, 18 us budget. Do not raise it.
+
+ON THE MUTATION SCAN. The gate runs the guarded set (~30 s). `--full` is
+about 90 minutes; start it early and work while it runs. It restores every
+file it touches, but check `git status` if you interrupt it.
+
+FINISH BY.
+
+  - Running the full gate and pasting it.
+  - Updating the docs you invalidated, ROADMAP.md, and HANDOFF.md.
+  - Writing the iteration-14 prompt into docs/12-ITERATION-PROMPTS.md and
+    extending the doc gate's prompt loop to cover it.
+  - Committing and pushing to your branch. Push EARLY -- do not leave the
+    only copy of an iteration's work in a sandbox.
+```
+
+## Prompt — Iteration 14+: contingency and live
 
 ## The handoff template
 

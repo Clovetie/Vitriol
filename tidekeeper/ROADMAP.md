@@ -312,7 +312,28 @@ tests asserting on non-existent fields (1615 refs, 0 problems).
 
 ---
 
-## Iteration 12+ ⬜
+## Iteration 12 ✅ — the fake platform was lying, and it hid a data-loss bug
+
+| Deliverable | Status |
+| --- | --- |
+| `fake-platform.lua` audited against the real DataStore/MemoryStore APIs | ✅ |
+| **Five divergences fixed**, all in the more-forgiving direction | ✅ |
+| **A real data-loss bug found and fixed** in `allocLedgerPage` / `drainReceipts` | ✅ |
+| Transform re-runs are now the **default**, not opt-in | ✅ |
+| `Saturation` section — five ceilings actually reached; guarded 47 → 52 | ✅ |
+| **OD19 closed** — keep fengari; it is the only VM running smoke and session | ✅ |
+| Session scenario 29 | ✅ |
+| **Studio (L4/L5)** | ❌ no access — unchanged since iteration 4 |
+
+**The find.** Roblox re-runs an `UpdateAsync` transform on contention, discarding
+earlier results. The fake called every transform exactly once, so two adapters that
+accumulated into upvalues — resetting in the retry wrapper instead of inside the
+transform — were correct against the suite and would have deleted ledger pages that
+were still in the index in production. Doc 05 §9.3, doc 10 §15.
+
+---
+
+## Iteration 13+ ⬜
 
 **Studio verification (L4/L5) is now the largest gap by a wide margin** — no Instance
 has ever been created, no DataStore call has ever been real, no frame has ever been
@@ -321,6 +342,17 @@ and whatever level eight turns out to be. Scope is defined by `HANDOFF.md`, not 
 this table.
 
 ---
+
+### Decisions D53–D54 (iteration 12)
+
+**D53 — an `UpdateAsync` transform must be re-entrant.** Roblox may run it several
+times within one call and discard the losers. Anything the transform accumulates into
+is reset as the transform's first statement, never in the surrounding retry wrapper.
+Doc 05 §9.3.
+
+**D54 — a test double must never be more permissive than the thing it doubles.** A
+stricter fake produces false alarms, which get noticed; a looser fake produces false
+confidence, which does not. Where the real API errors, the fake errors. Doc 10 §15.2.
 
 ### Decisions D50–D52 (iteration 11)
 
@@ -379,7 +411,7 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD15 ✅ | DataStore compresses values itself; does our base64 packing still pay? | ~~it11~~ | **Closed with numbers (doc 10 §14.6).** On a heavy post, comparing only the fields `PostCodec` persists: binary+base64 **1 252 B raw / 474 gzipped**, naive JSON **3 836 / 772**. So 3.06× raw and **1.63× after compression** — keep the packing, but the honest margin is 1.6×, not the 6× the first attempt claimed (that run serialised a resident ledger the post blob does not contain, and the round-trip assertion caught it). The stronger argument is the one the ratio hides: packing gives a **hard bound** on blob size, which is what makes the 6 144-byte budget enforceable at all |
 | OD17 | Run the correctness suite in real Luau instead of transformed Lua 5.3 | ~~it5~~ | **Closed (doc 10 §8.4), and without Lute.** `tidekeeper-luau-test.js` runs the suite shim-free; 887 = 887 against fengari, 0.7 s vs 72 s. Lute release binaries remain unreachable and turned out not to be needed — it would have added a test runner and a profiler, not a different measurement |
 | OD18 | Adopt **LibMP** to measure the client frame budget on real devices (doc 10 §7.2) | it6 | Yes for the Ledger replay, sampled on a fraction of sessions — Roblox warns it raises memory. **Blocked on Studio**, like L4/L5 |
-| OD19 | Port `fake-platform.lua` to real Luau so fengari can be deleted entirely | it6+ | Only worth it if the shims start costing again. The cross-check between two VMs is currently an asset, not debt |
+| OD19 ✅ | Delete fengari now that real Luau runs the suite? | ~~it12~~ | **Closed: keep it, for a reason nobody had stated.** The two-VM cross-check is the *secondary* benefit. The decisive fact is that smoke (1 267) and session (634) run **only** under fengari — real Luau runs only the bundled pure suite — so deleting fengari would delete 1 901 assertions, including the entire server-against-fake-platform layer. The real question for a later iteration is the inverse: port the session harness to bundled Luau so the fake platform runs on the actual target VM |
 | OD20 | The three dispatch fields are session-scoped, not persisted | it8 | Left as is, deliberately. A dispatch choice that does not survive a relog is a small loss; persisting it costs a schema field and a migration for something the player re-picks in one tap. Revisit only if telemetry shows players dispatching and relogging inside one epoch |
 | OD21 ✅ | `DataStoreAdapter:reapPoolShard` is never scheduled, so the drifter pool only grows | ~~it9~~ | **Closed (doc 05 §9).** `ExchangeService:reapTick` on the IO slot, one shard per tick, targeting `epoch - 28` — nothing can claim a key that old, because resolve clamps catch-up to 27. *Which* server was the real question: exactly one, by a `reap:<epoch>` MemoryStore lease via the new `MemoryAdapter:tryLease`. 320 keys per epoch deleted once rather than once per server; losers count `reapLeasesLost` and skip. If MemoryStore is unavailable **nobody** reaps — a missed reap is visible growth, twenty blind reapers during an outage is a quota fire. Proved by session scenario 23, including a negative control where removing the lease makes a second server duplicate 284 deletes |
 | OD22 ✅ | Ledger history is written and never read | ~~it10~~ | **Closed (doc 05 §9.2).** `loadLedgerPage` had no caller and no way to be called: page keys were `l:<user>:<epoch>` and nothing recorded which epochs had pages. Pages are now numbered from an atomic counter in a per-player index key — which also fixed a silent data loss, since `saveLedgerPage` overwrites and two servers flushing inside one 6.2-hour epoch destroyed one of the two pages. `RF_History` (2 burst, 10/min) + `HistoryHandler` + a client pager whose cursor counts back from the newest page. Retention 32 pages, with the falling-out keys deleted as they fall — the ledger reaper, which costs nothing extra because it runs where the information already is |

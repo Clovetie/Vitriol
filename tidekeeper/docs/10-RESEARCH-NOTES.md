@@ -761,6 +761,94 @@ The stronger argument for packing is the one the ratio hides: it gives a
 **hard bound** on blob size, which is what makes the 6 144-byte budget
 enforceable. JSON of the same state has no bound anyone can assert.
 
+## 15. Iteration-12 pass — auditing the thing everything rests on
+
+No Studio access, so L4/L5 are unchanged. Rather than build an eighth scan, this
+iteration audited **`tools/tests/fake-platform.lua`** — the floor under every claim
+this project makes. Nothing had ever checked it against the real API.
+
+### 15.1 Sources
+
+- `create.roblox.com/docs/reference/engine/classes/GlobalDataStore` and
+  `robloxapi.github.io/ref/class/GlobalDataStore.html` — `UpdateAsync(key,
+  transformFunction)`; *"In cases where another game server updated the key in the
+  short timespan between retrieving the key's current value and setting the key's
+  value, UpdateAsync will call the function again, **discarding the result of the
+  previous call**. The function will be called as many times as needed until the data
+  is saved."* The transform also **may not yield**.
+- `create.roblox.com/docs/cloud-services/data-stores` — a transform returning `nil`
+  **cancels** the write; `SetAsync(key, nil)` errors (*"Argument 2 is missing or
+  nil"*); only `RemoveAsync` deletes.
+- `create.roblox.com/docs/cloud-services/memory-stores/hash-map` and
+  `.../sorted-map`, plus the generated `MemoryStoreSortedMap.yaml` — `SetAsync(key,
+  value, expiration)` and `UpdateAsync(key, transformFunction, expiration)`:
+  **expiration is required**, maximum **3 888 000 s (45 days)**. Sorted-map
+  `UpdateAsync` re-runs its transform on contention in the same way.
+
+### 15.2 Five divergences, all in the forgiving direction
+
+| # | the fake did | Roblox does |
+| --- | --- | --- |
+| 1 | called each DataStore transform **once** | re-runs it on contention, discarding earlier results |
+| 2 | same for MemoryStore | same re-run behaviour |
+| 3 | defaulted a missing expiration to **45 s** | expiration is a required argument |
+| 4 | no expiration ceiling | rejects beyond 45 days |
+| 5 | accepted `SetAsync(key, nil)` as a remove | errors; only `RemoveAsync` deletes |
+
+**Every one is more permissive than the real platform.** That is the dangerous
+direction: a fake that is stricter than production produces false alarms you notice,
+while a fake that is looser produces false confidence you do not.
+
+### 15.3 What divergence 1 was hiding
+
+`DataStoreAdapter.allocLedgerPage` appends evicted page numbers to `dropped`, and
+`LedgerService` deletes **exactly** the keys that list names. Both it and
+`drainReceipts` reset their accumulator in the `attempt` retry wrapper — which covers
+*this adapter* calling `UpdateAsync` again — and **not inside the transform**, which
+is where Roblox's own re-run happens.
+
+So on any contended write the reaper would have been handed each evicted page two or
+three times, and deleted pages that were **still in the index**. Silent loss of a
+player's history, in the one system whose entire purpose is remembering — and in code
+added only two iterations earlier, by a process that had already written the comment
+*"Reset on retry: UpdateAsync may run the transform more than once"* in the wrong
+place.
+
+`drainReceipts` had the same shape: `drained` is filled by index, so a shorter later
+run leaves the longer earlier run's leftovers behind — duplicate receipts, and Ledger
+entries for visits that never happened.
+
+**The lesson is not "we had a bug".** It is that the bug was unreachable by every
+tool in the project, because all of them ultimately ask the fake platform what is
+true. Transform re-runs are now **on by default**, not opt-in: production always has
+this possibility, so the faithful behaviour is what every scenario should get.
+
+### 15.4 A limit never reached is a limit never tested
+
+Iteration 11 left 37 constants unguarded, most with the same reason: *"no scenario
+reaches the cap"*. The new `Saturation` section deliberately fills
+`MAX_STORE_ENTRIES`, `VISITOR_RING_SIZE`, `MAX_ARRIVALS_PER_EPOCH`,
+`MAX_CATCHUP_EPOCHS` and `MAX_RESIDENT_DRIFTERS`. Beyond checking each clamp, it
+checks that a **saturated post still survives the codec** — the failure where a cap
+and a codec bound disagree and saving a maxed-out post destroys it. Guarded 47 → 52.
+
+### 15.5 OD19 — keep fengari, for a reason nobody had stated
+
+The question was "delete fengari now that real Luau runs the suite". The answer is
+no, and the usual argument (two-VM cross-checking is valuable) is the *secondary*
+one. The decisive fact:
+
+| suite | assertions | VM |
+| --- | --- | --- |
+| smoke | 1 267 | fengari only |
+| session | 634 | fengari only |
+| luau-test | 1 266 | real Luau 0.700 (bundled pure suite) |
+
+Real Luau runs only the bundled pure suite. **Deleting fengari deletes 1 901
+assertions**, including the entire server-against-fake-platform layer. The real
+question for a later iteration is the inverse: port the session harness to the
+bundled-Luau approach, so the fake platform runs on the actual target VM.
+
 ## 9. Known unknowns
 
 Recorded so later iterations do not mistake absence of evidence for evidence.

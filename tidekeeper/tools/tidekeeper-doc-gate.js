@@ -311,7 +311,7 @@ if (fs.existsSync(promptPath)) {
 	// project advances -- it was "6+" through iteration 4 and becomes "7+"
 	// once iteration 6 has a prompt of its own -- so it is derived rather
 	// than hard-coded, which is what caught the rename that produced it.
-	for (const n of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+	for (const n of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) {
 		check(`prompt for iteration ${n}`, text.includes(`Iteration ${n}:`), "not present");
 	}
 	const tail = text.match(/Iteration (\d+)\+/);

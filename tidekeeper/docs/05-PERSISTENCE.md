@@ -306,6 +306,27 @@ hop — silently destroyed one of the two pages.
 | a hole | a page in the index that will not load reports empty but **keeps the cursor moving**, so one unreadable page cannot hide every older page behind it |
 | cost | one index read + one page read per call, which is why `RF_History` is throttled to 2 burst / 10 per minute. Paging is a deliberate tap, not a scroll |
 
+## 9.3 UpdateAsync transforms must be re-entrant (iteration 12)
+
+Roblox may call an `UpdateAsync` transform **more than once within a single call**,
+discarding the result of each losing attempt, until the write lands. Any transform
+that accumulates into an upvalue must therefore **reset that accumulator inside the
+transform body**, not in the surrounding retry wrapper.
+
+This is not theoretical: `allocLedgerPage` and `drainReceipts` both got it wrong, and
+the bug was invisible because `fake-platform.lua` called every transform exactly once
+until iteration 12 (doc 10 §15).
+
+| transform | the accumulator | what a re-run did |
+| --- | --- | --- |
+| `allocLedgerPage` | `dropped` — evicted page numbers, **appended** | reported each page once per attempt, so the reaper deleted pages still in the index |
+| `drainReceipts` | `drained` — filled **by index** | a shorter later run left the earlier run's tail behind: receipts that never existed |
+
+**Rule.** A transform passed to `UpdateAsync` must be a pure function of its `old`
+argument plus constants. If it must write to something outside itself, that something
+is reset as the first statement of the transform. The fake platform now re-runs every
+transform by default, so a regression here fails session scenario 29.
+
 ## 9.1 The failed-save recovery queue
 
 When `savePost` abandons a write — a stale session lock, or an exhausted retry budget —
