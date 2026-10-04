@@ -177,6 +177,38 @@ The Almanac is the long game: 200 entries, each with a discovery date, the tide 
 found on, and — for finds acquired via a Drifter — **who brought it to you**. The
 Almanac is a record of other people.
 
+## 6.1 These numbers are pinned, as of iteration 11
+
+Until iteration 11 **every number in this document was verified by nothing**.
+The mutation scan changed each scalar in `Config/` by one and re-ran all
+1 755 assertions: `STANDING_ON_SERVED`, `RENOWN_ON_GIFT`,
+`WARMTH_BASE_SERVED`, `SPOIL_PER_MILLE`, `PASSIVE_RATE_PER_MILLE` and the
+rest could each be changed with the suite still green. The iteration-7
+balance pass tuned values that no test would have noticed being wrong.
+
+They are now pinned in `tools/tests/pure-tests.lua`, section
+`EconomyPinning`, in two halves — a **literal** assertion of the value, and a
+behavioural assertion that the code uses it. Asserting the behaviour against
+the constant alone pins nothing, because mutating the config moves both sides
+together.
+
+**If you are changing a number in this document, the pinning test will fail,
+and that is the point.** Update both, deliberately, in the same commit.
+
+Pinned relationships, not just values:
+
+- a gift is warmer than a sale, which is warmer than a partial;
+- a gift earns more standing *and* more renown than a sale;
+- `WARMTH_MAX` is 127 because warmth is stored in one signed byte — if these
+  ever disagree the codec truncates a player's reception silently;
+- the warmest reachable visit (`WARMTH_BASE_GIFT` + `WARMTH_PER_WANT_MET` ×
+  `MAX_WANTS`) reaches the clamp, so the clamp is exercised rather than
+  theoretical;
+- spoilage rounds to **zero** on a small holding — a post with two things on
+  the shelf is not taxed into nothing while its owner is away;
+- the long-absence cache is worth returning for but cannot buy a tier;
+- `MAX_PRICE` × `MAX_BERTHS` cannot overflow the coin ceiling.
+
 ## 7. Progression pacing
 
 **Measured in iteration 7.** These were targets with no mechanism behind them for

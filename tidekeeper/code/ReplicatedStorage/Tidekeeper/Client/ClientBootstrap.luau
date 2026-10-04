@@ -73,6 +73,9 @@ function ClientBootstrap.start(opts)
 	self.historyMore = false
 	self.historyPages = 0
 	self.almanacPage = 1
+	-- One reused buffer for the tide dial: dayCurve fills it in place, so
+	-- redrawing the shore does not allocate 48 numbers a frame.
+	self.curveBuffer = {}
 	self.seq = 0
 	self.snapshot = nil
 	self.ledger = nil
@@ -270,6 +273,39 @@ function ClientBootstrap:upgradeOffer()
 	}
 end
 
+-- Turn to a page of the almanac. Clamped by the view, which knows how many
+-- pages there are; the client only has to say "next".
+function ClientBootstrap:setAlmanacPage(page)
+	local pages = AlmanacView.pageCount()
+	local p = math.floor(page or 1)
+	if p < 1 then
+		p = 1
+	elseif p > pages then
+		p = pages
+	end
+	if p ~= self.almanacPage then
+		self.almanacPage = p
+		self.dirty = true
+	end
+	return self.almanacPage
+end
+
+-- What the standing orders WOULD do, before committing them. This is the
+-- affordance that makes a rule editor usable rather than frightening: you
+-- see how many of your recent visitors the change would have affected.
+--
+-- `recent` and `facts` come from the Ledger replay, which the client already
+-- has -- no extra round trip, and `Orders.evaluate` here is the same pure
+-- function the server runs, so the preview cannot disagree with the outcome.
+function ClientBootstrap:previewOrders(candidate, recent, facts)
+	return OrdersView.preview(candidate, recent or {}, facts or {})
+end
+
+-- The human-readable values for one rule domain, for the editor's dropdowns.
+function ClientBootstrap:orderChoices(domain)
+	return OrdersView.domainValues(domain)
+end
+
 -- Read one page of archived Ledger entries (OD22). `cursor` counts back from
 -- the newest archived page: 0 is the most recent, and nil/absent means
 -- "start at the beginning of the archive".
@@ -400,7 +436,16 @@ function ClientBootstrap:render(now)
 		tide = TideView.header(t),
 		tabs = self:tabs(),
 	}
-	if self.screen == ClientBootstrap.SCREEN_LEDGER then
+	if self.screen == ClientBootstrap.SCREEN_WORLD then
+		-- The shore. Until iteration 11 this screen -- the one a player
+		-- lands on -- rendered nothing but the tide header, and
+		-- TideView.dayCurve sat on the orphan allowlist labelled "client UI
+		-- not built". It is the tide dial: 24 hours of water at a glance,
+		-- which is the single most useful thing this game can show someone
+		-- who has just arrived.
+		model.curve = TideView.dayCurve(t, self.curveBuffer)
+		model.curveSamples = TideView.CURVE_SAMPLES
+	elseif self.screen == ClientBootstrap.SCREEN_LEDGER then
 		model.ledger = self:ledgerModel(true)
 		model.highlight = LedgerView.highlight(model.ledger)
 	elseif self.screen == ClientBootstrap.SCREEN_POST and self.snapshot ~= nil then

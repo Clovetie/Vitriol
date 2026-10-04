@@ -2757,3 +2757,173 @@ for i = 1, #names do
 end
 
 end
+
+-- ============================================ the economy numbers are pinned
+section("EconomyPinning")
+do
+
+-- WHY THIS SECTION EXISTS, AND WHY IT ASSERTS LITERALS.
+--
+-- Iteration 11's mutation scan changed every scalar in Config/ by one and
+-- re-ran all 1755 assertions. 54 of 84 constants could be changed with the
+-- whole suite still green -- including EVERY number in the economy table.
+-- Doc 06 is the longest design document in the project; STANDING_ON_SERVED,
+-- RENOWN_ON_GIFT, WARMTH_BASE_SERVED, SPOIL_PER_MILLE and the rest were
+-- verified by nothing at all. The balance pass in iteration 7 tuned numbers
+-- that no test would have noticed being wrong.
+--
+-- THE OBVIOUS FIX DOES NOT WORK. Writing
+--     eq(delta.warmth, EconomyConfig.WARMTH_BASE_SERVED, "...")
+-- pins nothing: mutate the config and both sides move together, the
+-- assertion still passes, and the mutant survives. That IS the vacuous test
+-- this iteration went looking for, and it is an easy one to write by
+-- accident.
+--
+-- So a pin has two halves:
+--   1. the constant equals a LITERAL -- a tripwire saying "this number is a
+--      deliberate decision recorded in doc 06; changing it is a design
+--      change, not a tweak";
+--   2. the observable behaviour equals that constant -- proving the code
+--      actually uses it, which is what stops the literal becoming a lie.
+--
+-- Half 1 is what mutation testing catches. Half 2 is what makes half 1 worth
+-- having. Neither is sufficient alone.
+
+-- 1. The tripwires. If you are changing one of these, change doc 06 too.
+eq(EconomyConfig.WARMTH_BASE_SERVED, 30, "WARMTH_BASE_SERVED is pinned")
+eq(EconomyConfig.WARMTH_BASE_PARTIAL, 6, "WARMTH_BASE_PARTIAL is pinned")
+eq(EconomyConfig.WARMTH_BASE_GIFT, 95, "WARMTH_BASE_GIFT is pinned")
+eq(EconomyConfig.WARMTH_PER_WANT_MET, 18, "WARMTH_PER_WANT_MET is pinned")
+eq(EconomyConfig.WARMTH_MAX, 127, "WARMTH_MAX is pinned (and is the i8 ceiling)")
+eq(EconomyConfig.STANDING_ON_SERVED, 34, "STANDING_ON_SERVED is pinned")
+eq(EconomyConfig.STANDING_ON_PARTIAL, 12, "STANDING_ON_PARTIAL is pinned")
+eq(EconomyConfig.STANDING_ON_GIFT, 110, "STANDING_ON_GIFT is pinned")
+eq(EconomyConfig.RENOWN_ON_SERVED, 1, "RENOWN_ON_SERVED is pinned")
+eq(EconomyConfig.RENOWN_ON_GIFT, 9, "RENOWN_ON_GIFT is pinned")
+eq(EconomyConfig.PASSIVE_RATE_PER_MILLE, 6, "PASSIVE_RATE_PER_MILLE is pinned")
+eq(EconomyConfig.SPOIL_PER_MILLE, 80, "SPOIL_PER_MILLE is pinned")
+eq(EconomyConfig.MAX_ITEMS_PER_VISIT, 4, "MAX_ITEMS_PER_VISIT is pinned")
+eq(EconomyConfig.LONG_ABSENCE_CACHE_COIN, 120, "LONG_ABSENCE_CACHE_COIN is pinned")
+eq(EconomyConfig.LONG_ABSENCE_CACHE_ITEMS, 3, "LONG_ABSENCE_CACHE_ITEMS is pinned")
+eq(EconomyConfig.COMB_RESPAWN_EPOCHS, 2, "COMB_RESPAWN_EPOCHS is pinned")
+eq(EconomyConfig.MAX_PRICE, 4294967, "MAX_PRICE is pinned")
+eq(DrifterConfig.TASTE_MAX, 100, "TASTE_MAX is pinned")
+
+-- 2. The behavioural half: the code must actually use those numbers.
+
+-- A gift is the most generous outcome in the game, and the ordering between
+-- the three outcomes is the design, not an accident.
+ok(EconomyConfig.WARMTH_BASE_GIFT > EconomyConfig.WARMTH_BASE_SERVED,
+	"a gift is warmer than a sale")
+ok(EconomyConfig.WARMTH_BASE_SERVED > EconomyConfig.WARMTH_BASE_PARTIAL,
+	"a sale is warmer than a partial")
+ok(EconomyConfig.STANDING_ON_GIFT > EconomyConfig.STANDING_ON_SERVED,
+	"a gift earns more standing than a sale")
+ok(EconomyConfig.RENOWN_ON_GIFT > EconomyConfig.RENOWN_ON_SERVED,
+	"a gift earns more renown than a sale")
+
+-- WARMTH_MAX must be the i8 ceiling, because warmth is stored as one signed
+-- byte. If these ever disagree the codec silently truncates a player's
+-- reception, which is the kind of bug that looks like bad luck.
+eq(EconomyConfig.WARMTH_MAX, 127, "warmth fits in the signed byte it is stored in")
+ok(EconomyConfig.WARMTH_BASE_GIFT + EconomyConfig.WARMTH_PER_WANT_MET * DrifterConfig.MAX_WANTS
+	>= EconomyConfig.WARMTH_MAX,
+	"the warmest possible visit reaches the clamp, so the clamp is reachable and tested")
+
+-- Passive income and spoilage are per-mille rates applied to whole numbers,
+-- so the arithmetic below is the actual arithmetic in Resolve.
+eq(math.floor(1000 * EconomyConfig.PASSIVE_RATE_PER_MILLE / 1000), 6,
+	"passive income on 1000 shelved value is 6 coin an epoch")
+eq(math.floor(100 * EconomyConfig.SPOIL_PER_MILLE / 1000), 8,
+	"spoilage on a stack of 100 is 8 an epoch")
+-- A rate that rounds to zero on a small holding is deliberate: a post with
+-- two things on the shelf should not be taxed into nothing while away.
+eq(math.floor(10 * EconomyConfig.SPOIL_PER_MILLE / 1000), 0,
+	"a small holding does not spoil at all")
+
+-- The long-absence cache is what greets a player who has been gone past the
+-- catch-up window. It must be worth coming back for, and it must not be so
+-- large that leaving is the best strategy.
+ok(EconomyConfig.LONG_ABSENCE_CACHE_COIN > 0, "a long absence leaves something behind")
+ok(EconomyConfig.LONG_ABSENCE_CACHE_COIN < EconomyConfig.TIER_COST[2],
+	"...but not enough to buy a tier outright")
+ok(EconomyConfig.LONG_ABSENCE_CACHE_ITEMS <= EconomyConfig.MAX_ITEMS_PER_VISIT,
+	"the cache cannot exceed what a single visit could carry")
+
+-- MAX_PRICE is the contract's ceiling and must stay well under the u32 coin
+-- ceiling, so that a full shelf cannot overflow a post's purse.
+ok(EconomyConfig.MAX_PRICE < GameConfig.MAX_COIN, "a single price cannot exceed the coin ceiling")
+ok(EconomyConfig.MAX_PRICE * GameConfig.MAX_BERTHS < GameConfig.MAX_COIN,
+	"a whole berth of max-price sales cannot overflow the purse")
+eq(EconomyConfig.MIN_PRICE, 1, "nothing is ever free by accident")
+
+end
+
+-- ====================================================== the blob budget (OD15)
+section("BlobBudget")
+do
+
+-- OD15 asked whether binary packing plus base64 still pays for itself, given
+-- that DataStore compresses values on its own. Iteration 11 measured it on a
+-- heavy post -- tier 4, twelve shelves priced, 200 finds held and sold (so
+-- both 32-byte bitsets are dense), a full order program:
+--
+--                        raw    gzip
+--   binary + base64     1252     474
+--   naive JSON          3836     772
+--
+-- 3.06x smaller raw, 1.63x smaller after compression. Base64 costs exactly
+-- the expected 4/3 inflation, which was the worry in the question.
+--
+-- THE FIRST VERSION OF THIS MEASUREMENT WAS WRONG AND SAID 5.9x. It built a
+-- post with a 200-entry resident ledger and serialised that to JSON -- but
+-- the post blob does NOT contain the ledger, which lives in its own pages.
+-- So it compared the packed form against JSON of strictly more data. The
+-- round-trip assertion below is what caught it: `#backBS.ledger` threw,
+-- because the decoded post has no ledger to count. A flattering number from
+-- an unfair comparison is worse than no number, and it is exactly the shape
+-- of mistake this iteration's scan exists to find.
+--
+-- VERDICT: keep the packing -- but the honest margin is 1.6x, not 6x. The
+-- stronger reason is the one the ratio hides: packing gives a HARD BOUND on
+-- blob size, which is what the 6144-byte budget below is enforceable
+-- against. JSON of the same state has no bound anyone can assert.
+
+local BS = Post.new(9001, 4455667788, 987654321, Tide.EPOCH)
+BS.tier = 4
+BS.coin = 123456
+BS.renown = 4210
+BS.orders = Orders.empty()
+BS.ordersBytecode = Orders.encode(BS.orders)
+for slot = 1, math.min(Post.maxShelves(BS.tier), 12) do
+	Post.setShelf(BS, slot, slot, 50 + slot)
+end
+-- Dense almanac and sold bitsets: 64 bytes packed, hundreds of numbers in
+-- JSON, and the realistic worst case for a long-lived post.
+for i = 1, 200 do
+	Post.addStock(BS, i, 7)
+end
+
+local heavyBytes = PostCodec.encode(BS)
+local heavyText = PostCodec.encodeToString(BS)
+
+eq(GameConfig.MAX_POST_BLOB_BYTES, 6144, "the post blob budget is pinned")
+ok(#heavyBytes < GameConfig.MAX_POST_BLOB_BYTES,
+	"a heavy post fits the blob budget (" .. tostring(#heavyBytes) .. " bytes)")
+-- Margin, not just fit. A post that only just fits is one content addition
+-- away from being unsaveable, and that failure mode loses progress.
+ok(#heavyBytes * 4 < GameConfig.MAX_POST_BLOB_BYTES,
+	"...with at least 4x headroom, so growth cannot silently reach the ceiling")
+
+ok(#heavyText >= #heavyBytes, "base64 never shrinks the payload")
+ok(#heavyText <= math.ceil(#heavyBytes * 4 / 3) + 4,
+	"base64 inflation is the expected 4/3, not something worse")
+
+-- And it round-trips, which is the only reason any of the above matters --
+-- and is the assertion that caught the bad measurement.
+local backBS = PostCodec.decodeFromString(heavyText)
+ok(backBS ~= nil, "the heavy post decodes again")
+eq(backBS.coin, BS.coin, "...with its coin intact")
+eq(Post.totalStock(backBS), Post.totalStock(BS), "...and every stack in the store")
+
+end

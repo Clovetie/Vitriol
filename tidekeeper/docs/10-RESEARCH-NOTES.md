@@ -576,6 +576,7 @@ in the seam between two correct modules.**
 | 4 | `orphan-scan`, both directions | an **allowlist entry** that has gone stale |
 | 5 | `remote-scan` | a **remote** one side never speaks |
 | 6 | `dead-content-scan` | a **string** a player can never see |
+| 7 | `mutation-scan` | a **value** no test constrains |
 
 Level 5 is the one that caught the biggest hole: five of six client → server remotes
 had a complete server half and zero client callers (doc 08 §8.4). Every level found
@@ -667,6 +668,98 @@ realistic accident.
 Worth recording as a general hazard: **a scan written against today's code will
 encode today's idioms.** This one was wrong within an hour of being written, by a
 refactor in the same commit.
+
+## 14. Iteration-11 pass — the first question the source cannot answer
+
+Levels one to six are all structural: read the code carefully enough and the
+answer is there. Level seven is different. *Does the suite actually check
+this?* cannot be answered by reading anything — only by breaking the code on
+purpose and seeing whether something notices.
+
+### 14.1 Two cheaper versions of the question, both clean
+
+Recorded because a negative result is a result, and because the next agent
+should not spend the same hours:
+
+| asked | method | result |
+| --- | --- | --- |
+| are there assertions that never run? | instrument the assert helpers with `debug.getinfo`, diff executed lines against static call sites | **3 of 1130** call sites unexecuted, all three legitimate `ok(false, ...)` failure branches |
+| do tests assert on fields that do not exist? | `member-scan` walks only `code/`, so extend it over `tools/tests` | **1615** references checked, **0** problems |
+
+The second is worth keeping in mind as a standing gap that turned out not to
+bite: 4 600 lines of test files — the project's entire evidence base — had
+never been member-checked at all.
+
+### 14.2 What mutation found
+
+Change every scalar in `Config/` by one; re-run all 1 755 assertions.
+**54 of 86 constants could be changed with the whole suite still green.**
+
+Among them, *every number in the economy table*: `STANDING_ON_SERVED`,
+`RENOWN_ON_GIFT`, `WARMTH_BASE_SERVED`, `SPOIL_PER_MILLE`,
+`PASSIVE_RATE_PER_MILLE`. Doc 06 is the longest design document in the
+project and nothing verified its numbers. The iteration-7 balance pass tuned
+values that no test would have noticed being wrong.
+
+### 14.3 The trap: the obvious pin pins nothing
+
+```lua
+eq(delta.warmth, EconomyConfig.WARMTH_BASE_SERVED, "...")   -- vacuous
+```
+
+Mutate the config and both sides move together; the assertion still passes.
+**This is itself the vacuous test the iteration was hunting**, and it is the
+natural thing to write. A pin needs two halves:
+
+1. the constant equals a **literal** — the tripwire mutation can catch;
+2. the observable behaviour equals the constant — which stops the literal
+   from becoming a lie as the code moves underneath it.
+
+Neither half is sufficient alone, and only the first is what mutation
+rewards. 47 constants are now guarded, up from 28.
+
+### 14.4 Cost forced the design, and the design turned out better
+
+A full run is ~90 minutes, which cannot go in a 3-minute gate. So the scan
+has two modes: `--full` for discovery, and a default that re-mutates only the
+**already-guarded** set against the 0.8 s real-Luau suite (~30 s). The
+default is not a weaker version of the full run — it answers a different and
+arguably more useful question: **has a test rotted?** A pin deleted or
+weakened shows up immediately.
+
+### 14.5 The iteration-10 warning arrived on schedule
+
+Doc 10 §13.3 warned that a scan written against today's code encodes today's
+idioms. Testing this one against a legitimate-but-unusual idiom — a trailing
+comment on a config line — made it announce that the constant *"no longer
+exists"*. Worse: the brittle regex had been hiding **two constants entirely**
+(`GameConfig.OWNER_ID_MAX`, `TideConfig.SCAN_HORIZON`), which had therefore
+never been mutated. The deliberate-idiom test is now the thing I would most
+recommend to anyone writing the next scan.
+
+### 14.6 OD15, and a wrong answer caught by its own test
+
+Measured on a heavy post (tier 4, twelve shelves priced, 200 finds held and
+sold, a full order program), comparing only the fields `PostCodec` persists:
+
+| | raw | gzip |
+| --- | --- | --- |
+| binary + base64 | 1 252 | 474 |
+| naive JSON | 3 836 | 772 |
+
+**3.06× raw, 1.63× after compression.** Keep the packing — but the honest
+margin is 1.6×, not the 6× the first attempt reported.
+
+That first attempt was wrong: it built a post with a 200-entry resident
+ledger and serialised that to JSON, while the packed form does **not** contain
+the ledger at all (it lives in its own pages, doc 05 §9.2). It compared the
+packed blob against JSON of strictly more data. The round-trip assertion
+caught it — `#backBS.ledger` threw, because a decoded post has no ledger to
+count.
+
+The stronger argument for packing is the one the ratio hides: it gives a
+**hard bound** on blob size, which is what makes the 6 144-byte budget
+enforceable. JSON of the same state has no bound anyone can assert.
 
 ## 9. Known unknowns
 

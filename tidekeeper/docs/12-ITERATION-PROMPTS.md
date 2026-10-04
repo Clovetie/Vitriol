@@ -927,7 +927,112 @@ FINISH BY.
   - Committing and pushing to your branch.
 ```
 
-## Prompt — Iteration 12+: contingency and live
+## Prompt — Iteration 12: Studio, or the honest alternative
+
+```
+You are iteration 12 of TIDEKEEPER, a Roblox game being built inside the
+Clovetie/Vitriol repository. Work only on your session's fixed branch. Never
+touch the VITRIOL tree: TIDEKEEPER is entirely inside tidekeeper/.
+
+START HERE, IN THIS ORDER.
+
+1.  git fetch && git reset --hard origin/<your branch>. The working tree is
+    reset to the session base between turns, so the previous iteration's
+    commits exist only on the remote.
+2.  cd tidekeeper/tools && npm install
+3.  Build Luau 0.700 into tidekeeper/tools/bin/luau (about 3-4 minutes):
+      git clone --depth 1 --branch 0.700 https://github.com/luau-lang/luau /tmp/luau
+      make -C /tmp/luau config=release luau -j$(nproc)
+      cp /tmp/luau/luau tidekeeper/tools/bin/luau
+4.  node tidekeeper/tools/tidekeeper-quality-gate.js
+    It must print 19/19 before you change anything. If it does not, fixing
+    that IS your iteration.
+5.  Read tidekeeper/HANDOFF.md, then docs/10-RESEARCH-NOTES.md sections 12,
+    13 and 14 -- the ladder, and what each level cost to find.
+
+THE BIGGEST THING IS NO LONGER A SCAN.
+
+Eleven iterations have built seven levels of scan and every one found
+something real. That has been the right instinct and it is reaching its
+limit. Here is the honest state of this project:
+
+  * 1828 assertions, 0 failures, 19 gate checks, all green.
+  * NOT ONE LINE HAS EVER RUN IN ROBLOX STUDIO. No Instance has been
+    created. No DataStore call has been real. No frame has been drawn. No
+    human has ever seen this game.
+
+L4 and L5 have been blocked since iteration 4. Everything the project claims
+rests on a fake platform written by the same process that wrote the code --
+and a fake platform agrees with its author by construction. That is the
+single largest risk here, and it is larger than anything another scan will
+find.
+
+SO, FIRST: IF YOU HAVE STUDIO ACCESS OR ANY WAY TO RUN REAL ROBLOX, DO THAT.
+Build the place file, open it, press play, and write down exactly what breaks
+-- it will not be nothing. Rojo is the expected route; the module map in
+tools/lib/module-map.js is the single source of truth for where every file
+belongs. Report what happened in plain language, including the parts that
+embarrassed the design.
+
+IF YOU DO NOT HAVE STUDIO ACCESS, DO NOT PRETEND OTHERWISE AND DO NOT
+SUBSTITUTE ANOTHER SCAN FOR IT. Say so in the handoff in one plain sentence,
+and spend the iteration on the highest-value work that does not need it:
+
+  a. SHRINK THE UNGUARDED LIST. 37 config constants are still constrained by
+     no test (see the UNGUARDED table in tools/tidekeeper-mutation-scan.js,
+     each with an honest reason). The most valuable ones are the ceilings
+     nothing reaches: MAX_ARRIVALS_PER_EPOCH, MAX_RESIDENT_DRIFTERS,
+     MAX_STORE_ENTRIES, VISITOR_RING_SIZE, MAX_CATCHUP_EPOCHS. Each needs a
+     scenario that actually saturates the limit, which is exactly the kind of
+     scenario that finds real bugs. Promote what you pin, and remember the
+     scan verifies the list in both directions.
+
+  b. THE FAKE PLATFORM IS THE WEAKEST LINK. tools/tests/fake-platform.lua is
+     where "it works" ultimately bottoms out, and nothing checks it against
+     the real API surface. Compare it, member by member, against the
+     published DataStore/MemoryStore/Players APIs -- argument counts, return
+     shapes, what throws versus what returns nil, UpdateAsync transform
+     semantics. Every place it is more forgiving than Roblox is a bug the
+     suite cannot see. Use web search; the docs are current and you should
+     cite what you check.
+
+  c. OD19 is still open: delete fengari now that real Luau runs the suite, or
+     write down why the two-VM cross-check still earns its keep.
+
+RULES THAT HAVE NOT CHANGED.
+
+  - Determinism (doc 04 section 5) is not negotiable.
+  - No free text over the wire. Ids only.
+  - The server owns prices (D46). The client displays, never computes.
+  - Content is reachable or it does not exist (D48).
+  - A pinned constant needs a literal AND a behavioural link (D50) -- an
+    assertion against the constant alone is vacuous.
+  - Test a new scan against a legitimate but unusual idiom (D51).
+  - A measurement must compare like with like and say what it excluded (D52).
+  - Every allowlist is verified in both directions (D44).
+  - Paste real tool output. Never paraphrase it.
+  - A partial honest result beats a complete claimed one. Always.
+
+ON THE BENCH. Best-of-3, every sample printed, 18 us budget. Do not raise it
+to make something pass.
+
+ON THE MUTATION SCAN. The gate runs the guarded set only (~30 s). Run
+`node tidekeeper/tools/tidekeeper-mutation-scan.js --full` if you add config
+or want the whole picture; it takes about 90 minutes, so start it early and
+do other work while it runs. It restores every file it touches, including on
+failure -- if you interrupt it anyway, check `git status` before trusting the
+tree.
+
+FINISH BY.
+
+  - Running the full gate and pasting it.
+  - Updating the docs you invalidated, ROADMAP.md, and HANDOFF.md.
+  - Writing the iteration-13 prompt into docs/12-ITERATION-PROMPTS.md and
+    extending the doc gate's prompt loop to cover it.
+  - Committing and pushing to your branch.
+```
+
+## Prompt — Iteration 13+: contingency and live
 
 ## The handoff template
 

@@ -285,13 +285,58 @@ of the two pages. Doc 05 §9.2.
 
 ---
 
-## Iteration 11+ ⬜
+## Iteration 11 ✅ — 54 of 86 config constants were verified by nothing
 
-Studio verification (L4/L5) remains the standing gap. Otherwise: the idea bank in
-doc 00 §9, and whatever level seven turns out to be. Scope is defined by `HANDOFF.md`,
-not by this table.
+| Deliverable | Status |
+| --- | --- |
+| **`tidekeeper-mutation-scan.js`** — gate check 19, level seven of the ladder | ✅ |
+| 18 economy constants + the blob budget pinned; guarded set 28 → 47 | ✅ |
+| **OD15 closed, with numbers** — and a wrong first answer caught and corrected | ✅ |
+| The dispatch/letters path read end to end; scenario 27 drives the whole chain | ✅ |
+| The shore screen draws the tide dial; the orders editor previews a change | ✅ |
+| Orphan allowlist 23 → 20; the "client UI not built" category is **empty** | ✅ |
+| Session scenarios 27–28, `EconomyPinning` and `BlobBudget` sections | ✅ |
+
+**The find.** Changing every scalar in `Config/` by one and re-running all 1 755
+assertions: 54 of 86 could be changed with the suite still green — including every
+number in the economy table. Doc 06 is the longest design document in the project and
+nothing verified its numbers.
+
+**The trap worth knowing:** `eq(delta.warmth, EconomyConfig.WARMTH_BASE_SERVED)` pins
+nothing, because mutating the config moves both sides together. That *is* a vacuous
+test. A pin needs a literal plus a behavioural link. Doc 10 §14.3.
+
+**Two cheaper questions came back clean** and are recorded so nobody re-spends the
+hours: assertions that never run (3 of 1130, all legitimate failure branches) and
+tests asserting on non-existent fields (1615 refs, 0 problems).
 
 ---
+
+## Iteration 12+ ⬜
+
+**Studio verification (L4/L5) is now the largest gap by a wide margin** — no Instance
+has ever been created, no DataStore call has ever been real, no frame has ever been
+drawn. Otherwise: shrink the 37 known-unguarded constants, the idea bank in doc 00 §9,
+and whatever level eight turns out to be. Scope is defined by `HANDOFF.md`, not by
+this table.
+
+---
+
+### Decisions D50–D52 (iteration 11)
+
+**D50 — a pinned constant needs a literal and a behavioural link.** Asserting
+behaviour against the constant alone is vacuous: mutate the config and both sides
+move together. The literal is the tripwire; the behavioural assertion stops the
+literal becoming a lie. Doc 10 §14.3.
+
+**D51 — test a new scan against a legitimate but unusual idiom before trusting it.**
+Iteration 10 predicted this and iteration 11 proved it twice: a trailing comment on a
+config line made the mutation scan report a constant as missing, and the same
+brittleness had hidden two constants from the scan entirely.
+
+**D52 — a measurement must compare like with like, and say what it excluded.** The
+first OD15 answer was 3.6× too flattering because it serialised data the packed form
+does not store. A flattering number from an unfair comparison is worse than no number.
 
 ### Decisions D47–D49 (iteration 10)
 
@@ -331,7 +376,7 @@ Recorded rather than guessed. Each has an owning iteration.
 | OD12 | Is `Visit.resolve` actually inside 18 µs in Luau? | ~~it4~~ | **Closed at L3.5 (doc 04 §6.1).** Real Luau 0.700, median **15.9 µs** against an 18 µs budget — inside, but only 1.1×. p99 26.3 µs and full catch-up 2.9 ms both have room. `--codegen` is *slower*, so the hot path is table-bound, not arithmetic-bound |
 | OD13 | Arrival scheduling is window-width dependent (see below) | ~~it3~~ | **Closed.** `CadenceService.planChunks` and `chunkForDrifter` are pure; at-most-once is asserted by session scenario 8 |
 | OD14 ✅ | Should `warmth` feed the price a Drifter will accept, not just the prose? | **it7** | **CLOSED: no.** Held for three iterations waiting for a playtest that six iterations without Studio access make clear is not coming soon. Deciding it costs nothing to reverse and leaving it open was costing a decision every iteration. The reasoning has not changed and is not really empirical: wiring warmth into price turns it into a stat to farm, makes every visitor an optimisation problem, and contradicts doc 00's pillars directly. Warmth stays prose-only — it is something you notice, not something you optimise. Re-open only if a playtest shows players cannot tell warmth does anything at all, and fix that with better prose first. |
-| OD15 | DataStore compresses values itself; does our base64 packing still pay? (doc 10 §6.2) | it4 | Binary packing is not compression, but base64 inflates 33 %. Sizes are far inside budget — measure, do not redesign |
+| OD15 ✅ | DataStore compresses values itself; does our base64 packing still pay? | ~~it11~~ | **Closed with numbers (doc 10 §14.6).** On a heavy post, comparing only the fields `PostCodec` persists: binary+base64 **1 252 B raw / 474 gzipped**, naive JSON **3 836 / 772**. So 3.06× raw and **1.63× after compression** — keep the packing, but the honest margin is 1.6×, not the 6× the first attempt claimed (that run serialised a resident ledger the post blob does not contain, and the round-trip assertion caught it). The stronger argument is the one the ratio hides: packing gives a **hard bound** on blob size, which is what makes the 6 144-byte budget enforceable at all |
 | OD17 | Run the correctness suite in real Luau instead of transformed Lua 5.3 | ~~it5~~ | **Closed (doc 10 §8.4), and without Lute.** `tidekeeper-luau-test.js` runs the suite shim-free; 887 = 887 against fengari, 0.7 s vs 72 s. Lute release binaries remain unreachable and turned out not to be needed — it would have added a test runner and a profiler, not a different measurement |
 | OD18 | Adopt **LibMP** to measure the client frame budget on real devices (doc 10 §7.2) | it6 | Yes for the Ledger replay, sampled on a fraction of sessions — Roblox warns it raises memory. **Blocked on Studio**, like L4/L5 |
 | OD19 | Port `fake-platform.lua` to real Luau so fengari can be deleted entirely | it6+ | Only worth it if the shims start costing again. The cross-check between two VMs is currently an asset, not debt |

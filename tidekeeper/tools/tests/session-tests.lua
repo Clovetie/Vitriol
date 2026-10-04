@@ -1791,3 +1791,166 @@ do -- 26. ONE STATUS ENUM, AND A SENTENCE FOR EVERY CODE (OD23)
 	-- An unknown code from a newer server still degrades honestly.
 	eq("an unknown status falls back to offline", client:statusText(99), offline)
 end
+
+do -- 27. A LETTER TRAVELS, AND SOMEBODY READS IT
+	-- The dispatch/letters path has produced a defect in three consecutive
+	-- iterations: iteration 7 found letters could never travel (letterId was
+	-- hard-coded to 0), iteration 9 found the payload builder sent a `phrase`
+	-- index the spec would have rejected, and iteration 10 found the screen
+	-- was still offering a superseded 12-line phrase table.
+	--
+	-- Every one of those was a break in a DIFFERENT link of the same chain,
+	-- and each fix was verified only at the link it touched. The existing
+	-- tests prove "the drifter carries the letter the player attached" and
+	-- stop there. Nothing has ever asserted the thing the feature is FOR:
+	-- that a letter chosen by one player is read, as words, by another.
+	--
+	-- This drives the whole chain: pick -> payload -> handler -> post ->
+	-- publish -> drifter -> visit -> receipt -> codec -> ledger -> text.
+	local ClientBootstrap = TidekeeperRequire("ClientBootstrap")
+	local NetContract = TidekeeperRequire("NetContract")
+	local DispatchHandler = TidekeeperRequire("DispatchHandler")
+	local SessionHandler = TidekeeperRequire("SessionHandler")
+	local LetterView = TidekeeperRequire("LetterView")
+	local Visit = TidekeeperRequire("Visit")
+	local Ledger = TidekeeperRequire("Ledger")
+	local LedgerView = TidekeeperRequire("LedgerView")
+	local Format = TidekeeperRequire("Format")
+	local Strings = TidekeeperRequire("Strings")
+	local Post = TidekeeperRequire("Post")
+	local ReceiptCodec = TidekeeperRequire("ReceiptCodec")
+
+	local app, env = newServer({ seed = 31337 })
+	local sender = 7100
+	env:addPlayer(sender)
+	settle(app, env)
+	local S = app.posts:get(sender)
+	ok("the sender has a post", S ~= nil)
+
+	-- The player picks a letter the way the UI makes them: a category, then
+	-- a letter inside it. No typing, no id pulled out of the air.
+	local categories = LetterView.categories()
+	ge("the picker offers categories", #categories, 1)
+	local chosen = LetterView.lettersIn(1)[2].id
+	ok("the picker returned a real letter id", LetterView.isValid(chosen))
+	ok("...which has authored words behind it", Strings.LETTER[chosen] ~= nil)
+
+	-- Give the sender something to carry, so the dispatch is a real one.
+	Post.addStock(S, 3, 2)
+
+	local function remoteTo(fn)
+		return { InvokeServer = function(_, payload) return fn(app, { UserId = sender }, payload) end }
+	end
+	local client = ClientBootstrap.start({
+		clock = function() return env.clock.now end,
+		userId = sender,
+		remotes = {
+			[NetContract.RF_SESSION] = remoteTo(SessionHandler.handle),
+			[NetContract.RF_DISPATCH] = remoteTo(DispatchHandler.handle),
+		},
+	})
+	client:requestSession()
+
+	local sent, why = client:dispatch({ 1 }, chosen, { 3 })
+	ok("the dispatch is accepted: " .. tostring(why), sent ~= nil)
+	eq("the post recorded the letter", S.dispatchLetter, chosen)
+
+	-- Publication happens at logout; buildDrifter is what carries it.
+	local d = app.exchange:buildDrifter(S, 500)
+	eq("the drifter carries the chosen letter", d.letterId, chosen)
+
+	-- The letter has to survive the wire format too. A u16 that silently
+	-- truncated would be invisible until a player read the wrong note.
+	local encoded = ReceiptCodec.encode({
+		v = 1, drifterId = d.id, hostId = 7200, epoch = 500,
+		outcome = Visit.OUTCOME_SOLD or 1, spent = 10, warmth = 20,
+		flags = 1, noteId = chosen,
+	})
+	local decoded = ReceiptCodec.decode(encoded)
+	ok("the receipt round-trips", decoded ~= nil)
+	eq("...carrying the same letter id", decoded.noteId, chosen)
+
+	-- And the recipient reads WORDS, not a number. This is the assertion the
+	-- feature exists for.
+	local entry = Ledger.entry(Ledger.T_REMOTE_LETTER, 500, 7200, { chosen })
+	ok("a letter entry is well-formed", entry ~= nil)
+	entry.noteId = chosen
+	local model = LedgerView.build({ entry }, {})
+	local line = model.groups[1].lines[1]
+	ok("the ledger line announces a letter", line.hasLetter)
+	ok("...and carries its text", line.letterText ~= nil and #line.letterText > 0)
+	eq("...which is the authored sentence, not a fallback", line.letterText, Strings.LETTER[chosen])
+	ok("...and is not the missing-letter fallback", line.letterText ~= Strings.LETTER_FALLBACK)
+	eq("no formatter miss fired on the whole journey", Format.misses.letter, 0)
+end
+
+do -- 28. THE SCREENS DO SOMETHING (the last "UI not built" allowlist entries)
+	-- Three helpers sat on the orphan allowlist for six iterations labelled
+	-- "client UI not built": the tide dial, the orders preview and the
+	-- domain value lists. Iteration 11 built the screens that use them.
+	--
+	-- The shore (SCREEN_WORLD) is the screen a player lands on, and until
+	-- now it rendered a tide header and nothing else.
+	local ClientBootstrap = TidekeeperRequire("ClientBootstrap")
+	local NetContract = TidekeeperRequire("NetContract")
+	local SessionHandler = TidekeeperRequire("SessionHandler")
+	local AlmanacView = TidekeeperRequire("AlmanacView")
+	local TideView = TidekeeperRequire("TideView")
+	local Orders = TidekeeperRequire("Orders")
+
+	local app, env = newServer({ seed = 5150 })
+	local userId = 8100
+	env:addPlayer(userId)
+	settle(app, env)
+
+	local client = ClientBootstrap.start({
+		clock = function() return env.clock.now end,
+		userId = userId,
+		remotes = {
+			[NetContract.RF_SESSION] = {
+				InvokeServer = function(_, payload)
+					return SessionHandler.handle(app, { UserId = userId }, payload)
+				end,
+			},
+		},
+	})
+	ok("the session starts", client:requestSession() ~= nil)
+
+	-- The shore draws a day of water.
+	client:setScreen(ClientBootstrap.SCREEN_WORLD)
+	local shore = client:render(env.clock.now)
+	ok("the shore renders a tide curve", shore.curve ~= nil)
+	eq("...with one sample per slot", #shore.curve, TideView.CURVE_SAMPLES)
+	ok("...and a tide header beside it", shore.tide ~= nil)
+	-- The curve must actually vary; a flat line would mean the dial is
+	-- drawing a constant and nobody would notice from a nil check.
+	local lo, hi = shore.curve[1], shore.curve[1]
+	for i = 2, #shore.curve do
+		if shore.curve[i] < lo then lo = shore.curve[i] end
+		if shore.curve[i] > hi then hi = shore.curve[i] end
+	end
+	ok("...and the water actually moves across the day", hi > lo)
+
+	-- The curve buffer is reused, not reallocated every redraw.
+	local again = client:render(env.clock.now)
+	ok("the dial reuses one buffer", again.curve == shore.curve)
+
+	-- The almanac pages, and clamps at both ends rather than running off.
+	client:setScreen(ClientBootstrap.SCREEN_ALMANAC)
+	eq("the almanac starts on page 1", client.almanacPage, 1)
+	eq("it can turn to page 2", client:setAlmanacPage(2), 2)
+	eq("page 0 clamps to the first", client:setAlmanacPage(0), 1)
+	local lastPage = AlmanacView.pageCount()
+	eq("a page past the end clamps to the last", client:setAlmanacPage(9999), lastPage)
+	local alm = client:render(env.clock.now)
+	ok("the almanac renders", alm.almanac ~= nil)
+	eq("...on the page that was chosen", alm.almanac.page, lastPage)
+	ok("...and says how much has been found", alm.almanac.heldText ~= nil)
+
+	-- The orders preview answers without a round trip.
+	local preview = client:previewOrders(Orders.empty(), {}, {})
+	ok("an orders preview is produced", preview ~= nil)
+	eq("...over no visitors, nothing changes", preview.changed, 0)
+	ok("...and it says so in words", preview.text ~= nil and #preview.text > 0)
+	ok("the editor can list a domain's values", client:orderChoices("tide") ~= nil)
+end

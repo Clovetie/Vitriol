@@ -81,6 +81,13 @@ const ALLOWED_ORPHANS = new Map([
 	["MemoryAdapter.clearIndex", "index teardown for a shard that is being retired"],
 
 	// --- blocked on a client that does not exist yet --------------------
+	//
+	// EMPTY as of iteration 11. The last three -- OrdersView.preview,
+	// OrdersView.domainValues and TideView.dayCurve -- were retired by
+	// building the screens that needed them: the shore now draws the tide
+	// dial, and the orders editor previews a rule change against the
+	// visitors you actually had. The scan made them leave by failing on the
+	// stale entries, which is D44 doing its job.
 	// These are the payload builders for UI nobody has built. They are real
 	// unfinished work, tracked in doc 07, NOT library surface.
 	//
@@ -89,9 +96,6 @@ const ALLOWED_ORPHANS = new Map([
 	// failing on the stale entries rather than letting them sit here
 	// looking like excuses. What remains is presentation: the preview and
 	// layout helpers that need a real screen.
-	["OrdersView.preview", "client UI not built; doc 07 row Orders"],
-	["OrdersView.domainValues", "client UI not built; doc 07 row Orders"],
-	["TideView.dayCurve", "client UI not built; doc 07 row Tide dial"],
 
 	// --- blocked on a platform capability that does not exist -----------
 	["NotifyService.shouldPromptOptIn", "OD7: the send half of the API is removed; NotifyAdapter is capability-flagged"],

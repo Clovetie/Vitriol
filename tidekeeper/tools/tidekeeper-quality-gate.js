@@ -39,7 +39,7 @@ const MAX_CAPTURE = 200000;
  * constant on purpose: a gate that infers how far along the project is will
  * eventually infer wrongly and let a missing harness through.
  */
-const CURRENT_ITERATION = 10;
+const CURRENT_ITERATION = 11;
 
 function die(message) {
 	console.error(`tidekeeper-quality-gate: ${message}`);
@@ -204,6 +204,10 @@ run("remote-scan", "tidekeeper-remote-scan.js", [], { requiredFrom: 9, needsSour
 // Level six: content a player can never see. Found 18 of 51 UI labels dead on
 // its first run, including the entire navigation bar. Required from 10.
 run("dead-content-scan", "tidekeeper-dead-content-scan.js", [], { requiredFrom: 10, needsSource: true });
+// Level seven: a value no test constrains. Mutates every guarded config
+// constant and re-runs the fast Luau suite (~30 s), so it detects test rot.
+// The exhaustive discovery run is `--full` and takes about 90 minutes.
+run("mutation-scan", "tidekeeper-mutation-scan.js", [], { requiredFrom: 11, needsSource: true });
 
 run("determinism-scan", "tidekeeper-determinism-scan.js", ["--src", rel(args.src)], { needsSource: true });
 

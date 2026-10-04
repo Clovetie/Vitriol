@@ -1,16 +1,15 @@
-# Handoff — TIDEKEEPER, iteration 10 (2026-10-02 UTC)
+# Handoff — TIDEKEEPER, iteration 11 (2026-10-02 UTC)
 
 TIDEKEEPER is a cozy async island trading post for Roblox. The tide runs on a real
 clock, and every visitor who arrives while you are offline is a real player's
 drifter, delayed. It lives in `tidekeeper/`, entirely separate from VITRIOL, with
-its own copy of the tooling. **65 Luau files, 14 967 lines. 1 755 executed
-assertions across two suites, 0 failures**, and 1 200 of them run byte-for-byte in
+its own copy of the tooling. **65 Luau files, 15 012 lines. 1 828 executed
+assertions across two suites, 0 failures**, and 1 241 of them run byte-for-byte in
 both a real Luau 0.700 VM and fengari with identical results.
 
-**Iteration 10 in one line: the Ledger — the screen carrying this game's whole
-argument — had been archiving history to a key nothing could read, and 18 of 51
-player-facing labels could never reach a player's eyes, including the entire
-navigation bar.**
+**Iteration 11 in one line: 54 of 86 config constants could be changed without a
+single one of 1 755 assertions noticing — including every number in the economy
+table, the longest design document in the project.**
 
 ---
 
@@ -20,195 +19,179 @@ See §9. It is also in `docs/12-ITERATION-PROMPTS.md`.
 
 ## 1. Verification level claimed
 
-**L3.5.** Everything runs headless: the pure core and the full server against a fake
-platform, plus a real Luau 0.700 VM cross-checking the pure suite. **Nothing has ever
-run in Roblox Studio** — no Instance has been created, no DataStore call has been
-real, no frame has been drawn. L4 and L5 have been blocked since iteration 4 and this
-is now the single largest gap in what this project can claim.
+**L3.5.** Everything runs headless. **Nothing has ever run in Roblox Studio** — no
+Instance created, no DataStore call real, no frame drawn, no human has seen this
+game. L4/L5 have been blocked since iteration 4, and after this iteration I would
+put it more strongly than previous handoffs have: every claim here rests on a fake
+platform written by the same process that wrote the code, and a fake platform agrees
+with its author by construction.
 
 ## 2. What is actually true
 
 | Check | Real pasted output |
 | --- | --- |
-| quality gate | `TIDEKEEPER quality gate: 18/18 checks passed` |
-| doc gate | `TIDEKEEPER doc gate: 180/180 checks passed` |
+| quality gate | `TIDEKEEPER quality gate: 19/19 checks passed` |
+| doc gate | `TIDEKEEPER doc gate: 183/183 checks passed` |
 | syntax | `All 65 Luau file(s) parsed successfully.` |
-| member-scan | `clean — every cross-module member resolves (803 checked)` |
+| member-scan | `clean — every cross-module member resolves (808 checked)` |
 | dead-write-scan | `clean — every field written to shared state is read somewhere (27 checked)` |
-| orphan-scan | `clean — every exported function is called, or allowlisted with a reason (484 checked, 23 allowlisted)` |
+| orphan-scan | `clean — every exported function is called, or allowlisted with a reason (487 checked, 20 allowlisted)` |
 | remote-scan | `clean — every remote is spoken by both sides (9 checked)` |
-| **dead-content-scan** | `clean — every piece of player-facing content is reachable (92 checked)` |
+| dead-content-scan | `clean — every piece of player-facing content is reachable (92 checked)` |
+| **mutation-scan** | `clean — every guarded constant is still pinned by a test (47 mutated, 37 known-unguarded)` |
 | determinism-scan | `clean` |
-| smoke-test | `TIDEKEEPER smoke test: 1201 passed, 0 failed, 0 static proof(s) failed` |
-| session-test | `TIDEKEEPER session test: 554 passed, 0 failed` |
-| luau-test | `TIDEKEEPER Luau test: 1200 passed, 0 failed, agrees with fengari` |
-| luau-bench | `within budget (median 15.537 us, p99 24.001 us, catch-up 2883.7 us)` |
+| smoke-test | `TIDEKEEPER smoke test: 1242 passed, 0 failed, 0 static proof(s) failed` |
+| session-test | `TIDEKEEPER session test: 586 passed, 0 failed` |
+| luau-test | `TIDEKEEPER Luau test: 1241 passed, 0 failed, agrees with fengari` |
+| luau-bench | `within budget (median 16.124 us, p99 21.191 us, catch-up 2892.7 us)` |
 
 ## 3. What was built
 
-### Level six: content a player can never see
+### Level seven: a value no test constrains
 
-`tools/tidekeeper-dead-content-scan.js`, gate check 18. It checks four things:
+The six scans before this one ask questions the source can answer. This one cannot:
+*does the suite actually check this?* is only answerable by breaking the code and
+seeing whether anything notices.
 
-1. every `Strings.UI` key is displayed by something;
-2. every `Format.label("KEY")` names a key that **exists** (a missing key returns `""`
-   and counts a silent miss, so a typo is a blank label and no error anywhere);
-3. every Ledger template has a prose row;
-4. every prose row has a template.
+**Two cheaper versions were tried first and both came back clean.** Recorded so the
+next agent does not re-spend the hours:
 
-**On its first run, 18 of 51 UI labels were dead.** Checks 3 and 4 were already clean
-and now stay clean. Table of what was dead, and what it meant, in doc 08 §8.5.
+| asked | result |
+| --- | --- |
+| assertions that never run (instrumented `debug.getinfo` vs static call sites) | **3 of 1130**, all legitimate `ok(false, ...)` failure branches |
+| tests asserting on fields that do not exist (`member-scan` extended over `tools/tests`, which it had never covered) | **1615** refs, **0** problems |
+
+**Mutation found what those could not.** Changing every scalar in `Config/` by one
+and re-running all 1 755 assertions: **54 of 86 survived**. Among them every number
+in the economy table — `STANDING_ON_SERVED`, `RENOWN_ON_GIFT`, `WARMTH_BASE_SERVED`,
+`SPOIL_PER_MILLE`, `PASSIVE_RATE_PER_MILLE`. The iteration-7 balance pass tuned
+values that no test would have noticed being wrong.
 
 | path | what changed |
 | --- | --- |
-| `tools/tidekeeper-dead-content-scan.js` | **new** — check 18, with its own `stripComments()` |
-| `code/.../Client/ChartView.luau` | **new** — the five Currents and which your tier has earned |
-| `code/.../Client/AlmanacView.luau` | **new** — 200 finds, paged 50 at a time |
-| `code/.../Client/ClientBootstrap.luau` | the navigation bar; `:history()`; the in-flight guard; `statusText` simplified |
-| `code/.../Client/LedgerView.luau` | group headings, the skip affordance, `LedgerView.archive`; dead `PHRASES` export removed |
-| `code/.../Client/DispatchView.luau` | cargo label; `Strings.PHRASE` replaced with `LetterView.categories()` |
-| `code/.../Client/Strings.luau` | `Strings.PHRASE` (12 rows) and `DISPATCH_PHRASE` deleted |
-| `code/.../Client/PostView.luau`, `OrdersView.luau` | the missing control labels, and a real rule limit per tier |
-| `code/.../Shared/NetContract.luau` | the status enum; `RF_History` row and `SPEC_HISTORY` |
-| `code/.../RemoteHandlers/HistoryHandler.luau` | **new** |
-| `code/.../Adapters/DataStoreAdapter.luau` | `allocLedgerPage`, `loadLedgerIndex`, `removeLedgerPage` |
-| `code/.../Services/LedgerService.luau` | atomic page allocation; `:history()`; the ledger reaper |
-| `tools/tests/session-tests.lua` | scenarios 24, 25, 26 |
+| `tools/tidekeeper-mutation-scan.js` | **new** — gate check 19, two modes |
+| `tools/tests/pure-tests.lua` | **new** `EconomyPinning` and `BlobBudget` sections |
+| `tools/tests/session-tests.lua` | scenarios 27 (the letter journey) and 28 (the screens) |
+| `code/.../Client/ClientBootstrap.luau` | the shore's tide dial; `setAlmanacPage`, `previewOrders`, `orderChoices` |
+| `tools/tidekeeper-orphan-scan.js` | the "client UI not built" category is now **empty**; 23 → 20 allowlisted |
 
-### Following one dead label found a dead content table
+### The trap this iteration is really about
 
-`DISPATCH_PHRASE` led to `Strings.PHRASE` — 12 canned lines from the design that
-preceded letters. Iteration 7 replaced phrases with 120 real letters and `letterId`;
-for three iterations afterwards `DispatchView.build` and `LedgerView.PHRASES` were
-still handing the renderer a choice the wire could no longer carry. Deleted.
+```lua
+eq(delta.warmth, EconomyConfig.WARMTH_BASE_SERVED, "...")   -- pins NOTHING
+```
 
-### OD22 — the Ledger remembers
+Mutate the config and both sides move together. **That is itself the vacuous test I
+went looking for**, and it is the natural thing to write. A pin needs two halves: the
+constant equals a **literal** (the tripwire), and the behaviour equals the constant
+(which stops the literal becoming a lie). 47 constants are now guarded, up from 28.
 
-`loadLedgerPage` was called by nothing, so every entry past `MAX_LEDGER_RESIDENT`
-(200) was archived and unreadable forever. For this game that is the worst available
-bug rather than a missing feature: doc 00's first pillar is *absence is content*, and
-the Ledger is where absence becomes content.
+### Cost forced a better design
 
-**There was no way to read it back even in principle** — page keys were
-`l:<userId>:<epoch>` and nothing recorded which epochs had pages. **And the epoch was
-not a safe key:** `saveLedgerPage` overwrites, so two servers flushing for one player
-inside a 6.2-hour epoch — an ordinary server hop — silently destroyed one of the two
-pages. Design table in doc 05 §9.2.
-
-### OD23 — one status enum
-
-Code 4 meant `E_COOLDOWN` from `PostHandler` and `E_ALREADY_OUT` from
-`DispatchHandler`. `NetContract` now owns the enum, `E_ALREADY_OUT` moved to 5, and
-`statusText` lost its remote-name parameter.
+A full run is ~90 minutes, which cannot sit in a 3-minute gate. So the default mode
+re-mutates only the **already-guarded** set against the 0.8 s real-Luau suite (~30 s).
+That is not a weaker full run — it answers a different and more useful question:
+**has a test rotted?**
 
 ## 4. Decisions taken
 
-**D47 — a scan must blank whatever can lie to it and keep whatever carries meaning.**
-Iteration 9's "parse from raw, detect in stripped" was the special case, not the
-principle. Here the thing being *detected* is a string literal, so stripping erases
-every call site and raw text lets comments vote. Doc 10 §13.2.
+**D50 — a pinned constant needs a literal and a behavioural link.** Neither half is
+sufficient; only the first is what mutation rewards.
 
-**D48 — content is reachable or it does not exist.** Both directions: a label nothing
-displays, and a `Format.label` naming a key that is not there.
+**D51 — test a new scan against a legitimate but unusual idiom before trusting it.**
+Iteration 10 predicted this; iteration 11 proved it twice (below).
 
-**D49 — one action in flight at a time.** `invoke` yields; a second tap races the
-first reply into the snapshot. `ERR_BUSY` is truthful and kinder than letting the
-rate limiter call it a rejection.
-
-**Retention is 32 pages, and the reaper runs where the information already is.** The
-page numbers falling out of the index come back from the allocation call, so deleting
-them costs no scan and no schedule.
-
-**The archive cursor counts back from the newest page.** Counted from the oldest it
-would slide under a reader every time a page was reaped.
+**D52 — a measurement must compare like with like, and say what it excluded.**
 
 ## 5. Where the docs were wrong
 
-- **Doc 05 §9** said the ledger reaper was "deletes pages older than 180 days on the
-  owner's own load" — a design that was never written and would not have worked,
-  since nothing knew which pages existed. Replaced with §9.2: numbering, reading,
-  retention, and the cross-server overwrite it fixed.
-- **Doc 08** described screens that rendered nothing. New §8.5 lists all 18 dead
-  labels and what each one's absence meant; §8.6 covers the archive view.
-- **Doc 10** had the ladder at five levels. Now six, plus §13 on why the iteration-9
-  parsing rule had to be generalised rather than reused.
-- **ROADMAP** closes OD22 and OD23 and records D47–D49.
+- **Doc 06**, the economy document, had *no* test behind any of its numbers. New
+  §6.1 records that, explains the two-halves pinning rule, and warns that changing a
+  number here will now fail a test on purpose.
+- **Doc 10** had the ladder at six levels; now seven, plus §14 on the two clean
+  negative results, the vacuous-pin trap, and the OD15 correction.
+- **ROADMAP** closes OD15 with numbers and records D50–D52.
 
-## 6. What iteration 10 was asked for and did not do
+## 6. Two things I got wrong, and how they surfaced
 
-- **Level seven was not attempted.** The prompt asked for one scan and I wrote it;
-  the candidate I most believe in — *a test that cannot fail* — is written up as the
-  first job of iteration 11. With 1 755 assertions, if even a handful are vacuous the
-  suite's authority is overstated by exactly that much and nobody knows which ones.
-- **The new screens have no interaction.** `AlmanacView` pages but nothing calls it
-  with page 2; `ChartView` shows locks but cannot be used to choose a current.
-- **OD15** (is base64 packing still paying for itself?) is untouched and is now the
-  oldest open question.
-- **No Studio.** Unchanged since iteration 4.
+**The OD15 measurement was 3.6× too flattering.** My first answer said base64 packing
+beat JSON by 5.9× compressed. It built a post with a 200-entry resident ledger and
+serialised that to JSON — but the post blob does not contain the ledger, which lives
+in its own pages. I was comparing the packed blob against JSON of strictly more data.
+The round-trip assertion caught it: `#backBS.ledger` threw, because a decoded post
+has no ledger to count. Corrected: **3.06× raw, 1.63× compressed.** Keep the packing,
+but the honest margin is 1.6×, and the better argument is that packing gives a hard
+size *bound*, which is what makes the 6 144-byte budget enforceable at all.
 
-## 7. Open questions for iteration 11
+**My own scan was brittle in exactly the way iteration 10 warned about.** Adding a
+trailing comment to a config line made it report that the constant *"no longer
+exists"* — and the same brittleness had been hiding two constants
+(`GameConfig.OWNER_ID_MAX`, `TideConfig.SCAN_HORIZON`) from the scan entirely, so
+they had never been mutated. Fixed and classified. The deliberate-idiom test is the
+thing I would most recommend to whoever writes the next scan.
 
-- **Level seven**, and specifically the vacuous-test question above.
-- **OD15** — base64 packing vs DataStore's own compression. Cheap to answer with
-  numbers now; close it either way.
-- **The dispatch/letters path has produced a defect in three consecutive
-  iterations** (7: letters could never travel; 9: the payload builder was
-  non-conformant; 10: the screen offered a superseded phrase table). Read it as a
-  whole rather than trusting that the last fix finished the job.
-- **Studio.** L3.5 must not be allowed to drift into sounding like "it works".
+## 7. What iteration 11 was asked for and did not do
+
+- **No Studio.** Unchanged since iteration 4, and now the largest gap by a wide
+  margin — see §1 and the prompt.
+- **37 constants remain unguarded**, each with an honest reason in the scan. The
+  valuable ones are ceilings no scenario reaches (`MAX_ARRIVALS_PER_EPOCH`,
+  `MAX_RESIDENT_DRIFTERS`, `VISITOR_RING_SIZE`, `MAX_CATCHUP_EPOCHS`).
+- **The chart cannot be used to choose a current** — no remote exists for it, and
+  inventing one at the end of an iteration would have been the wrong call.
+- **OD19** (delete fengari) untouched.
 
 ## 8. Commands and their real output
 
 ```
-TIDEKEEPER quality gate — iteration 10, source root tidekeeper/code (65 Luau file(s))
+TIDEKEEPER quality gate — iteration 11, source root tidekeeper/code (65 Luau file(s))
 
-  ok  doc-gate           TIDEKEEPER doc gate: 180/180 checks passed
+  ok  doc-gate           TIDEKEEPER doc gate: 183/183 checks passed
   ok  separation         no dependency on the VITRIOL tree
   ok  check-syntax       All 65 Luau file(s) parsed successfully.
-  ok  metrics              58  code/ReplicatedStorage/Tidekeeper/Shared/PostCodec.luau
+  ok  metrics              59  code/ReplicatedStorage/Tidekeeper/Client/ClientBootstrap.luau
   ok  hot-loop-scan         1  :Clone (instance clone)
   ok  call-graph           ShowcaseService.new  <- Bootstrap
   ok  find-dead-config     ✓ no dead keys
-  ok  member-scan        clean — every cross-module member resolves (803 checked)
+  ok  member-scan        clean — every cross-module member resolves (808 checked)
   ok  dead-write-scan    clean — every field written to shared state is read somewhere (27 checked)
-  ok  orphan-scan        clean — every exported function is called, or allowlisted with a reason (484 checked, 23 allowli
+  ok  orphan-scan        clean — every exported function is called, or allowlisted with a reason (487 checked, 20 allowli
   ok  remote-scan        clean — every remote is spoken by both sides (9 checked)
   ok  dead-content-scan  clean — every piece of player-facing content is reachable (92 checked)
+  ok  mutation-scan      clean — every guarded constant is still pinned by a test (47 mutated, 37 known-unguarded)
   ok  determinism-scan   clean
-  ok  smoke-test         TIDEKEEPER smoke test: 1201 passed, 0 failed, 0 static proof(s) failed
-  ok  session-test       TIDEKEEPER session test: 554 passed, 0 failed
-  ok  luau-test          TIDEKEEPER Luau test: 1200 passed, 0 failed, agrees with fengari
-  ok  luau-bench         TIDEKEEPER Luau bench: within budget (median 15.537 us, p99 24.001 us, catch-up 2883.7 us).
+  ok  smoke-test         TIDEKEEPER smoke test: 1242 passed, 0 failed, 0 static proof(s) failed
+  ok  session-test       TIDEKEEPER session test: 586 passed, 0 failed
+  ok  luau-test          TIDEKEEPER Luau test: 1241 passed, 0 failed, agrees with fengari
+  ok  luau-bench         TIDEKEEPER Luau bench: within budget (median 16.124 us, p99 21.191 us, catch-up 2892.7 us).
   ok  git-diff-check
 
-TIDEKEEPER quality gate: 18/18 checks passed
+TIDEKEEPER quality gate: 19/19 checks passed
 ```
 
-Negative controls, because a check that has never been seen to fail is not evidence.
-All four content checks:
+Negative controls, because a check never seen to fail is not evidence:
 
-- removing one `Format.label("CHART_TITLE")` call → `FAIL Strings.UI.CHART_TITLE —
-  defined, never displayed`;
-- typo'ing it to `CHART_TILTE` → both the dead-label FAIL **and** `FAIL
-  Format.label("CHART_TILTE") — no such key in Strings.UI; renders as an EMPTY label`;
-- deleting prose row 201 → `FAIL Ledger.T_EPOCH_QUIET (201) — no prose row`;
-- renumbering the template to 202 → `FAIL ... no prose row` **and** `FAIL
-  Strings.LEDGER[201] — prose with no template constant`;
-- restored → `clean — every piece of player-facing content is reachable (92 checked)`.
+- **deleting one pinning assertion** → `FAIL EconomyConfig.STANDING_ON_SERVED —
+  GUARDED, but changing it from 34 breaks NO test. The assertion that pinned it is
+  gone or weakened.`
+- **adding an unclassified config constant** → `FAIL EconomyConfig.BRAND_NEW_KNOB —
+  new config constant, not classified. Run --full and add it to GUARDED or
+  UNGUARDED.`
+- **the idiom test** (a trailing comment on `MIN_PRICE`) → `FAIL EconomyConfig.MIN_PRICE
+  — listed as GUARDED but no longer exists in config`, which is how the two hidden
+  constants were found.
+- restored → `clean — every guarded constant is still pinned by a test`.
 
-And the page allocator: reverting `allocLedgerPage` to the old epoch-derived index
-failed **6** assertions across scenarios 24 and 25, including `both servers' pages
-survive -- got 0, floor 2.0`. Restored → 554/0.
+The dispatch/letters path was read end to end after three consecutive iterations of
+defects there. **It is sound** — 120 ids, 120 texts, 7 categories, ceilings derived
+from config on both sides. The gap was in the testing: every previous fix was
+verified only at the link it touched. Scenario 27 now drives the whole chain, from
+the picker to the words a stranger reads.
 
-Two checks also fired on my own work this iteration, which is the design working on
-its author: the orphan allowlist went stale the moment `loadLedgerPage` gained a
-caller, and the layering check caught `ChartView`/`AlmanacView` reaching for
-`game:GetService` when client views must use relative requires.
-
-## 9. Prompt for iteration 11
+## 9. Prompt for iteration 12
 
 ```
-You are iteration 11 of TIDEKEEPER, a Roblox game being built inside the
+You are iteration 12 of TIDEKEEPER, a Roblox game being built inside the
 Clovetie/Vitriol repository. Work only on your session's fixed branch. Never
 touch the VITRIOL tree: TIDEKEEPER is entirely inside tidekeeper/.
 
@@ -223,110 +206,89 @@ START HERE, IN THIS ORDER.
       make -C /tmp/luau config=release luau -j$(nproc)
       cp /tmp/luau/luau tidekeeper/tools/bin/luau
 4.  node tidekeeper/tools/tidekeeper-quality-gate.js
-    It must print 18/18 before you change anything. If it does not, fixing
+    It must print 19/19 before you change anything. If it does not, fixing
     that IS your iteration.
-5.  Read tidekeeper/HANDOFF.md, then docs/10-RESEARCH-NOTES.md sections 12
-    and 13 -- the ladder of dead features and what it has cost to find each
-    level -- before you plan anything.
+5.  Read tidekeeper/HANDOFF.md, then docs/10-RESEARCH-NOTES.md sections 12,
+    13 and 14 -- the ladder, and what each level cost to find.
 
-YOUR FIRST JOB: LEVEL SEVEN.
+THE BIGGEST THING IS NO LONGER A SCAN.
 
-Ten iterations; six levels of dead feature; every one green on every check
-that existed the day before it was found:
+Eleven iterations have built seven levels of scan and every one found
+something real. That has been the right instinct and it is reaching its
+limit. Here is the honest state of this project:
 
-  1  member-scan        a field READ that is never written
-  2  dead-write-scan    a field WRITTEN that is never read
-  3  orphan-scan        a FUNCTION defined that is never called
-  4  orphan-scan (D44)  an ALLOWLIST ENTRY gone stale
-  5  remote-scan        a REMOTE one side never speaks
-  6  dead-content-scan  a STRING a player can never see
+  * 1828 assertions, 0 failures, 19 gate checks, all green.
+  * NOT ONE LINE HAS EVER RUN IN ROBLOX STUDIO. No Instance has been
+    created. No DataStore call has been real. No frame has been drawn. No
+    human has ever seen this game.
 
-Find level seven before you build anything. The candidate I would bet on,
-and could not get to in iteration 10:
+L4 and L5 have been blocked since iteration 4. Everything the project claims
+rests on a fake platform written by the same process that wrote the code --
+and a fake platform agrees with its author by construction. That is the
+single largest risk here, and it is larger than anything another scan will
+find.
 
-  - A TEST THAT CANNOT FAIL. A session scenario that asserts only on values
-    it computed itself, or whose assertion is tautological (eq(x, x)), or
-    that is inside a conditional that never runs. There are now 554 session
-    assertions and 1201 smoke assertions; if even a handful are vacuous, the
-    suite's authority is overstated by exactly that much and nobody knows
-    which ones. A mutation-style check is the honest version: perturb a
-    constant, confirm some test notices. Start with the cheap static form
-    (an assertion whose expected value is derived from the same expression
-    as the actual) and only then consider mutation.
+SO, FIRST: IF YOU HAVE STUDIO ACCESS OR ANY WAY TO RUN REAL ROBLOX, DO THAT.
+Build the place file, open it, press play, and write down exactly what breaks
+-- it will not be nothing. Rojo is the expected route; the module map in
+tools/lib/module-map.js is the single source of truth for where every file
+belongs. Report what happened in plain language, including the parts that
+embarrassed the design.
 
-Others, if you find a better one:
-  - A config key whose reader exists but is itself never called.
-  - A cadence job registered but whose body can never do work.
-  - A persisted blob field that migrates correctly and is read by nothing
-    (dead-write-scan only covers S/S2/state/post).
-  - A Ledger template that is reachable in code but that no realistic game
-    state can actually produce.
+IF YOU DO NOT HAVE STUDIO ACCESS, DO NOT PRETEND OTHERWISE AND DO NOT
+SUBSTITUTE ANOTHER SCAN FOR IT. Say so in the handoff in one plain sentence,
+and spend the iteration on the highest-value work that does not need it:
 
-Whatever you pick, prove it with a NEGATIVE CONTROL: break the real thing on
-purpose, show the scan failing with exactly the expected message, restore,
-show it clean. Paste both runs. Then wire it in as check 19 with
-requiredFrom 11.
+  a. SHRINK THE UNGUARDED LIST. 37 config constants are still constrained by
+     no test (see the UNGUARDED table in tools/tidekeeper-mutation-scan.js,
+     each with an honest reason). The most valuable ones are the ceilings
+     nothing reaches: MAX_ARRIVALS_PER_EPOCH, MAX_RESIDENT_DRIFTERS,
+     MAX_STORE_ENTRIES, VISITOR_RING_SIZE, MAX_CATCHUP_EPOCHS. Each needs a
+     scenario that actually saturates the limit, which is exactly the kind of
+     scenario that finds real bugs. Promote what you pin, and remember the
+     scan verifies the list in both directions.
 
-A WARNING FROM ITERATION 10. The dead-content scan was written, and was
-wrong within the hour: a refactor in the same commit introduced a lookup
-table and the scan called four live labels dead. A scan written against
-today's code encodes today's idioms. Before you trust yours, run it against
-a deliberately UNUSUAL but legitimate way of writing the same thing.
+  b. THE FAKE PLATFORM IS THE WEAKEST LINK. tools/tests/fake-platform.lua is
+     where "it works" ultimately bottoms out, and nothing checks it against
+     the real API surface. Compare it, member by member, against the
+     published DataStore/MemoryStore/Players APIs -- argument counts, return
+     shapes, what throws versus what returns nil, UpdateAsync transform
+     semantics. Every place it is more forgiving than Roblox is a bug the
+     suite cannot see. Use web search; the docs are current and you should
+     cite what you check.
 
-THEN, THE SCHEDULED WORK.
-
-  a. The screens are real now but thin. ChartView and AlmanacView were born
-     in iteration 10 and have no interaction -- the almanac pages but nothing
-     calls AlmanacView with page 2, and the chart shows locks but cannot be
-     used to choose a current. Check the orphan allowlist for presentation
-     helpers still parked there and retire what you honestly can. Remember
-     that when an entry stops being an orphan the scan FAILS on the stale
-     entry: that is D44 working, so remove the entry in the same commit.
-
-  b. OD15 is the oldest open question: is base64 packing still paying for
-     itself, given DataStore compresses values itself? It is cheap to
-     answer now -- the fixtures exist, the codec is pure, and you can
-     measure it in the Luau harness rather than guessing. Close it either
-     way, with numbers.
-
-  c. Look hard at the dispatch and letters path end to end. Iteration 7 gave
-     drifters 120 letters, iteration 9 gave the client a letter picker, and
-     iteration 10 found that the screen had been offering a superseded
-     12-line phrase table the whole time. That area has produced a defect in
-     three consecutive iterations. Read it as a whole rather than trusting
-     that the last fix finished the job.
+  c. OD19 is still open: delete fengari now that real Luau runs the suite, or
+     write down why the two-VM cross-check still earns its keep.
 
 RULES THAT HAVE NOT CHANGED.
 
   - Determinism (doc 04 section 5) is not negotiable.
-  - No free text over the wire. Ids only. NetContract.hasNoStringFields is
-    the proof and it must keep being called.
+  - No free text over the wire. Ids only.
   - The server owns prices (D46). The client displays, never computes.
-  - A client payload builder is validated through the server's own
-    NetContract.accept, never round-tripped against itself (D45).
-  - Every allowlist entry is verified in both directions (D44).
   - Content is reachable or it does not exist (D48).
+  - A pinned constant needs a literal AND a behavioural link (D50) -- an
+    assertion against the constant alone is vacuous.
+  - Test a new scan against a legitimate but unusual idiom (D51).
+  - A measurement must compare like with like and say what it excluded (D52).
+  - Every allowlist is verified in both directions (D44).
   - Paste real tool output. Never paraphrase it.
   - A partial honest result beats a complete claimed one. Always.
 
-ON THE BENCH. Best-of-3, every sample printed. Contention only inflates, so
-the minimum is the estimate. Do NOT raise the 18 us budget to make something
-pass; if the median genuinely moves, that is a regression -- find it.
+ON THE BENCH. Best-of-3, every sample printed, 18 us budget. Do not raise it
+to make something pass.
 
-ON STUDIO. L4 and L5 have been blocked since iteration 4 and this is now the
-single largest gap in what the project can claim: no Instance has ever been
-created, no DataStore call has ever been real, no frame has ever been drawn.
-If you have Studio access, that is worth more than anything else on this
-list -- do it first and say exactly what changed. If you do not, say so
-plainly in the handoff rather than letting L3.5 drift into sounding like
-"it works".
+ON THE MUTATION SCAN. The gate runs the guarded set only (~30 s). Run
+`node tidekeeper/tools/tidekeeper-mutation-scan.js --full` if you add config
+or want the whole picture; it takes about 90 minutes, so start it early and
+do other work while it runs. It restores every file it touches, including on
+failure -- if you interrupt it anyway, check `git status` before trusting the
+tree.
 
 FINISH BY.
 
-  - Running the full gate and pasting it (19/19 if you added the scan).
-  - Updating the docs you invalidated, ROADMAP.md, and HANDOFF.md to the
-    template in docs/12-ITERATION-PROMPTS.md.
-  - Writing the iteration-12 prompt into docs/12-ITERATION-PROMPTS.md and
+  - Running the full gate and pasting it.
+  - Updating the docs you invalidated, ROADMAP.md, and HANDOFF.md.
+  - Writing the iteration-13 prompt into docs/12-ITERATION-PROMPTS.md and
     extending the doc gate's prompt loop to cover it.
   - Committing and pushing to your branch.
 ```
