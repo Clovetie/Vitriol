@@ -11,7 +11,8 @@
 -- service and the service belongs in Bootstrap.
 
 local ServerStorage = game:GetService("ServerStorage")
-local Root = ServerStorage:WaitForChild("Tidekeeper")
+local SS = game:GetService("ServerScriptService")
+local Root = SS:WaitForChild("Tidekeeper")
 
 local Bootstrap = require(Root.Services.Bootstrap)
 local Profiler = require(Root.Diagnostics.Profiler)
