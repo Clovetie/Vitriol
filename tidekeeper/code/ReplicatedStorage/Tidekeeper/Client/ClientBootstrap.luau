@@ -60,6 +60,9 @@ function ClientBootstrap.start(opts)
 	local self = setmetatable({}, ClientBootstrap)
 	self.remotes = opts.remotes or {}
 	self.clock = opts.clock
+	-- Injectable so the session harness can advance virtual time instead of
+	-- actually sleeping. Defaults to task.wait in a real client.
+	self.waiter = opts.waiter or (task ~= nil and task.wait or nil)
 	self.userId = opts.userId or 0
 	self.logger = opts.logger or function() end
 	self.names = opts.names or {}
@@ -89,6 +92,7 @@ function ClientBootstrap.start(opts)
 		renders = 0,
 		busy = 0,
 		historyPages = 0,
+		sessionAttempts = 0,
 	}
 
 	self.views = {
@@ -133,16 +137,68 @@ function ClientBootstrap:invoke(name, payload)
 end
 
 -- Ask for the session. The reply is the post snapshot and the Ledger.
+-- Returns (reply, errorText, status). The third value is what lets a caller
+-- tell "come back in a moment" apart from "this will never work".
 function ClientBootstrap:requestSession()
 	local reply = self:invoke(NetContract.RF_SESSION, { seq = self:nextSeq() })
 	if reply == nil then
-		return nil, Format.label("ERR_OFFLINE")
+		return nil, Format.label("ERR_OFFLINE"), nil
 	end
 	if reply.status ~= 0 then
-		return nil, self:statusText(reply.status)
+		return nil, self:statusText(reply.status), reply.status
 	end
 	self:applySnapshot(reply)
-	return reply
+	return reply, nil, reply.status
+end
+
+-- Keep asking until the post is there.
+--
+-- THE FIRST STUDIO RUN SOFT-LOCKED ON THIS. Main.client said "ask for the
+-- session once", and the very first reply was E_NO_POST:
+--
+--   16:15:32.981  [Tidekeeper] server up
+--   16:15:33.458  [Tidekeeper] session unavailable: Your post is still
+--                 coming out of the water. One moment.
+--
+-- Half a second after the server came up, the player's post had not finished
+-- loading -- which is exactly what E_NO_POST MEANS, and SessionHandler's own
+-- comment says so: "the join is still in flight". The client warned and
+-- returned, and nothing ever asked again. The Ledger, which is the game's
+-- entire opening (doc 08 section 2), never arrived, and the player sat
+-- looking at nothing.
+--
+-- "One moment" is a promise the client has to keep. Only E_NO_POST and a
+-- dropped call are retried: a rejection or an illegal request will not fix
+-- itself by being repeated, and hammering a server that is refusing us is
+-- how a bad minute becomes a bad hour.
+ClientBootstrap.SESSION_RETRIES = 12
+ClientBootstrap.SESSION_RETRY_WAIT = 1.5
+
+function ClientBootstrap:awaitSession(waiter)
+	-- The caller owns the yielding primitive. In the real client that is
+	-- `task.wait` passed down from Main.client; in the harness it advances
+	-- virtual time, so the suite never actually sleeps.
+	local wait = waiter or self.waiter
+	local lastWhy = nil
+	for attempt = 1, ClientBootstrap.SESSION_RETRIES do
+		local reply, why, status = self:requestSession()
+		if reply ~= nil then
+			self.stats.sessionAttempts = attempt
+			return reply
+		end
+		lastWhy = why
+		local retriable = (status == nil) or (status == NetContract.E_NO_POST)
+		if not retriable then
+			self.stats.sessionAttempts = attempt
+			return nil, why
+		end
+		if attempt < ClientBootstrap.SESSION_RETRIES and wait ~= nil then
+			-- determinism-scan: allow scheduler-scope this IS the client boundary script's one startup task (the case the rule already exempts in Main.client); it lives here only so the retry policy can be tested, and it yields solely through a waiter the caller injects -- never through a global
+			wait(ClientBootstrap.SESSION_RETRY_WAIT)
+		end
+	end
+	self.stats.sessionAttempts = ClientBootstrap.SESSION_RETRIES
+	return nil, lastWhy
 end
 
 -- ---------------------------------------------------------------- actions

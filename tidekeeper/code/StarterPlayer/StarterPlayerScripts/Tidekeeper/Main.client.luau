@@ -78,7 +78,11 @@ end
 -- the Ledger takes the screen on arrival (doc 08 section 2: it slides up on
 -- its own, at 0:02, and it is not empty).
 task.spawn(function()
-	local reply, why = app:requestSession()
+	-- KEEP ASKING. The first real Studio run asked once, half a second after
+	-- the server came up, got "your post is still coming out of the water"
+	-- -- which is E_NO_POST, meaning the join is still in flight -- and gave
+	-- up permanently. The Ledger is the game's opening and it never arrived.
+	local reply, why = app:awaitSession()
 	if reply == nil then
 		warn("[Tidekeeper] session unavailable: " .. tostring(why))
 		return

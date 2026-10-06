@@ -1244,7 +1244,7 @@ do -- 20. A BADGE IS EARNED IN PLAY AND SURVIVES THE SAVE
 
 	local S = app.posts:get(userId)
 	eq("a new post is at the current schema version", S.v, GameConfig.SCHEMA_VERSION)
-	eq("the current schema version is 3", GameConfig.SCHEMA_VERSION, 3)
+	eq("the current schema version is 4", GameConfig.SCHEMA_VERSION, 4)
 	eq("a new post holds no badges", Badges.count(S), 0)
 
 	-- Badge 1, First Light: one visitor served. Drive the lifetime counter
@@ -2044,4 +2044,114 @@ do -- 29. ROBLOX RUNS A TRANSFORM MORE THAN ONCE (the fake platform was lying)
 	end
 	for _ = 1, 10 do app.ledger:flushPending() end
 	ge("pages still archive under transform retries", app.ledger.stats.pagesWritten, before + 1)
+end
+
+do -- 30. WHAT THE FIRST REAL STUDIO RUN FOUND
+	-- Three bugs, from eleven lines of output, after twelve iterations of a
+	-- fully green gate. Every one of them was invisible headless because the
+	-- fake platform agreed with the code instead of with Roblox, or because
+	-- every fixture in the suite was tidier than reality.
+	local ClientBootstrap = TidekeeperRequire("ClientBootstrap")
+	local NetContract = TidekeeperRequire("NetContract")
+	local SessionHandler = TidekeeperRequire("SessionHandler")
+	local GameConfig = TidekeeperRequire("GameConfig")
+
+	-- (1) THE REAPER. `Enum.DataStoreRequestType.RemoveAsync` does not
+	-- exist, so every reap tick threw on its first line:
+	--   slot io task exchange.reap errored: RemoveAsync is not a valid
+	--   member of "Enum.DataStoreRequestType" (x24)
+	-- The pool reaper -- the whole point of OD21 -- had never deleted a
+	-- single key in production. The fake platform had an invented
+	-- RemoveAsync member, so scenario 23 passed anyway.
+	local app, env = newServer({ seed = 1313 })
+	local userId = 9500
+	env:addPlayer(userId)
+	settle(app, env)
+
+	local reaped0 = app.exchange.stats.shardsReaped or 0
+	-- Push the clock past the reap horizon and tick the IO slot.
+	env:advance(30 * 22357)
+	for _ = 1, 40 do
+		app.exchange:reapTick(env.clock.now)
+	end
+	ge("the reaper actually removes shards now", (app.exchange.stats.shardsReaped or 0), reaped0 + 1)
+
+	-- (2) MODERN USER IDS. postId is a UserId and was written as u32;
+	-- Roblox ids passed 2^32 and the run's own account was 7221743187, so
+	-- posts.tick threw "Codec: u32 out of range" every save.
+	eq("the post schema carries the wider postId", GameConfig.SCHEMA_VERSION, 4)
+	local modernId = 7221743187
+	env:addPlayer(modernId)
+	settle(app, env)
+	local modernPost = app.posts:get(modernId)
+	ok("a modern-id player gets a post", modernPost ~= nil)
+	eq("...with the id intact", modernPost.postId, modernId)
+	-- The save path is what actually broke. Drive it.
+	-- The save path is what actually threw in Studio. `tick` is the slow-slot
+	-- job whose log line was "posts.tick errored: Codec: u32 out of range".
+	app.posts:markDirty(modernId)
+	local savedOk = app.posts:save(modernId, true)
+	ok("...and that post SAVES, which is what failed in Studio", savedOk ~= false)
+	app.posts:markDirty(modernId)
+	local tickOk = pcall(function() app.posts:tick() end)
+	ok("...and posts.tick no longer errors on a modern id", tickOk)
+
+	-- (3) THE SOFT-LOCK. The client asked for its session once, got
+	-- E_NO_POST because the join was still in flight, warned, and never
+	-- asked again -- so the Ledger, the game's entire opening, never came.
+	local pending = true
+	local attempts = 0
+	local fakeRemote = {
+		InvokeServer = function(_, payload)
+			attempts = attempts + 1
+			if pending then
+				-- Exactly what the real handler returns while a join is in
+				-- flight.
+				return { status = NetContract.E_NO_POST }
+			end
+			return SessionHandler.handle(app, { UserId = userId }, payload)
+		end,
+	}
+	local waited = 0
+	local client = ClientBootstrap.start({
+		clock = function() return env.clock.now end,
+		userId = userId,
+		waiter = function(seconds)
+			waited = waited + 1
+			-- The post finishes loading while the client is waiting, which
+			-- is the real sequence.
+			if waited >= 2 then pending = false end
+			env:advance(seconds)
+		end,
+		remotes = { [NetContract.RF_SESSION] = fakeRemote },
+	})
+
+	-- The old one-shot call gives up on the first reply.
+	local once = client:requestSession()
+	eq("a single attempt still fails while the join is in flight", once, nil)
+
+	-- awaitSession keeps the promise the message makes.
+	local reply, why = client:awaitSession()
+	ok("the session arrives once the post lands: " .. tostring(why), reply ~= nil)
+	ge("...after retrying", attempts, 3)
+	ok("...and it did not spin forever", attempts <= ClientBootstrap.SESSION_RETRIES + 1)
+
+	-- A refusal that will never fix itself must NOT be retried.
+	local hardAttempts = 0
+	local hardClient = ClientBootstrap.start({
+		clock = function() return env.clock.now end,
+		userId = userId,
+		waiter = function() end,
+		remotes = {
+			[NetContract.RF_SESSION] = {
+				InvokeServer = function()
+					hardAttempts = hardAttempts + 1
+					return { status = NetContract.E_REJECTED }
+				end,
+			},
+		},
+	})
+	local hardReply = hardClient:awaitSession()
+	eq("a rejection is not retried", hardReply, nil)
+	eq("...it gives up immediately", hardAttempts, 1)
 end

@@ -881,7 +881,7 @@ Version.OLDEST_SUPPORTED = 1
 -- _reset() above wiped it, and every PostCodec test after this point needs
 -- the v1 -> v2 step to exist (OD16).
 PostCodec.registerMigrations()
-eq(Version.registeredCount(), 2, "both real migrations (v1->v2, v2->v3) are restored after the reset")
+eq(Version.registeredCount(), 3, "all three real migrations (v1->v2, v2->v3, v3->v4) are restored after the reset")
 ok(Version.hasMigration(1), "PostCodec registered a migration from v1")
 
 -- ================================================================ DrifterCodec
@@ -1826,7 +1826,7 @@ eq(restored.claims[1].fromOwner, 4455667788, "a claim's owner round trips")
 --   2. a REAL v1 blob, captured before the field existed, still loads.
 -- Only the second one can fail in a way that matters to a live player.
 
-eq(Version.CURRENT, 3, "the current post schema is version 3")
+eq(Version.CURRENT, 4, "the current post schema is version 4")
 blobPost.publishedAt = 4242
 local v2Blob = PostCodec.encode(blobPost)
 local v2Back, v2Reason = PostCodec.decode(v2Blob)
@@ -1840,7 +1840,7 @@ blobPost.publishedAt = nil
 local neverBack = PostCodec.decode(PostCodec.encode(blobPost))
 eq(neverBack.publishedAt, nil, "never-published round trips as never")
 blobPost.publishedAt = 4242
-eq(v2Back.v, 3, "a freshly encoded blob reports schema version 3")
+eq(v2Back.v, 4, "a freshly encoded blob reports schema version 4")
 eq(#v2Blob, #postBlob, "publishedAt costs exactly the 4 bytes the layout says")
 
 local v1Bytes = Codec.base64Decode(FIXTURE_POST_V1)
@@ -1849,7 +1849,7 @@ eq(#v1Bytes, 249, "the v1 fixture is the size it was captured at")
 local migrated, migReason, migWhy = PostCodec.decode(v1Bytes)
 eq(migReason, nil, "the captured v1 blob still decodes: " .. tostring(migWhy))
 ok(migrated ~= nil, "the v1 blob produced a state")
-eq(migrated.v, 3, "the v1 blob was migrated all the way up to v3")
+eq(migrated.v, 4, "the v1 blob was migrated all the way up to v4")
 eq(migrated.publishedAt, nil, "a migrated v1 post has never published")
 -- Everything the v1 blob DID carry must survive the migration untouched.
 eq(migrated.postId, 1001, "postId survives the migration")
@@ -1866,7 +1866,7 @@ eq(#migrated.ring, 2, "the visitor ring survives the migration")
 -- A migrated post must be re-encodable at the new version, or the player is
 -- stuck reading a save they can never write back.
 local reBlob = PostCodec.encode(migrated)
-eq(reBlob[1], 3, "re-encoding a migrated post writes version 3")
+eq(reBlob[1], 4, "re-encoding a migrated post writes version 4")
 local reBack, reReason = PostCodec.decode(reBlob)
 eq(reReason, nil, "the re-encoded blob decodes")
 eq(reBack.coin, 123456, "coin survives the full v1 -> v2 -> bytes -> state trip")
@@ -2591,7 +2591,7 @@ eq(#v2Raw, 238, "the v2 fixture is the size it was captured at")
 local up, upReason, upWhy = PostCodec.decode(v2Raw)
 eq(upReason, nil, "the captured v2 blob still decodes: " .. tostring(upWhy))
 ok(up ~= nil, "the v2 blob produced a state")
-eq(up.v, 3, "the v2 blob was migrated to v3")
+eq(up.v, 4, "the v2 blob was migrated to v4")
 
 -- Everything v2 carried survives.
 eq(up.postId, 2002, "postId survives v2 -> v3")
@@ -2616,9 +2616,9 @@ eq(Badges.count(up), 0, "a migrated post holds no badges yet")
 -- A migrated post must be re-encodable, or the player can read a save they
 -- can never write back.
 local upBlob = PostCodec.encode(up)
-eq(upBlob[1], 3, "re-encoding a migrated v2 post writes version 3")
+eq(upBlob[1], 4, "re-encoding a migrated v2 post writes version 4")
 local upBack, upBackReason = PostCodec.decode(upBlob)
-eq(upBackReason, nil, "the re-encoded v3 blob decodes")
+eq(upBackReason, nil, "the re-encoded v4 blob decodes")
 eq(upBack.coin, 98765, "coin survives the full v2 -> v3 -> bytes -> state trip")
 
 -- ------------------------------------------------------------ the bitmask
@@ -3036,5 +3036,70 @@ eq(GameConfig.MAX_RESIDENT_DRIFTERS, 24, "MAX_RESIDENT_DRIFTERS is pinned")
 -- adapter reads MAX_RESIDENT_DRIFTERS * 9 encoded drifters per claim.
 ok(GameConfig.MAX_RESIDENT_DRIFTERS * 9 > GameConfig.MAX_ARRIVALS_PER_EPOCH,
 	"the claim cap can supply a full epoch of arrivals")
+
+end
+
+-- ============================================ modern user ids (Studio, it13)
+section("ModernUserId")
+do
+
+-- THE FIRST BUG A REAL ROBLOX RUN FOUND, and it was fatal: no player with a
+-- recent account could save at all.
+--
+--   slot slow task posts.tick errored:
+--   Codec: u32 out of range [0, 4294967295]: 7221743187
+--
+-- `postId` IS a UserId -- PostService does `Post.new(postId or userId,
+-- userId, salt, now)` -- and it was written as u32. Roblox UserIds passed
+-- 2^32 some time ago; the account in that log is 7 221 743 187. `owner`
+-- beside it had always been u64, so the blob was half-right, and every test
+-- in this suite used small invented ids like 1001 and 9001, which is why
+-- eleven iterations of "it works" never touched it.
+--
+-- The lesson is bigger than the fix: a test fixture that is tidier than
+-- reality is not a test. Every id below is a real-shaped modern UserId.
+
+local MODERN = 7221743187      -- the id from the Studio log
+local BIGGER = 9876543210      -- comfortably past it, still a plausible id
+
+ok(MODERN > 4294967295, "the id from the real run genuinely exceeds u32")
+ok(MODERN < GameConfig.OWNER_ID_MAX, "...and is still inside the owner range the design allows")
+
+local ModS = Post.new(MODERN, MODERN, 987654321, Tide.EPOCH)
+ModS.tier = 3
+ModS.coin = 4242
+Post.addStock(ModS, 5, 9)
+
+local modBytes = PostCodec.encode(ModS)
+ok(modBytes ~= nil, "a post owned by a modern user id encodes")
+local modBack, modReason = PostCodec.decode(modBytes)
+eq(modReason, nil, "...and decodes without a reason")
+ok(modBack ~= nil, "...producing a state")
+eq(modBack.postId, MODERN, "the postId survives the round trip exactly")
+eq(modBack.owner, MODERN, "...and so does the owner")
+
+-- Through the storage form the adapter actually uses, not just raw bytes.
+local modText = PostCodec.encodeToString(ModS)
+local modTextBack = PostCodec.decodeFromString(modText)
+ok(modTextBack ~= nil, "a modern-id post survives base64 storage")
+eq(modTextBack.postId, MODERN, "...with its postId intact")
+
+-- A different, larger id, so the test cannot pass by coincidence of one value.
+local BigS = Post.new(BIGGER, BIGGER, 11, Tide.EPOCH)
+local bigBack = PostCodec.decode(PostCodec.encode(BigS))
+eq(bigBack.postId, BIGGER, "a larger modern id also round-trips")
+eq(bigBack.owner, BIGGER, "...owner too")
+
+-- The drifter id packing has its own ceiling, and a modern UserId must be
+-- inside it or dispatch breaks for the same accounts.
+ok(MODERN < GameConfig.OWNER_ID_MAX,
+	"a modern user id fits the drifter-id owner range")
+local packed = DrifterCodec.makeId(MODERN, 1234)
+eq(DrifterCodec.ownerFromId(packed), MODERN, "a modern owner survives drifter id packing")
+
+-- And the schema version that carries the wider field is pinned (D50).
+eq(GameConfig.SCHEMA_VERSION, 4, "the post schema is version 4")
+ok(GameConfig.SCHEMA_VERSION > GameConfig.OLDEST_SUPPORTED_VERSION,
+	"there is still a migration chain to walk")
 
 end

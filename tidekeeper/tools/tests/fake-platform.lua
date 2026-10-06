@@ -514,12 +514,15 @@ function FakePlatform.new(opts)
 			return 1000
 		end
 		local kind = "get"
-		if requestType == "UpdateAsync" or requestType == "SetIncrementAsync" then
+		if requestType == "UpdateAsync" or requestType == "SetIncrementAsync"
+			or requestType == "StandardWrite" then
 			kind = "set"
-		elseif requestType == "RemoveAsync" then
+		elseif requestType == "StandardRemove" then
 			kind = "remove"
-		elseif requestType == "ListAsync" then
+		elseif requestType == "ListAsync" or requestType == "StandardList" then
 			kind = "list"
+		elseif requestType == "StandardRead" then
+			kind = "get"
 		end
 		local left = env:remainingBudget(kind)
 		if left <= 0 then
@@ -747,14 +750,42 @@ end
 function FakePlatform.install(env)
 	game = env.game
 	task = env.task
+	-- THE REAL Enum.DataStoreRequestType, and nothing else.
+	--
+	-- This table used to contain `RemoveAsync`, which DOES NOT EXIST on the
+	-- real enum. It had been invented here to match what the adapter
+	-- happened to ask for, so the fake agreed with its author by
+	-- construction -- and a real Studio run then produced, once every five
+	-- seconds forever:
+	--
+	--   slot io task exchange.reap errored: RemoveAsync is not a valid
+	--   member of "Enum.DataStoreRequestType" (x24)
+	--
+	-- Members below are the published list; the remove-shaped ones are
+	-- `StandardRemove` (modern) and `SetIncrementAsync` (legacy, which the
+	-- reference says covers RemoveAsync).
+	local requestTypes = {
+		"GetAsync", "SetIncrementAsync", "UpdateAsync", "GetSortedAsync",
+		"SetIncrementSortedAsync", "OnUpdate", "ListAsync", "GetVersionAsync",
+		"RemoveVersionAsync", "StandardRead", "StandardWrite", "StandardList",
+		"StandardRemove", "OrderedRead", "OrderedWrite", "OrderedList",
+		"OrderedRemove",
+	}
+	local requestTypeTable = {}
+	for _, name in ipairs(requestTypes) do
+		requestTypeTable[name] = name
+	end
+	-- Roblox THROWS on a missing Enum member. So does this now: a fake that
+	-- silently answers nil for a name the platform does not have is how an
+	-- invented enum member survives eleven iterations of green tests (D54).
+	setmetatable(requestTypeTable, {
+		__index = function(_, key)
+			error(tostring(key) .. ' is not a valid member of "Enum.DataStoreRequestType"', 0)
+		end,
+	})
+
 	Enum = {
-		DataStoreRequestType = {
-			GetAsync = "GetAsync",
-			UpdateAsync = "UpdateAsync",
-			SetIncrementAsync = "SetIncrementAsync",
-			RemoveAsync = "RemoveAsync",
-			ListAsync = "ListAsync",
-		},
+		DataStoreRequestType = requestTypeTable,
 	}
 	Instance = {
 		new = function(className)

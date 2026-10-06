@@ -119,7 +119,15 @@ function PostCodec.encode(S)
 	local w = Codec.writer()
 	w:u8(Version.CURRENT)
 	w:u8(0)
-	w:u32(S.postId)
+	-- v4+: postId is u64. It was u32 until iteration 13, and `postId` IS a
+	-- Roblox UserId (PostService calls `Post.new(postId or userId, userId,
+	-- ...)`). Modern UserIds have passed 2^32 -- the real Studio run that
+	-- found this had id 7221743187 -- so EVERY save for a recent account
+	-- died with "Codec: u32 out of range [0, 4294967295]: 7221743187" and
+	-- that player's post could never be written at all.
+	--
+	-- `owner` beside it was always u64; only this field was narrow.
+	w:u64(S.postId)
 	w:u64(S.owner)
 	w:u32(S.salt)
 	w:u8(S.tier)
@@ -248,7 +256,13 @@ function PostCodec.decode(bytes)
 		if flags ~= 0 then
 			error("unknown flags byte " .. tostring(flags), 0)
 		end
-		S.postId = r:u32()
+		-- v1..v3 wrote postId as u32; v4+ writes u64. Reading the right
+		-- width per version is what lets an existing post load.
+		if S.v >= 4 then
+			S.postId = r:u64()
+		else
+			S.postId = r:u32()
+		end
 		S.owner = r:u64()
 		S.salt = r:u32()
 		S.tier = r:u8()
@@ -399,6 +413,22 @@ function PostCodec.registerMigrations()
 			end
 			d.badges = { 0, 0, 0, 0, 0 }
 			d.v = 3
+			return d
+		end)
+	end
+	if not Version.hasMigration(3) then
+		-- v3 -> v4: `postId` widens from u32 to u64. Nothing in the decoded
+		-- table changes -- the field already holds a number and the reader
+		-- picked its width from the version byte -- so this migration only
+		-- restamps the version.
+		--
+		-- It exists because the FORMAT changed even though the SHAPE did
+		-- not, and skipping the registration would leave a v3 blob failing
+		-- the migration-chain check rather than loading. Found by a real
+		-- Studio run: postId is a UserId, modern UserIds exceed 2^32, and
+		-- every affected player's save threw instead of writing.
+		Version.register(3, 4, function(d)
+			d.v = 4
 			return d
 		end)
 	end

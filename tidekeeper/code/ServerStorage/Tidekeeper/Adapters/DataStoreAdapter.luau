@@ -55,6 +55,29 @@ local LOCK_WAIT = 6
 local LOCK_POLL = 1
 
 local STORE_POST = "Post"
+-- THERE IS NO `Enum.DataStoreRequestType.RemoveAsync`. Iteration 13, from a
+-- real Studio run:
+--
+--   slot io task exchange.reap errored: RemoveAsync is not a valid member of
+--   "Enum.DataStoreRequestType" (x24)
+--
+-- The enum's remove-shaped members are `StandardRemove` (modern, for
+-- GlobalDataStore:RemoveAsync) and the legacy `SetIncrementAsync`, which the
+-- reference describes as covering "SetAsync(), IncrementAsync(),
+-- RemoveAsync(), and the write of UpdateAsync()". `RemoveVersionAsync` is a
+-- different operation entirely and is not this.
+--
+-- Indexing a missing Enum member THROWS in Roblox, so every reap tick died
+-- on its first line -- the pool reaper never deleted a single key, which is
+-- the exact failure OD21 was closed to prevent. The fake platform accepted
+-- it because the fake defines its own Enum table out of whatever names this
+-- code happened to use, which is divergence six of the kind D54 is about.
+--
+-- `StandardRemove` is preferred and `SetIncrementAsync` is the fallback for
+-- older clients, resolved once at load rather than per call.
+local REMOVE_BUDGET = (Enum.DataStoreRequestType :: any).StandardRemove
+	or Enum.DataStoreRequestType.SetIncrementAsync
+
 local STORE_LEDGER = "Ledger"
 local STORE_POOL = "DrifterPool"
 local STORE_RECEIPTS = "Receipts"
@@ -524,7 +547,7 @@ function DataStoreAdapter:reapPoolShard(current, epoch, shard)
 	if store == nil then
 		return false, err
 	end
-	if not self:awaitBudget(Enum.DataStoreRequestType.RemoveAsync) then
+	if not self:awaitBudget(REMOVE_BUDGET) then
 		return false, "no remove budget"
 	end
 	local key = self:poolKey(current, epoch, shard)
@@ -734,7 +757,7 @@ function DataStoreAdapter:removeLedgerPage(userId, page)
 	if store == nil then
 		return false, err
 	end
-	if not self:awaitBudget(Enum.DataStoreRequestType.RemoveAsync) then
+	if not self:awaitBudget(REMOVE_BUDGET) then
 		return false, "no remove budget"
 	end
 	local key = self:ledgerKey(userId, page)
