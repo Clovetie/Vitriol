@@ -211,6 +211,22 @@ function NoiseField.new(cfg: any?)
 	self._driftY = 0
 	self._driftZ = 0
 
+	-- One reusable visitor for the first instinct-only investigation slice.
+	-- Only a bounded, actually emitted impulse can become an investigation;
+	-- this never queries any hidden player's live Character position.
+	self._listenVisit = function(id, e, _, _, _, distanceSq)
+		if id == self._listenIgnored or not e.time or not e.halflife or e.halflife <= 0 then return end
+		local age = self._listenNow - e.time
+		if age < 0 or age > self._listenMaxAge then return end
+		local score = (e.intensity or 0) * self._listenMask
+			* (0.5 ^ (age / e.halflife)) / (1 + distanceSq / 256)
+		if score >= self._listenThreshold and (score > self._listenScore
+			or (score == self._listenScore and (self._listenId == nil or id > self._listenId))) then
+			self._listenScore, self._listenId = score, id
+			self._listenX, self._listenY, self._listenZ = e.x, e.y, e.z
+		end
+	end
+
 	local w = c.Wind
 	if w then
 		self:setWind(w.X or w.x or 0, w.Y or w.y or 0, w.Z or w.z or 0)
@@ -276,7 +292,7 @@ function NoiseField:advectionWindow(channel: any): number
 end
 
 -- wind(field) -> x, y, z   (multi-return: the debug visualiser reads this per frame)
-function NoiseField:wind(): number, number, number
+function NoiseField:wind(): (number, number, number)
 	return self.windX, self.windY, self.windZ
 end
 
@@ -464,7 +480,7 @@ end
 -- loudestChannel(field, x, y, z, radius, now) -> channel?, intensity
 -- Cheap "which sense should wake up?" probe used by the sense scheduler so a
 -- creature does not run all six sense bodies when nothing is happening.
-function NoiseField:loudestChannel(x: number, y: number, z: number, radius: number, now: number): any, number
+function NoiseField:loudestChannel(x: number, y: number, z: number, radius: number, now: number): (any, number)
 	local bestChannel = nil
 	local bestValue = 0
 	for i = 1, #self.channels do
@@ -476,6 +492,25 @@ function NoiseField:loudestChannel(x: number, y: number, z: number, radius: numb
 		end
 	end
 	return bestChannel, bestValue
+end
+
+-- A bounded server-side audible EVENT query, not a search over player roots.
+-- Only VIBRATION is used by the first instinct slice; a caller owns its radius,
+-- threshold and imperfect localization. Ignore the just-investigated impulse
+-- so a static sound cannot hold the creature at one spot until it decays.
+-- The visitor is allocated once in new(), not in the Think cadence.
+function NoiseField:strongestNearby(channel: any, x: number, y: number, z: number, radius: number, now: number, threshold: number, ignoredId: any?): (any?, number?, number?, number?, number?)
+	local hash = self.hashes[channel]
+	if not hash or radius <= 0 or self.mask[channel] <= 0 or hash:count() == 0 then
+		return nil,nil,nil,nil,nil -- idle Think must not scan empty spatial cells
+	end
+	self._listenNow, self._listenMaxAge = now, self.maxAge[channel]
+	self._listenMask, self._listenThreshold = self.mask[channel], math.max(0, threshold)
+	self._listenIgnored = ignoredId
+	self._listenScore, self._listenId = -1, nil
+	self._listenX, self._listenY, self._listenZ = nil, nil, nil
+	hash:query(x,y,z,radius,self._listenVisit)
+	return self._listenId, self._listenX, self._listenY, self._listenZ, self._listenScore
 end
 
 -- prune(field, now) -> number removed

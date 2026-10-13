@@ -107,7 +107,7 @@ function QLearning:q(feats: any, action: any): number
 end
 
 -- _maxQ(ql, feats) -> number, actionIndex
-function QLearning:_maxQ(feats: any): number, number
+function QLearning:_maxQ(feats: any): (number, number)
 	local best = -math.huge
 	local bestAi = 1
 	for ai = 1, self.nActions do
@@ -146,7 +146,7 @@ end
 -- Boltzmann over Q + kappa*logPrior, with an exploration floor. The floor matters
 -- more than it looks: a creature that stops exploring stops being surprising, and
 -- "surprising" is the product (docs/02 §8.6).
-function QLearning:act(feats: any, rng: any, opts: any?): any, number
+function QLearning:act(feats: any, rng: any, opts: any?): (any, number)
 	if self.nActions == 0 then
 		return nil, 0
 	end
@@ -221,7 +221,7 @@ function QLearning:act(feats: any, rng: any, opts: any?): any, number
 end
 
 -- greedy(ql, feats) -> action, actionIndex
-function QLearning:greedy(feats: any): any, number
+function QLearning:greedy(feats: any): (any, number)
 	local _, bestAi = self:_maxQ(feats)
 	return self.actions[bestAi], bestAi
 end

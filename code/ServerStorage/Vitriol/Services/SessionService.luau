@@ -50,6 +50,7 @@ function SessionService.init(svc: any, services: any): ()
 	svc.Remotes = services.Remotes
 	svc.Time = services.Time
 	svc.Threat = services.Threat
+	svc.Health = services.Health
 	svc.DataStore = services.DataStore
 	svc.log = services.Logger
 
@@ -61,6 +62,7 @@ function SessionService.init(svc: any, services: any): ()
 	svc.elapsed = 0
 	svc.nightsSurvived = 0
 	svc.phaseChanges = 0
+	svc.lastSlowPath = "not-sampled" -- same-slot context for exceptional budget warning
 	svc.playersAlive = 0
 	svc.kills = 0
 	svc.lines = {} -- the last N acceptance lines, for the debug dump
@@ -122,11 +124,15 @@ end
 function SessionService:tick(dt: number): ()
 	if self.state == STATE_INTERMISSION then
 		self.intermissionLeft = self.intermissionLeft - dt
+		self.lastSlowPath = self.intermissionLeft <= 0 and "begin-round" or "intermission"
 		if self.intermissionLeft <= 0 then
 			self:beginRound()
 		end
 	elseif self.state == STATE_RUNNING then
+		self.lastSlowPath = "running"
 		self.elapsed = self.elapsed + dt
+	else
+		self.lastSlowPath = "ended"
 	end
 end
 
@@ -168,6 +174,16 @@ function SessionService:phaseChanged(phase: string, previous: string, phaseLengt
 		local cap = self.Config.Session.PhaseLogLines
 		self.lines[(self.phaseChanges - 1) % cap + 1] = line
 	end
+	-- The same authoritative Night -> Dawn edge that scores the night also
+	-- releases waiting survivors. Never invent a second timer for respawns.
+	if self.DayPrep then self.DayPrep:onPhaseChanged(phase) end
+	if self.Floodlight then self.Floodlight:onPhaseChanged(phase) end
+	if self.Barricade then self.Barricade:onPhaseChanged(phase) end
+	if self.Placement then self.Placement:onPhaseChanged(phase) end
+	if self.HouseCover then self.HouseCover:onPhaseChanged(phase) end
+	if phase == "Dawn" and previous == "Night" and self.state ~= STATE_ENDED and self.Health then
+		self.Health:onDawn(self.nightsSurvived)
+	end
 end
 
 -- nightEnded(svc, nightIndex) -> ()
@@ -204,7 +220,10 @@ end
 -- A late join is a time-sync event first: the client cannot render a sky it has not
 -- been told about, and waiting for the next snapshot is a visible pop on join.
 function SessionService:onPlayerJoined(player: any): ()
-	self:emit("player " .. player.Name .. " joined (" .. self.playersAlive .. " alive)")
+	if self.state == STATE_RUNNING and self.playersAlive >= self.Config.Session.MinPlayers then
+		self.roundActive = true -- a zero-player server can gain its first participant
+	end
+	self:emit("player " .. player.Name .. " joined (" .. self.playersAlive .. " connected)")
 	if self.Time then
 		self.Time:onPlayerAdded(player)
 	end
@@ -212,7 +231,7 @@ end
 
 -- onPlayerLeft(svc, player) -> ()
 function SessionService:onPlayerLeft(player: any): ()
-	self:emit("player " .. player.Name .. " left (" .. self.playersAlive .. " alive)")
+	self:emit("player " .. player.Name .. " left (" .. self.playersAlive .. " connected)")
 	if self.playersAlive == 0 and self.state == STATE_RUNNING then
 		-- An empty server keeps ticking but a round with nobody in it is over; the
 		-- record is saved so the group's nights survive a mass-disconnect.

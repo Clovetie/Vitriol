@@ -56,7 +56,6 @@ end
 local WORLD_FOLDER = "World"
 local ROOT_FOLDER = "Vitriol"
 local ANCHOR_NAME = "TimeAnchor"
-local ZERO_STUDS = 0
 local THREAT_MIN = 0
 local THREAT_MAX = 1
 local MAX_PHASE_ROLLOVERS = 64 -- a dt guard, not a tunable (see advance)
@@ -79,6 +78,8 @@ function TimeService.init(svc: any, services: any): ()
 	svc.phase = svc.Model.phaseOf(svc:openingClock())
 	svc.phaseElapsed = 0
 	svc.phaseLength = svc.Model.phaseSeconds(svc.phase, 0)
+	svc.pendingDayPrep = 0 -- Dawn prep charges the following Day, not Dawn
+	svc.prepFade = nil -- optional authoritative stage in the existing TimeSync
 	svc.elapsedTotal = 0
 	svc.nightIndex = 0
 	svc.threat = 0
@@ -91,6 +92,14 @@ function TimeService.init(svc: any, services: any): ()
 	svc.running = false
 	svc.timeScale = 0 -- 0 means "read the config"; see setTimeScale
 	svc.slotIds = {}
+	-- Low-frequency, allocation-free section timings for the *scheduled* 1 Hz
+	-- publish. Cadence measures the entire slot; these distinguish attribute
+	-- replication from the RemoteEvent when a real Play sample exceeds budget.
+	-- Immediate fade/prep publications are deliberately not mixed into this row.
+	svc.publishCost = { samples=0, overBudget=0, peakMs=0,
+		peakAttributesMs=0, peakRemoteMs=0, lastMs=0,
+		lastAttributesMs=0, lastRemoteMs=0,
+		peakSampleAttributesMs=0, peakSampleRemoteMs=0, peakPhase="" }
 	svc.anchor = svc.Workspace and svc:acquireAnchor() or nil
 
 	if svc.log then
@@ -111,32 +120,10 @@ end
 -- acquireAnchor(svc) -> Instance
 function TimeService:acquireAnchor(): any
 	local root = self.Workspace:FindFirstChild(ROOT_FOLDER)
-	if root == nil then
-		root = Instance.new("Folder")
-		root.Name = ROOT_FOLDER
-		root.Parent = self.Workspace
-	end
-	local world = root:FindFirstChild(WORLD_FOLDER)
-	if world == nil then
-		world = Instance.new("Folder")
-		world.Name = WORLD_FOLDER
-		world.Parent = root
-	end
-	local anchor = world:FindFirstChild(ANCHOR_NAME)
-	if anchor == nil then
-		-- A 0-size anchored Part, not a Folder: a Part is the cheapest replicated
-		-- object that reliably carries attributes, and CanQuery/CanTouch off keeps it
-		-- out of every spatial query a creature ever runs.
-		anchor = Instance.new("Part")
-		anchor.Name = ANCHOR_NAME
-		anchor.Size = Vector3.new(ZERO_STUDS, ZERO_STUDS, ZERO_STUDS)
-		anchor.Anchored = true
-		anchor.CanCollide = false
-		anchor.CanQuery = false
-		anchor.CanTouch = false
-		anchor.Transparency = 1
-		anchor.Material = Enum.Material[self.DayNight.Driver.AnchorMaterial]
-		anchor.Parent = world
+	local world = root and root:FindFirstChild(WORLD_FOLDER)
+	local anchor = world and world:FindFirstChild(ANCHOR_NAME)
+	if anchor == nil or not anchor:IsA("BasePart") then
+		error("[Vitriol.Time] missing authored Workspace.Vitriol.World.TimeAnchor", 0)
 	end
 	return anchor
 end
@@ -164,7 +151,7 @@ function TimeService:start(): ()
 			PeriodSeconds = 1 / self.DayNight.Driver.SnapshotRateHz,
 			BudgetMs = self.Config.Budgets.SlowShares.TimePublish,
 			Run = function()
-				self:publish()
+				self:publish(true) -- section timings only inside the budgeted slot
 			end,
 		})
 	end
@@ -184,10 +171,13 @@ function TimeService:advance(dt: number): ()
 	if self.timeScale > 0 then
 		scale = self.timeScale
 	end
-	local elapsed = dt * scale
-	if elapsed <= 0 then
-		return
-	end
+	self:_advanceSeconds(dt * scale)
+end
+
+-- Shared phase-boundary path for natural ticking AND one server-authorized
+-- preparation time jump. A jump must fire the same Session callbacks as time.
+function TimeService:_advanceSeconds(elapsed: number): ()
+	if elapsed <= 0 then return end
 	self.elapsedTotal = self.elapsedTotal + elapsed
 	self.phaseElapsed = self.phaseElapsed + elapsed
 	local length = self.phaseLength
@@ -225,6 +215,14 @@ function TimeService:endPhase(): ()
 	end
 	self.phase = nextPhase
 	self.phaseLength = self.Model.phaseSeconds(nextPhase, self.threat)
+	if nextPhase == "Day" and self.pendingDayPrep > 0 then
+		-- Dawn preparations debit the UPCOMING Day at its start. The same
+		-- advance loop processes a completely exhausted Day into Dusk.
+		local debt = math.min(self.pendingDayPrep, self.phaseLength)
+		self.phaseElapsed = self.phaseElapsed + debt
+		self.elapsedTotal = self.elapsedTotal + debt
+		self.pendingDayPrep = 0
+	end
 	if self.Session then
 		self.Session:phaseChanged(nextPhase, previous, self.phaseLength, self.elapsedTotal)
 	end
@@ -238,11 +236,67 @@ function TimeService:phaseProgress(): number
 	return 0
 end
 
+-- Day allowance is separate from the current Dawn duration. In Dawn it
+-- reflects already reserved time from the coming Day; outside Dawn/Day absent.
+function TimeService:dayRemaining(): number?
+	if self.phase == "Dawn" then
+		return math.max(0, self.Model.phaseSeconds("Day", self.threat) - self.pendingDayPrep)
+	elseif self.phase == "Day" then
+		return math.max(0, self.phaseLength - self.phaseElapsed)
+	end
+	return nil
+end
+
+-- Spend server-owned Day seconds at the midpoint of an all-client blackout.
+-- Cannot spill through Dusk or advance Night. Caller owns eligibility/vote.
+function TimeService:spendPrepDay(seconds: number): number
+	if not self.running or type(seconds) ~= "number" or seconds ~= seconds
+		or seconds <= 0 or seconds == math.huge then return 0 end
+	local remaining = self:dayRemaining()
+	if not remaining or remaining <= 0 then return 0 end
+	local spent = math.min(seconds, remaining)
+	if self.phase == "Dawn" then
+		self.pendingDayPrep = self.pendingDayPrep + spent
+	else
+		self:_advanceSeconds(spent)
+	end
+	self:publish() -- immediate shared server snapshot; do not wait for next slow slot
+	return spent
+end
+
+-- One serialised fade record accompanies ordinary time snapshots and late-join
+-- catch-up. Workspace:GetServerTimeNow is synchronised between Roblox peers; the
+-- client can render the CURRENT stage without waiting for a streaming TimeAnchor.
+-- Only the server-owned coordinator calls this. No additional remote/Instance.
+function TimeService:setPrepFade(serial: number, stage: string, seconds: number): boolean
+	if not self.running or type(serial) ~= "number" or serial ~= math.floor(serial)
+		or serial < 1 or type(stage) ~= "string" or type(seconds) ~= "number"
+		or seconds ~= seconds or seconds < 0 or seconds > 15 then return false end
+	local previous = self.prepFade
+	if previous and serial < previous.serial then return false end
+	if previous and serial == previous.serial then
+		local allowed = (previous.stage == "vote" and (stage == "blackout" or stage == "cancel"))
+			or (previous.stage == "blackout" and (stage == "reveal" or stage == "cancel"))
+			or ((previous.stage == "reveal" or previous.stage == "cancel") and stage == "clear")
+		if not allowed then return false end
+	elseif stage ~= "vote" then
+		return false -- new serial cannot appear halfway through a blackout
+	end
+	if (stage == "clear" and seconds ~= 0) or (stage ~= "clear" and seconds <= 0) then return false end
+	local workspace = self.Workspace
+	if not workspace or type(workspace.GetServerTimeNow) ~= "function" then return false end
+	self.prepFade = {serial=serial, stage=stage, seconds=seconds,
+		startedAt=workspace:GetServerTimeNow()}
+	self:publish() -- stages go out immediately, not only on the slow clock slot
+	return true
+end
+
 -- publish(svc) -> ()
 -- The replicated view. Every attribute is written only when it changed: an attribute
 -- write produces a replication packet even at the same value, and this runs twice a
 -- second for every player in the server.
-function TimeService:publish(): ()
+function TimeService:publish(measureCost: boolean?): ()
+	local before = measureCost and os.clock() or nil
 	local progress = self:phaseProgress()
 	local anchor = self.anchor
 	if anchor then
@@ -253,6 +307,7 @@ function TimeService:publish(): ()
 		self:writeAttribute(anchor, "WeatherSeed", self.weatherSeed)
 		self:writeAttribute(anchor, "PhaseName", self.phase)
 		self:writeAttribute(anchor, "PhaseProgress", progress)
+		self:writeAttribute(anchor, "DayBudgetRemaining", self:dayRemaining())
 		-- Wind and weather are only published when the feature that produces them is
 		-- on (docs/06 §6): the Attune overlay advects scent with the wind, so an
 		-- absent attribute means "nothing to draw", not "zero wind was measured".
@@ -263,7 +318,27 @@ function TimeService:publish(): ()
 			self:writeAttribute(anchor, "WeatherKind", self.weather)
 		end
 	end
+	local attributesDone = before and os.clock() or nil
 	self:syncRemotes(progress)
+	if before and attributesDone then
+		local finish = os.clock()
+		local attributesMs = (attributesDone - before) * 1000
+		local remoteMs = (finish - attributesDone) * 1000
+		local totalMs = (finish - before) * 1000
+		local cost = self.publishCost
+		cost.samples += 1
+		cost.lastMs, cost.lastAttributesMs, cost.lastRemoteMs = totalMs, attributesMs, remoteMs
+		if attributesMs > cost.peakAttributesMs then cost.peakAttributesMs = attributesMs end
+		if remoteMs > cost.peakRemoteMs then cost.peakRemoteMs = remoteMs end
+		if totalMs > cost.peakMs then
+			cost.peakMs, cost.peakPhase = totalMs, self.phase
+			cost.peakSampleAttributesMs, cost.peakSampleRemoteMs = attributesMs, remoteMs
+		end
+		if totalMs > self.Config.Budgets.SlowShares.TimePublish then
+			-- Evidence only; NEVER suppress Cadence's warning.
+			cost.overBudget += 1
+		end
+	end
 end
 
 -- writeAttribute(svc, instance, name, value) -> ()
@@ -283,7 +358,7 @@ function TimeService:syncRemotes(progress: number): ()
 	end
 	-- No extra throttle: this runs at Driver.SnapshotRateHz by construction, and a
 	-- 1 Hz broadcast of one small payload to four players is not a cost worth state.
-	sync:FireAllClients(clock, self.phase, progress, self.threat, self.nightIndex, self.weather, self.Model.cycleSeconds(self.threat))
+	sync:FireAllClients(self.clockMinutes, self.phase, progress, self.threat, self.nightIndex, self.weather, self.Model.cycleSeconds(self.threat), self:dayRemaining(), self.prepFade)
 end
 
 -- onPlayerAdded(svc, player) -> ()
@@ -292,7 +367,7 @@ function TimeService:onPlayerAdded(player: any): ()
 	if sync == nil then
 		return
 	end
-	sync:FireClient(player, self.clockMinutes, self.phase, self:phaseProgress(), self.threat, self.nightIndex, self.weather, self.Model.cycleSeconds(self.threat))
+	sync:FireClient(player, self.clockMinutes, self.phase, self:phaseProgress(), self.threat, self.nightIndex, self.weather, self.Model.cycleSeconds(self.threat), self:dayRemaining(), self.prepFade)
 end
 
 -- setThreat(svc, threat) -> ()
@@ -370,6 +445,9 @@ function TimeService:seekTo(clockHours: number): ()
 	local hours = clockHours % 24
 	local phase = self.Model.phaseOf(hours)
 	local progress = self.Model.phaseProgress(hours, phase)
+	-- Debug seeks are not a preparation transaction; never carry an old
+	-- Dawn reservation into a different designer-selected phase.
+	self.pendingDayPrep = 0
 	self.phase = phase
 	self.phaseLength = self.Model.phaseSeconds(phase, self.threat)
 	self.phaseElapsed = progress * self.phaseLength

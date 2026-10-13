@@ -149,6 +149,7 @@ SurvivalConfig.Consumables = {
 -- wounds, so a wound's rate cannot be applied twice.
 SurvivalConfig.Health = {
 	Max = 100,
+	MaxHpLossPerDeath = 20, -- 100 -> 80 -> 60 -> 40 -> 20 -> 0; dawn respawn until zero
 	-- Below this the player is Incapacitated rather than dead (docs/05 §3.2:
 	-- collapse is a compound state, and a corpse has no second chance).
 	IncapacitatedThreshold = 15,

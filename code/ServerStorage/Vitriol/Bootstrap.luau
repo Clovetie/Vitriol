@@ -44,6 +44,7 @@ local SurvivalConfig = require(shared.Config.SurvivalConfig)
 local GoreConfig = require(shared.Config.GoreConfig)
 local BloodConfig = require(shared.Config.BloodConfig)
 local Remotes = require(shared.Shared.Remotes)
+local PrepRules = require(shared.Shared.PrepRules)
 local NetContract = require(shared.Shared.NetContract)
 local NoiseField = require(shared.Shared.NoiseField)
 local BloodAdapter = require(shared.Shared.BloodAdapter)
@@ -55,6 +56,12 @@ local SessionService = require(vitriol.Services.SessionService)
 local HealthService = require(vitriol.Services.HealthService)
 local KillChoreography = require(vitriol.Creature.Body.KillChoreography)
 local CreatureService = require(vitriol.Services.CreatureService)
+local DayPrepService = require(vitriol.Services.DayPrepService)
+local FloodlightService = require(vitriol.Services.FloodlightService)
+local PrepCoordinator = require(vitriol.Services.PrepCoordinator)
+local BarricadeService = require(vitriol.Services.BarricadeService)
+local BarricadePlacementService = require(vitriol.Services.BarricadePlacementService)
+local HouseCoverService = require(vitriol.Services.HouseCoverService)
 
 local instance: any = nil
 
@@ -114,6 +121,10 @@ function Bootstrap.ensure(): any
 		return instance
 	end
 
+	-- Engine-owned characters still spawn normally on first join, but automatic
+	-- post-death respawns would bypass the dawn/life budget. Health owns LoadCharacter.
+	Players.CharacterAutoLoads = false
+
 	local runtime: any = {
 		Config = GameConfig,
 		DayNight = DayNightConfig,
@@ -151,7 +162,70 @@ function Bootstrap.ensure(): any
 			-- blows its budget hard enough to matter between polls (a 4x overshoot is
 			-- audibly a stutter, and waiting 10 s to say so is too late to care).
 			if budget > 0 and ms > budget * GameConfig.Budgets.WatchdogMultiplier * 2 then
-				log("warn", "cadence " .. name .. " took " .. string.format("%.3f", ms) .. " ms against a " .. string.format("%.3f", budget) .. " ms budget")
+				-- A rare Time:Publish warning can be gone by the time a human stops
+				-- Play and reports it. Include the SAME sample's already-measured
+				-- sections in the existing warning, after Cadence's clock has stopped.
+				-- Never change its threshold or hide the measured whole-slot cost.
+				local detail = ""
+				if name == "Time:Publish" then
+					local cost = runtime.Time and runtime.Time.publishCost
+					if cost and cost.samples > 0 then
+						detail = string.format(" (attributes %.3f ms, remote %.3f ms, phase %s, sample %d)",
+							cost.lastAttributesMs, cost.lastRemoteMs, tostring(runtime.Time.phase), cost.samples)
+					end
+				elseif name == "DayPrep:Pulse" then
+					local prep = runtime.DayPrep
+					if prep then
+						-- Labels were set during the SAME measured pulse; string
+						-- formatting happens only AFTER Cadence stopped its clock.
+						-- A path label is not proof which engine call took the time.
+						detail = string.format(" (phase %s, prep %s %s->%s, bell %s, hum %s)",
+							tostring(runtime.Time and runtime.Time.phase),
+							tostring(prep.lastPulseAction), tostring(prep.lastPulseFrom),
+							tostring(prep.lastPulseTo), tostring(prep.bellRinging == true),
+							tostring(prep.lastPulseHum == true))
+					end
+				elseif name == "Session:Slow" then
+					local session = runtime.Session
+					if session then
+						-- The path was recorded IN the measured slot; this context is
+						-- formatted afterward. It does not excuse an over-budget sample.
+						detail = string.format(" (path %s, state %s, phase %s)",
+							tostring(session.lastSlowPath), tostring(session.state),
+							tostring(runtime.Time and runtime.Time.phase))
+					end
+				elseif name == "Creature:Think" then
+					local owner = runtime.Creature
+					local id = owner and owner.order and owner.order[1]
+					local c = id and owner.creatures[id]
+					-- No private target coordinates or player IDs are logged.
+					detail = string.format(" (phase %s, decision %s, attack %s)",
+						tostring(runtime.Time and runtime.Time.phase),
+						tostring(c and c.DecisionReason or "no-creature"),
+						tostring(c and c.AttackPhase or "none"))
+				end
+				log("warn", "cadence " .. name .. " took " .. string.format("%.3f", ms) .. " ms against a " .. string.format("%.3f", budget) .. " ms budget" .. detail)
+			end
+			-- The Studio bridge cannot inspect active Play. Emit only genuine
+			-- threshold/first-lead transitions to SERVER Output, AFTER the
+			-- measured Think slot. No player ID, private target or client remote.
+			if name == "Creature:Think" then
+				local owner = runtime.Creature
+				local id = owner and owner.order and owner.order[1]
+				local creature = id and owner.creatures[id]
+				local event = creature and creature.GarageExplainEvent
+				if event then
+					creature.GarageExplainEvent = nil
+					local habit = owner.GarageHabit
+					if habit then
+						local prefix = event == "witness-threshold" and "Garage habit witnessed" or "Garage habit chose"
+						log("info", string.format("%s entries=%d evidence=%d/%d misses=%d reason=%s",
+							prefix, habit.Visits or 0, habit.Evidence or 0,
+							(habit.Config and habit.Config.GarageVisitsForPrediction) or 3,
+							habit.PredictionMisses or 0,
+							event == "lead" and tostring(creature.DecisionReason) or "observed-entry"))
+					end
+				end
 			end
 		end,
 	})
@@ -172,6 +246,11 @@ function Bootstrap.ensure(): any
 	runtime.Session = setmetatable({}, SessionService)
 	runtime.Health = setmetatable({}, HealthService)
 	runtime.Creature = setmetatable({}, CreatureService)
+	runtime.DayPrep = setmetatable({}, DayPrepService)
+	runtime.Floodlight = setmetatable({}, FloodlightService)
+	runtime.Barricade = setmetatable({}, BarricadeService)
+	runtime.Placement = setmetatable({}, BarricadePlacementService)
+	runtime.HouseCover = setmetatable({}, HouseCoverService)
 
 	runtime.Time:init({
 		Workspace = Workspace,
@@ -197,9 +276,41 @@ function Bootstrap.ensure(): any
 		Remotes = runtime.Remotes,
 		Time = runtime.Time,
 		Threat = runtime.Threat,
+		Health = runtime.Health,
 		Config = GameConfig,
 		Logger = log,
 	})
+	runtime.DayPrep:init({
+		Workspace = Workspace, Players = Players, Health = runtime.Health,
+		Time = runtime.Time, Session = runtime.Session, Noise = runtime.Noise,
+		Cadence = runtime.Cadence, Logger = log,
+	})
+	runtime.Session.DayPrep = runtime.DayPrep
+	runtime.Floodlight:init({
+		Workspace = Workspace, Players = Players, Health = runtime.Health,
+		Time = runtime.Time, Session = runtime.Session, Noise = runtime.Noise,
+		Logger = log,
+	})
+	runtime.Session.Floodlight = runtime.Floodlight
+	runtime.DayPrep.Floodlight = runtime.Floodlight
+	runtime.Barricade:init({
+		Workspace = Workspace, Players = Players, Health = runtime.Health,
+		Time = runtime.Time, Session = runtime.Session, Noise = runtime.Noise,
+		Logger = log,
+	})
+	runtime.Session.Barricade = runtime.Barricade
+	runtime.Placement:init({
+		Workspace = Workspace, ServerStorage = ServerStorage, Players = Players,
+		Health = runtime.Health, Time = runtime.Time, Session = runtime.Session,
+		Noise = runtime.Noise, Logger = log,
+	})
+	runtime.Session.Placement = runtime.Placement
+	runtime.HouseCover:init({
+		Workspace = Workspace, Players = Players, Health = runtime.Health,
+		Time = runtime.Time, Session = runtime.Session, Noise = runtime.Noise,
+		Logger = log,
+	})
+	runtime.Session.HouseCover = runtime.HouseCover
 	runtime.Health:init({
 		Players = Players,
 		Cadence = runtime.Cadence,
@@ -210,6 +321,7 @@ function Bootstrap.ensure(): any
 		KillConfig = MonsterConfig.Kill,
 		GoreConfig = GoreConfig,
 		Time = runtime.Time,
+		Session = runtime.Session,
 		Config = GameConfig,
 		Survival = SurvivalConfig,
 		OnVictimKillStart = function(player: any, scene: any)
@@ -217,7 +329,11 @@ function Bootstrap.ensure(): any
 				runtime.Creature:presentVictimKill(player, scene)
 			end
 		end,
+		OnInventoryWipe = function(player: any)
+			if runtime.Placement then runtime.Placement:reclaimTool(player) end
+		end,
 		OnDeath = function(state: any)
+			if runtime.DayPrep then runtime.DayPrep:drop(state.player) end
 			if runtime.Creature then
 				runtime.Creature:presentVictimKill(state.player, state)
 			end
@@ -231,6 +347,12 @@ function Bootstrap.ensure(): any
 		Time = runtime.Time,
 		Threat = runtime.Threat,
 		Health = runtime.Health,
+		Session = runtime.Session,
+		DayPrep = runtime.DayPrep,
+		Floodlight = runtime.Floodlight,
+		Barricade = runtime.Barricade,
+		Placement = runtime.Placement,
+		HouseCover = runtime.HouseCover,
 		Remotes = runtime.Remotes,
 		Workspace = Workspace,
 		Monster = MonsterConfig,
@@ -238,12 +360,70 @@ function Bootstrap.ensure(): any
 		Logger = log,
 	})
 
+	-- All five authored helper prompts are required before ANY prep handler
+	-- starts. A missing or wrong-class one is a deployment error, not a reason
+	-- to silently let an action commit without its shared clock charge.
+	local function helper(part: any, name: string): any
+		local node = part:FindFirstChild(name)
+		if not node or not node:IsA("ProximityPrompt") then
+			error("[Vitriol.Prep] missing authored helper " .. part.Name .. "." .. name, 0)
+		end
+		return node
+	end
+	local prep = runtime.DayPrep
+	local gate = runtime.Barricade
+	local station = runtime.Floodlight
+	local houseCover = runtime.HouseCover
+	local actions = {
+		TakeFuel = {Part=prep.Can, Helper=helper(prep.Can,"AssistPrep"),
+				Ready=function(player) return prep:ready("TakeFuel",player) end,
+				Commit=function(player) return prep:pickup(player) end},
+			PowerGarage = {Part=prep.Generator, Helper=helper(prep.Generator,"AssistPrep"),
+				Ready=function(player) return prep:ready("PowerGarage",player) end,
+				Commit=function(player) return prep:power(player) end},
+			PrimeBell = {Part=prep.BellLever, Helper=helper(prep.BellLever,"AssistPrep"),
+				Ready=function(player) return prep:ready("PrimeBell",player) end,
+				Commit=function(player)
+					local ok=prep:primeBell(player)
+					if ok then prep.hoistPending=true end
+					return ok
+				end},
+			BoardGarage = {Part=gate.Latch, Helper=helper(gate.Latch,"AssistPrep"),
+				Ready=function(player) return gate:readyBoard(player) end,
+				Commit=function(player) return gate:board(player) end},
+			RepairStationFloodlight = {Part=station.Switch, Helper=station.Helper,
+				Ready=function(player) return station:ready(player) end,
+				Commit=function(player) return station:repair(player) end},
+			RepairGarageLight = {Part=prep.Generator, Helper=prep.GarageRepairHelper,
+				Ready=function(player) return prep:ready("RepairGarageLight", player) end,
+				Commit=function(player) return prep:repairGarage(player) end},
+	}
+	for action, piece in pairs(houseCover.ByAction) do
+		local key = action
+		local furniture = piece
+		actions[key] = {Part=furniture.Part, Helper=furniture.Helper,
+			Ready=function(player) return houseCover:ready(key,player) end,
+			Commit=function(player) return houseCover:move(key,player) end}
+	end
+	runtime.Prep = PrepCoordinator.new({
+		Time = runtime.Time, Health = runtime.Health, Players = Players,
+		Rules = PrepRules, Logger = log,
+		OnClear = function(action) prep:onPrepReveal(action) end,
+		Now = function() return Workspace:GetServerTimeNow() end,
+		Fade = function(serial, stage, seconds)
+			return runtime.Time:setPrepFade(serial, stage, seconds)
+		end,
+		Actions = actions,
+	})
+	prep.Prep, gate.Prep, station.Prep, houseCover.Prep = runtime.Prep, runtime.Prep, runtime.Prep, runtime.Prep
+
 	runtime.NoiseSlot = runtime.Cadence:register({
 		Name = "Noise:Prune",
 		PeriodSeconds = 1 / GameConfig.Ticks.SlowHz,
 		BudgetMs = GameConfig.Budgets.SlowShares.Noise,
 		Run = function()
 			runtime.Noise:prune(runtime.Time.elapsedTotal)
+			runtime.Blood:prune(os.clock())
 		end,
 	})
 
@@ -260,11 +440,17 @@ function Bootstrap.ensure(): any
 	runtime.Threat:start()
 	runtime.Session:start()
 	runtime.Health:start()
+	runtime.Prep:start()
+	runtime.DayPrep:start()
+	runtime.Barricade:start()
+	runtime.Floodlight:start()
+	runtime.Placement:start()
+	runtime.HouseCover:start()
 	runtime.Creature:start()
 	runtime.Cadence:start()
 
 	if GameConfig.Diagnostics.LogServiceLifecycle then
-		log("info", "runtime up: " .. table.concat({ "cadence", "time", "threat", "session", "health", "creature", "blood" }, ", "))
+		log("info", "runtime up: " .. table.concat({ "cadence", "time", "threat", "session", "health", "day-prep", "prep-vote", "station-light", "barricade", "placement", "creature", "blood" }, ", "))
 	end
 	return runtime
 end
@@ -283,6 +469,12 @@ function Bootstrap.stop(): ()
 		return
 	end
 	runtime.Creature:stop()
+	runtime.HouseCover:stop()
+	runtime.Placement:stop()
+	runtime.Floodlight:stop()
+	runtime.Barricade:stop()
+	runtime.DayPrep:stop()
+	runtime.Prep:stop()
 	runtime.Health:stop()
 	runtime.Session:stop()
 	if runtime.Blood then

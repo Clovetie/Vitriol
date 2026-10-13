@@ -118,7 +118,7 @@ local PHASE_START_KEY = {
 	Night = "NightStart",
 }
 
-function TimeModel.phaseSpan(phase: any): any, any
+function TimeModel.phaseSpan(phase: any): (any, any)
 	local hours = TimeModel.PHASE_HOURS
 	local key = PHASE_START_KEY[phase]
 	if key == nil then
@@ -187,7 +187,7 @@ end
 -- The cross-fade scalar docs/06 §5.6 asks for ("CreatureAudio cross-fades ambience
 -- beds on phaseWeight, not on a discrete phase change"), and the same number the
 -- LightingDriver smoothsteps its scalar writes with.
-function TimeModel.phaseWeight(clockHours: number): string, number
+function TimeModel.phaseWeight(clockHours: number): (string, number)
 	local phase = TimeModel.phaseOf(clockHours)
 	return phase, TimeModel.phaseProgress(clockHours, phase)
 end

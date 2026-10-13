@@ -8,8 +8,9 @@ output goes to `tools/reports/` (git-ignored); build caches live under
 ## Quick start
 
 ```bash
-bash tools/setup-tools.sh     # optional: installs selene/stylua/luau into .tools/
-npm --prefix tools install    # installs luaparse for check-syntax.js
+bash tools/install-luau.sh    # REQUIRED: official luau-compile, fail-closed Studio syntax gate
+npm --prefix tools ci         # installs luaparse/fengari for the headless harnesses
+# bash tools/setup-tools.sh   # optional additional selene/stylua/luau tools
 
 # One-shot audit (no external deps needed beyond node + luaparse):
 bash tools/audit.sh
@@ -23,21 +24,48 @@ legacy Rojo project validator when this repository has no `default.project.json`
 ### `vitriol-quality-gate.js` — strict evidence gate
 
 This is the command future agents should run before committing. It runs the smoke
-and session harnesses, the syntax checker, metrics, hot-loop scan, call graph,
-dead-config audit, model evaluation, and `git diff --check`. It treats only the two
-known Lua 5.1 parser failures (`Lib/Noise.luau` and `Lib/RNG.luau`) as allowlisted;
-a new syntax failure or any priced call in a RunService file fails the gate.
+and session harnesses, the authored-content gate, the offline Studio-audit
+failure-path tests, the selected Studio property-inventory offline tests, **the official Luau compiler**, the secondary Lua 5.1 syntax
+checker, metrics, hot-loop scan, call graph,
+dead-config audit, model evaluation, and `git diff --check`. The compiler is
+mandatory: no syntax exceptions are allowlisted. The historical checker hid
+invalid multi-return type annotations and cannot substitute for Luau. A new
+syntax failure or a priced call in a RunService file fails the gate.
 
 ```bash
 node tools/vitriol-quality-gate.js --src code
 node tools/vitriol-quality-gate.js --src code --report tools/reports/quality-gate.json
 ```
 
+The gate includes `tools/vitriol/navigation.luau`'s 16-case garage routing
+and CreatureService-think regression; it is not Studio collision, gameplay, or frame-time proof.
 The report is ignored under `tools/reports/` and keeps bounded stdout/stderr for
-post-handoff inspection. A green run ends with `Vitriol quality gate: 9/9 checks
-passed`. It is an evidence aggregator, not a substitute for Studio verification.
+post-handoff inspection. A green run currently ends with `Vitriol quality gate:
+49/49 checks passed`. It is an evidence aggregator, not a substitute for the
+credentialed Edit-mode Studio audit or fresh human Play verification.
 
 ---
+
+## Studio bridge & static authoring skill
+
+Read [`../INTEGRATION.md`](../INTEGRATION.md) and the
+[Vitriol Studio skill](../.agents/skills/vitriol-studio/SKILL.md). The connected
+legacy bridge uses `/api/jobs` (not the modern arenarobloxbridge `/api/tool`).
+`studio_bridge.py` accepts `health`, `ping`, `runfile`, `inspect`, `survey`,
+`parity` (all current game scripts), and `sync` (specific Explorer paths). Set
+`BRIDGE_URL` and `BRIDGE_TOKEN` **in your shell only**; never commit them.
+
+For a **read-only, fail-closed Edit-mode check**, run
+`python tools/vitriol-studio-audit.py`. It confirms the exact place, runs all
+ten structural/boot/content verifiers, compares the *class* of every Vitriol script
+against its Explorer path, and reads back every game source. The report under
+`tools/reports/studio-audit.json` contains no credentials or source. Run
+`python tools/test-studio-audit.py` for offline tests of its failure paths
+(also included in the local quality gate). This is not a Play test.
+
+`jobs/author_static_vitriol.lua` authoring is Edit-mode only and idempotent;
+`jobs/verify_static_vitriol.lua` reads exact counts/classes. Run
+`node tools/static-content-check.js` to reject runtime Instance constructors.
 
 ## Analysis tools (these are the "future-iteration toolkit")
 

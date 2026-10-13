@@ -38,6 +38,7 @@ local PERM_SIZE = 256
 local PERM_MASK = 255
 local INV16 = 1 / 65536 -- hash values are 16-bit
 local INV32 = 1 / 4294967296 -- for normalising the 32-bit xorshift draw
+local band, bxor, lshift, rshift = bit32.band, bit32.bxor, bit32.lshift, bit32.rshift
 
 local Noise = {}
 Noise.__index = Noise
@@ -72,15 +73,15 @@ local function buildPermutation(seed: number): any
 		p[i] = i
 	end
 
-	local state = (math.floor(seed) + 0x9E3779B9) & MASK32
+	local state = band(math.floor(seed) + 0x9E3779B9, MASK32)
 	if state == 0 then
 		state = 0x9E3779B9
 	end
 
 	for i = PERM_SIZE - 1, 1, -1 do
-		state = (state ~ (state << 13)) & MASK32
-		state = state ~ (state >> 17)
-		state = (state ~ (state << 5)) & MASK32
+		state = band(bxor(state, lshift(state, 13)), MASK32)
+		state = bxor(state, rshift(state, 17))
+		state = band(bxor(state, lshift(state, 5)), MASK32)
 
 		-- Normalise to [0, 1) in the FLOAT domain. On VMs whose bitwise ops are
 		-- 32-bit signed the xorshift pattern reads negative, and folding that half
@@ -118,24 +119,24 @@ end
 -- visibly banded - 256 levels across a full period shows up as contour lines on
 -- a large scent cloud, 65536 does not.
 local function hash1(p: any, sb: number, i: number): number
-	local a = p[i & PERM_MASK]
+	local a = p[band(i, PERM_MASK)]
 	local b = p[a + sb]
-	return b * 256 + p[(b + a) & PERM_MASK]
+	return b * 256 + p[band(b + a, PERM_MASK)]
 end
 
 local function hash2(p: any, sb: number, i: number, j: number): number
-	local a = p[i & PERM_MASK]
-	local b = p[a + (j & PERM_MASK)]
+	local a = p[band(i, PERM_MASK)]
+	local b = p[a + band(j, PERM_MASK)]
 	local c = p[b + sb]
-	return c * 256 + p[(c + a) & PERM_MASK]
+	return c * 256 + p[band(c + a, PERM_MASK)]
 end
 
 local function hash3(p: any, sb: number, i: number, j: number, k: number): number
-	local a = p[i & PERM_MASK]
-	local b = p[a + (j & PERM_MASK)]
-	local c = p[b + (k & PERM_MASK)]
+	local a = p[band(i, PERM_MASK)]
+	local b = p[a + band(j, PERM_MASK)]
+	local c = p[b + band(k, PERM_MASK)]
 	local d = p[c + sb]
-	return d * 256 + p[(d + a) & PERM_MASK]
+	return d * 256 + p[band(d + a, PERM_MASK)]
 end
 
 -- new(seed) -> Noise
@@ -143,13 +144,13 @@ end
 -- not construct per frame; rigs and fields own one instance each.
 function Noise.new(seed: number?)
 	local self = setmetatable({}, Noise)
-	local s = (seed or 0) & MASK32
+	local s = band(seed or 0, MASK32)
 	self.seed = s
 	self.perm = buildPermutation(s)
 	-- Three decorrelated seed bytes, for v3's independent axes.
-	self.sbA = s & PERM_MASK
-	self.sbB = (s + 71) & PERM_MASK
-	self.sbC = (s + 157) & PERM_MASK
+	self.sbA = band(s, PERM_MASK)
+	self.sbB = band(s + 71, PERM_MASK)
+	self.sbC = band(s + 157, PERM_MASK)
 	return self
 end
 
@@ -224,7 +225,7 @@ end
 -- v3(noise, seedOffset, t) -> x, y, z in [-1, 1]
 -- The per-tendril idle offset. Three decorrelated 1D samples at slightly
 -- different rates and seed bytes so the motion does not read as one oscillator.
-function Noise:v3(seedOffset: number, t: number): number, number, number
+function Noise:v3(seedOffset: number, t: number): (number, number, number)
 	local p = self.perm
 	local a = sample1(p, self.sbA, t + seedOffset)
 	local b = sample1(p, self.sbB, t * 1.13 + seedOffset + 131.7)

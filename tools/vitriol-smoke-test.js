@@ -46,6 +46,9 @@ const MODULES = {
 	DayNightConfig: "code/ReplicatedStorage/Vitriol/Config/DayNightConfig.luau",
 	MonsterConfig: "code/ReplicatedStorage/Vitriol/Config/MonsterConfig.luau",
 	SurvivalConfig: "code/ReplicatedStorage/Vitriol/Config/SurvivalConfig.luau",
+	SurvivalModel: "code/ReplicatedStorage/Vitriol/Shared/SurvivalModel.luau",
+	SurvivalCollapse: "code/ReplicatedStorage/Vitriol/Shared/SurvivalCollapse.luau",
+	SurvivalConsumeAction: "code/ReplicatedStorage/Vitriol/Shared/SurvivalConsumeAction.luau",
 	RegionIntegrity: "code/ReplicatedStorage/Vitriol/Shared/RegionIntegrity.luau",
 	Skeleton: "code/ReplicatedStorage/Vitriol/Shared/Skeleton.luau",
 	SkeletonCodec: "code/ReplicatedStorage/Vitriol/Shared/SkeletonCodec.luau",
@@ -53,6 +56,7 @@ const MODULES = {
 	Remotes: "code/ReplicatedStorage/Vitriol/Shared/Remotes.luau",
 	NetContract: "code/ReplicatedStorage/Vitriol/Shared/NetContract.luau",
 	TimeModel: "code/ReplicatedStorage/Vitriol/Shared/TimeModel.luau",
+	PrepRules: "code/ReplicatedStorage/Vitriol/Shared/PrepRules.luau",
 	// ServerStorage, but its codec/adapter half is pure Lua + a `buffer` shim, which
 	// is what the Replicator parity test needs to prove array/buffer agreement.
 	Replicator: "code/ServerStorage/Vitriol/Creature/Replicator.luau",
@@ -86,7 +90,15 @@ if (process.argv.includes("--debug-transform")) {
 }
 
 const PREAMBLE = `
--- Luau stdlib shims (fengari is Lua 5.3).
+-- Luau stdlib shims (fengari is Lua 5.3). Roblox's bit32 API is not
+-- guaranteed on a plain Lua VM; use Lua 5.3 operators only in this test shim.
+bit32 = {
+  band = function(a, b) return (a & b) & 0xFFFFFFFF end,
+  bxor = function(a, b) return (a ~ b) & 0xFFFFFFFF end,
+  lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+  rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+}
+
 table.create = function(n, v)
 	local t = {}
 	for i = 1, n do t[i] = v end

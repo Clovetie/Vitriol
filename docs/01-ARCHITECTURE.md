@@ -34,23 +34,31 @@ owns what, how data flows, and the rules every later iteration must obey.
 
 ---
 
+> **2026-10-11 runtime authoring rule:** the tree below includes future design
+> targets, not a promise they all exist. Every Vitriol UI and object must be
+> present in the saved place before Play. Use `jobs/author_static_vitriol.lua`
+> for the current slice; do not create/clone UI, remotes, visual models, debris,
+> droplets or effects from game scripts. In particular the included third-party
+> BloodEngine remains inactive because it allocates at runtime. See
+> [`../INTEGRATION.md`](../INTEGRATION.md).
+
 ## 2. The tree
 
 ```
 game
 ├─ Workspace (SVC)
-│  ├─ Vitriol (FL)                      ← everything the runtime creates at play time
+│  ├─ Vitriol (FL)                      ← authored in Edit mode; never created during play
 │  │  ├─ World (FL)                     ← server-authoritative world state anchors
-│  │  │  └─ TimeAnchor (ATT parented to a 0-size part) : holds replicated clock attrs
-│  │  ├─ Creatures (FL)                 ← one (MO) per live creature
-│  │  ├─ Debris (FL)                    ← pooled debris parts (CS tag "Vitriol_Debris")
-│  │  ├─ Gore (FL)                      ← bounded fallback / optional local effects (CS "Vitriol_Gore")
+│  │  │  └─ TimeAnchor (PT, invisible)  ← preauthored; replicated clock attrs
+│  │  ├─ Creatures (FL)                 ← Braid_1: preauthored Model + Core + 210 segments
+│  │  ├─ Debris (FL)                    ← future: author any pools in Edit mode first
+│  │  ├─ Gore (FL)                      ← 24 preauthored BloodDrop_1..24 Parts
 │  │  ├─ Vehicles (FL)                  ← drivable vehicle assemblies
 │  │  ├─ Structures (FL)                ← destructible structures authored in the map
 │  │  ├─ NoiseMarkers (FL)              ← OPTIONAL debug-only visualisation (never in ship)
 │  │  └─ CorpseCache (FL)               ← persistent corpses / detached limbs
 │  ├─ Map (FL)                         ← HUMAN AUTHORED (see 10-HUMAN-AUTHORED.md)
-│  ├─ Terrain (SVC)                     ← BloodEngine's `Vitriol_Blood` folder is created here
+│  ├─ Terrain (SVC)                     ← BloodEngine is installed but not activated (it allocates at runtime)
 │  └─ ... (streaming containers)
 │
 ├─ Lighting (SVC)                       ← client-side driven; see 06-DAY-NIGHT.md
@@ -91,7 +99,7 @@ game
 │     │  ├─ Signal (MD)                 ← tiny observable (no BindableEvent needed)
 │     │  └─ Tables (MD)                 ← freeze/clone/pool helpers
 │     ├─ Shared (FL)                    ← modules that MAY touch instances, both sides
-│     │  ├─ Remotes (MD)               ← creates/looks up every remote, one place only
+│     │  ├─ Remotes (MD)               ← validates/binds authored remotes; never creates them
 │     │  ├─ NetContract (MD)            ← payload schemas + validation (server never trusts)
 │     │  ├─ NoiseField (MD)             ← shared vibration/scent/EM channel model
 │     │  ├─ Skeleton (MD)               ← joint-chain data structure (server & client)

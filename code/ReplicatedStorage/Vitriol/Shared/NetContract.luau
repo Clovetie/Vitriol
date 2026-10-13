@@ -221,7 +221,7 @@ local function validateField(spec: any, v: any, depth: number): any
 end
 
 -- validate(schemaName, payload) -> ok, rejectCode?, fieldName?
-function NetContract.validate(schemaName: string, payload: any): boolean, any, any
+function NetContract.validate(schemaName: string, payload: any): (boolean, any, any)
 	local schema = NetContract.Schemas[schemaName]
 	if schema == nil then
 		return false, NetContract.Reject.UnknownSchema, nil
@@ -283,7 +283,7 @@ function NetContract.limits(schemaName: string): any
 end
 
 -- gate:allow(key, schemaName, now) -> ok, retryAfterSeconds
-function NetContract.allow(gate: any, key: any, schemaName: string, now: number): boolean, number
+function NetContract.allow(gate: any, key: any, schemaName: string, now: number): (boolean, number)
 	local limits = NetContract.limits(schemaName)
 	if limits == nil then
 		return false, 0
@@ -356,7 +356,7 @@ end
 -- admit(gate, key, schemaName, payload, now) -> ok, rejectCode?, fieldName?
 -- THE entry point every client-facing handler calls. Order is deliberate: the
 -- cheapest test that can refuse a spammer runs first.
-function NetContract.admit(gate: any, key: any, schemaName: string, payload: any, now: number): boolean, any, any
+function NetContract.admit(gate: any, key: any, schemaName: string, payload: any, now: number): (boolean, any, any)
 	local ok, retry = NetContract.allow(gate, key, schemaName, now)
 	if not ok then
 		gate.rejected = gate.rejected + 1

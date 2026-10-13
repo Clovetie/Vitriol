@@ -1,0 +1,32 @@
+# Church lever as an exact physical-ray endpoint — LOCAL ONLY (2026-10-13)
+
+> **Later owner-approved position:** The owner chose to keep the original
+> already-authored lever at `(119,2.5,-199)` rather than restore former
+> Z=-210. Local verifier/editor jobs now agree, and the fresh read-only
+> Vitriol/Edit audit passes 10/10 with zero Source drift. No geometry or
+> game Source was changed in that decision. See
+> [`CHURCH-LEVER-CURRENT-POSITION-APPROVED-2026-10-13.md`](CHURCH-LEVER-CURRENT-POSITION-APPROVED-2026-10-13.md).
+
+> **Later deployment:** The House/Church local Sources described below were
+> guarded-synced to Vitriol Edit **2/2 exact** after the owner approved a
+> verified pre-sync published Version History checkpoint. An actual installed-
+> Source route probe reaches the CURRENT lever at Z=-199 via the main entrance;
+> approved Z=-210 still differs and no lever was moved. The owner
+> subsequently confirmed a new post-sync Save to Roblox with Notes and
+> verified its Version History entry; there is still **NO live Play verdict**.
+> A later read-only hypothetical Z=-210 probe hits the collidable Bell, so
+> do not infer that a straight core path is clear. See
+> [`HOUSE-CHURCH-GUARDED-EDIT-SYNC-2026-10-13.md`](HOUSE-CHURCH-GUARDED-EDIT-SYNC-2026-10-13.md).
+
+
+**No Studio geometry or Source was written.** The user's bell audio/flashes had been Play-confirmed previously, but the distant Braid's whole entrance→lever lure path had not. While continuing read-only Edit work, the church verifier still flagged that the actual `Church_BellLever` is at `(119,2.5,-199)` rather than the previously approved `(119,2.5,-210)`. This remains an **unresolved authored-position difference**, not a license to move it or redefine the user's decision.
+
+A new read-only probe (`jobs/probe_bell_lever_route_comparison_vitriol.lua`, `tools/reports/bell-lever-route-comparison-edit.json`) compiled the **current Studio `ChurchNavigation` Source** against the actual church UnionOperation. From the previously reported western core `(83.8,-207.5)`, the first two route legs correctly reach the side `(86.25,-130.25)` and main entrance `(119,-130.25)`. The final ground-height ray at Y=4 **hits the original, queryable, noncolliding lever itself** at `(119,4,-198.5)`; the old router treats this non-church Part as an unknown blocker and returns no final waypoint. With the lever still at Z=-199, merely asking for the old Z=-210 coordinate ALSO hits that intervening lever; moving an imaginary target coordinate is not a fix. The probe is Edit-only. It does not establish that a real player cannot reach the prompt, or that a Braid actually stalled in Play.
+
+The **local, unsynced** `code/ServerStorage/Vitriol/Creature/ChurchNavigation.luau` now recognizes a ray's first hit as a valid endpoint **only** when it is the exact preauthored `Workspace.Map.Interactions.Church_BellLever` Part AND the requested target X/Z matches that Part's **current** coordinate. Solid church walls, windows, an intervening lever en route to a different target, and unrelated props remain blocking. The existing route to the real **main entrance**, not a window, is unchanged. No game/GUI Instance is constructed or cloned. A focused test first reproduced the blocked exact-lever ray; afterward Church route **10/10**, church bell **19/19**, full gate **38/38**, official Luau compiler **61/61**. The House fixture remains **74/74**.
+
+A separate **read-only evaluation of the local candidate Source on the actual Studio/Edit map** (`tools/reports/church-endpoint-local-candidate-edit.json`) found side→front→actual current lever `(119,-199)` now reachable, while side→front→hypothetical old coordinate `(119,-210)` still fails closed because the present lever blocks it. The local candidate was evaluated in Lua memory only; it was **not installed** as a Studio ModuleScript. A follow-up read-only geometric preflight (`jobs/probe_church_lever_core_clearance_vitriol.lua`, `tools/reports/church-lever-core-clearance-edit.json`) excluded **only the original lever as an endpoint obstruction** and fired 14 ground-height/elevated rays along seven body-width offsets from the actual church entrance to its current Z=-199 target. All were clear, and a vertical ray at the target hit the original collidable NaveFloor top near Y=0.8. This reduces the risk of accepting a lever hidden behind a solid UnionOperation, but does **not** simulate planted-foot entry, player prompt usability, live lure priority, or real frame cadence. It is not a decision to keep Z=-199.
+
+There are now **two intended local-only Studio Source differences**: `CreatureService` (House exit before Garage habit/full-body seam) and `ChurchNavigation` (exact lever endpoint). The guarded two-Module `tools/sync-pending-house-church.py --check` verified Vitriol place ID `92448193604950`, Edit mode, existing ModuleScript classes and both exact prior full Studio Sources against the 75-script ZIP: **2/2 guarded and pending, zero writes**. Six offline fail-closed tests exercise its preflight, no-write default, checkpoint attestation, per-Module readback and stopping before the second write on a bad first readback. The future two-Module apply is sequential, not atomic; an interrupted apply can leave the first Source installed without the second. After any future successful apply, a new Save to Roblox with Notes and verified Version History checkpoint would still be needed to preserve those installed Sources. The comprehensive read-only audit reports 9/10 verifiers (the lever-position discrepancy), 61 classes and 61 Sources: 44 byte-exact, 13 one-terminal-LF differences, the two hash-pinned user edits, and precisely these two pending local code differences. See `tools/reports/vitriol-studio-audit-after-house-church-offline.json`.
+
+**Updated data-loss boundary:** The owner says the Vitriol place is published, confirms its pre-sync version in Version History, and explicitly allows that as the safety checkpoint. This is a user report, not independent Studio/UI verification. The guarded future `--apply` still requires operator attestation, fresh exact-Source/place/Edit checks, and bridge access, which is currently absent; it was **not run**. Even a later Source readback would not be a post-sync cloud save or publish. Do not overwrite the short Studio phases, user geometry or the lever position; do not request a Play test now. The two guarded local code changes are not in the Studio place yet.

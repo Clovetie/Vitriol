@@ -191,7 +191,7 @@ function SpatialHash:query(x: number, y: number, z: number, radius: number, fn: 
 end
 
 -- queryNearest(hash, x, y, z, radius) -> id?, entry?, distSq?
-function SpatialHash:queryNearest(x: number, y: number, z: number, radius: number): any, any, number?
+function SpatialHash:queryNearest(x: number, y: number, z: number, radius: number): (any, any, number?)
 	local bestId, bestEntry, bestSq = nil, nil, math.huge
 	self:query(x, y, z, radius, function(id, e, _, _, _, dSq)
 		if dSq < bestSq then

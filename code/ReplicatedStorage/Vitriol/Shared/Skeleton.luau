@@ -213,7 +213,7 @@ function Skeleton:setRestPose(ox: number, oy: number, oz: number, dx: number, dy
 end
 
 -- restPose(skel) -> ox, oy, oz, dx, dy, dz
-function Skeleton:restPose(): number, number, number, number, number, number
+function Skeleton:restPose(): (number, number, number, number, number, number)
 	return self.restX, self.restY, self.restZ, self.dirX, self.dirY, self.dirZ
 end
 
