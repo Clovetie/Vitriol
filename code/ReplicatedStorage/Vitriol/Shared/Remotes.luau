@@ -1,14 +1,13 @@
 --!strict
 -- Remotes.luau
 -- Location: ReplicatedStorage > Vitriol > Shared > Remotes  (ModuleScript)
--- Purpose:  THE ONLY PLACE REMOTES ARE CREATED, and the only place their names are
---           written down. Exactly the set in docs/01-ARCHITECTURE.md §2 - no
---           remote is ever invented ad hoc by a feature.
+-- Purpose:  The registry of EDIT-MODE-AUTHORED remotes; never creates Instances.
+--           Exactly the set in docs/01-ARCHITECTURE.md §2 - no remote is
+--           invented ad hoc by a feature.
 --
 --           Rules this module encodes:
---           * SERVER creates (init), CLIENT binds (WaitForChild + timeout). A client
---             never creates an Instance, and a bind that times out is reported once
---             rather than retried every frame.
+--           * SERVER validates authored remotes (init), CLIENT binds with
+--             WaitForChild + timeout. Neither side creates them at runtime.
 --           * Every client->server entry names a NetContract schema, so no inbound
 --             remote can exist without a validator. 'coverageProblems' is the test
 --             that keeps that true as the set grows.
@@ -145,95 +144,55 @@ function Remotes.clientToServer(): any
 	return out
 end
 
--- ensureFolder() -> Instance
--- Creates ReplicatedStorage.Vitriol.Comms if it is not there yet. In a real place
--- the folder ships authored; in a test/studio-play place this lets the whole
--- project boot from code alone.
-local function ensureFolder(): any
-	local root = storage()
-	local container = root:FindFirstChild("Vitriol")
-	if container == nil then
-		container = Instance.new("Folder")
-		container.Name = "Vitriol"
-		container.Parent = root
-	end
-	local comms = container:FindFirstChild(FOLDER_NAME)
-	if comms == nil then
-		comms = Instance.new("Folder")
-		comms.Name = FOLDER_NAME
-		comms.Parent = container
-	end
-	return comms
-end
-
--- init() -> createdCount
--- Server only, idempotent. Creates every remote in the definition list; re-running
--- it after an external script deleted one repairs the set. One GetChildren pass
--- builds the present-set rather than N FindFirstChild calls, and the same pass is
--- what lets this module POLICE its own folder: a remote authored in Studio outside
--- the contract is exactly the "ad hoc remote" rule this file exists to prevent.
+-- init() -> 0; validate the authored tree before any gameplay starts.
+-- A missing or wrong-class remote is a deployment error, never repaired in Play mode.
 function Remotes.init(): number
 	if not isServer() then
-		warn("[Vitriol.Remotes] init() called on a client - remotes are server-created")
-		return 0
+		error("[Vitriol.Remotes] init is server-only", 0)
 	end
-	local comms = ensureFolder()
+	local container = storage():FindFirstChild("Vitriol")
+	local comms = container and container:FindFirstChild(FOLDER_NAME)
+	if comms == nil or not comms:IsA("Folder") then
+		error("[Vitriol.Remotes] missing authored ReplicatedStorage.Vitriol." .. FOLDER_NAME, 0)
+	end
 	local present = {}
 	for _, child in ipairs(comms:GetChildren()) do
+		if present[child.Name] then
+			error("[Vitriol.Remotes] duplicate remote " .. child.Name, 0)
+		end
 		present[child.Name] = child
 	end
-	local created = 0
 	for i = 1, #Remotes.Definition do
 		local def = Remotes.Definition[i]
-		local existing = present[def.Name]
-		if existing == nil then
-			local remote = Instance.new(def.Class)
-			remote.Name = def.Name
-			remote.Parent = comms
-			cache[def.Name] = remote
-			created = created + 1
-		else
-			present[def.Name] = nil
-			if existing.Class ~= def.Class then
-				-- A class mismatch means somebody authored a remote in Studio with a
-				-- different class than the contract. That cannot be repaired at
-				-- runtime without destroying their instance, so it is a loud error.
-				error(("[Vitriol.Remotes] %s exists as %s, contract says %s"):format(def.Name, existing.Class, def.Class), 0)
-			end
-			cache[def.Name] = existing
+		local remote = present[def.Name]
+		if remote == nil or remote.ClassName ~= def.Class then
+			error(("[Vitriol.Remotes] missing/wrong-class authored remote %s (expected %s)"):format(def.Name, def.Class), 0)
 		end
+		present[def.Name] = nil
+		cache[def.Name] = remote
 	end
 	for name in pairs(present) do
-		warn(("[Vitriol.Remotes] stray remote %s in Comms: it is not in the contract. Delete it, or add it to Remotes.Definition and a NetContract schema."):format(name))
+		error("[Vitriol.Remotes] stray child in Comms: " .. name, 0)
 	end
 	initialised = true
-	return created
+	return 0
 end
 
--- get(name) -> Instance?
--- Never creates on a client. On the server it will initialise itself if nothing did
--- yet, because services are started in an order that this must not depend on.
+-- get(name) -> pre-authored Instance. No repair or creation in Play mode.
 function Remotes.get(name: string): any
-	local cached = cache[name]
-	if cached ~= nil and cached.Parent ~= nil then
-		return cached
-	end
 	if BY_NAME[name] == nil then
-		error(("[Vitriol.Remotes] %s is not in the contract; add it to Remotes.Definition (and a NetContract schema if a client sends it)"):format(name), 0)
+		error("[Vitriol.Remotes] unknown remote " .. tostring(name), 0)
 	end
 	if not isServer() then
 		return Remotes.await(name)
 	end
 	if not initialised then
 		Remotes.init()
-		return cache[name]
 	end
-	local comms = ensureFolder()
-	local def = BY_NAME[name]
-	local remote = Instance.new(def.Class)
-	remote.Name = name
-	remote.Parent = comms
-	cache[name] = remote
+	local remote = cache[name]
+	if remote == nil or remote.Parent == nil then
+		error("[Vitriol.Remotes] authored remote removed during play: " .. name, 0)
+	end
 	return remote
 end
 
@@ -247,8 +206,12 @@ function Remotes.await(name: string, timeoutSeconds: number?): any
 	if cached ~= nil then
 		return cached
 	end
-	local comms = storage():FindFirstChild("Vitriol")
+	-- StarterPlayerScripts can run before ReplicatedStorage.Vitriol replicates.
+	-- A non-yielding FindFirstChild could silently return nil here, causing
+	-- optional client remote binds to be skipped during a replication race.
+	local comms = storage():WaitForChild("Vitriol", timeoutSeconds or BIND_TIMEOUT_SECONDS)
 	if comms == nil then
+		Remotes.reportBindFailure("ReplicatedStorage.Vitriol")
 		return nil
 	end
 	local folder = comms:WaitForChild(FOLDER_NAME, timeoutSeconds or BIND_TIMEOUT_SECONDS)
@@ -270,13 +233,13 @@ function Remotes.reportBindFailure(what: string): ()
 		return
 	end
 	missing[what] = true
-	warn(("[Vitriol.Remotes] WaitForChild timed out for %s after %ss - the server never created it"):format(what, tostring(BIND_TIMEOUT_SECONDS)))
+	warn(("[Vitriol.Remotes] WaitForChild timed out for %s after %ss - missing or not yet replicated"):format(what, tostring(BIND_TIMEOUT_SECONDS)))
 end
 
 -- bindAll(timeoutSeconds?) -> ok, missingNames
 -- Client boot path: bind the whole contract once, and report what is absent so the
 -- caller can decide whether a feature is worth disabling. Called from ClientMain.
-function Remotes.bindAll(timeoutSeconds: number?): boolean, any
+function Remotes.bindAll(timeoutSeconds: number?): (boolean, any)
 	local absent = {}
 	local n = 0
 	for i = 1, #Remotes.Definition do

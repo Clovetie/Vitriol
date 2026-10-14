@@ -1,0 +1,21 @@
+# Church lever at Z=-199 — owner-approved rest position (2026-10-13)
+
+**Owner decision:** After the post-sync Save to Roblox with Notes was verified in Version History, the owner explicitly selected **“Approve Z=-199”**. The already-authored `Church_BellLever` remains at `(119,2.5,-199)`, replacing the *earlier* approved rest coordinate `(119,2.5,-210)`. The owner chose **not** to move geometry. This revision does not authorize moving, resizing or bypassing the Bell, church UnionOperation, rope/hoist, or other authored content. The earlier coordinate remains a documented historical choice, not the current validation target.
+
+## Why this is a narrow, testable update
+
+The installed `ChurchNavigation` reaches the exact actual lever through side → main entrance → target in a read-only Edit/source probe. A separate prior clearance preflight fired seven lateral rays at two heights from that entrance toward the current lever, excluding **only the lever as endpoint**: **14/14 clear**; a downward ray landed on the original NaveFloor. The updated read-only dynamic-target probes (`tools/reports/church-distant-after-lever-approval-edit.json`, `tools/reports/church-corridor-after-lever-approval-edit.json`) confirm the installed router points the distant Braid toward the main entrance, that the side→door ray is clear, and that the direct door→target ray ends on the actual lever. This does **not** prove planted-foot Play movement, player prompt reach, or measured Think cadence.
+
+A hypothetical check of the old Z=-210 location, with the current lever excluded from those *probe rays only*, found that the original anchored, collidable Bell MeshPart obstructed **12/14 straight rays** to the old target. The target had NaveFloor support but lacked straight body-width clearance. The installed router's older Bell-descendant hit allowance could still return that old goal; a waypoint is not proof of a body-clear path. See [`CHURCH-APPROVED-LEVER-HYPOTHETICAL-PREFLIGHT-2026-10-13.md`](CHURCH-APPROVED-LEVER-HYPOTHETICAL-PREFLIGHT-2026-10-13.md). This geometry finding informed the owner choice but is **not** a live Play verdict.
+
+## Exact local changes and independent Edit audit
+
+Only **local tooling**, not a Studio Instance or game Script, was updated for the revised coordinate:
+
+- `jobs/verify_church_bell_vitriol.lua` now checks X=119, **Y=2.5**, Z=-199, rest/anchoring and the existing bell/rope/hoist and audio properties. It did not weaken checks on the other authored content.
+- `jobs/author_prep_helpers_vitriol.lua` validates the current lever coordinate rather than falsely rejecting it; this authoring job was **not run**.
+- The obsolete prototype `jobs/author_church_bell_vitriol.lua` records the new approval but remains blocked by the existing user-owned Bell model; it was **not run**. Two read-only church ray probes now derive their target from the current lever rather than hard-code the former coordinate. The focused `tools/vitriol/church-navigation.luau` fixture now uses Z=-199 and still rejects a ray through the current lever to the former Z=-210 goal.
+
+The comprehensive **read-only** Vitriol/Edit audit after this verifier change (`tools/reports/vitriol-studio-audit-after-lever-approval-2026-10-13.json`) passed **10/10** authored verifiers and checked **61/61** script Sources/classes: 46 byte-exact, 13 one-terminal-newline differences, two pinned, user-preserved Studio Source differences, **zero unexpected drift**. The local quality gate remains **39/39**, with Church route **10/10**, bell **19/19**, House **74/74**, Garage **69/69**, official Luau compiler **61/61**. The audit ran in the correct Vitriol place in Edit mode. No cloud save, publish, game Source, or geometry write was performed during this verifier update. The owner's previously confirmed post-sync Save to Roblox with Notes remains the latest human-verified checkpoint for the unchanged Studio place.
+
+**Open live evidence:** The Braid's precise church lure route still lacks a human Play verdict. So do the latest House egress/House_02, the fourth Garage visit, and normal frame cadence. The bridge does not support live Play; do not claim that a green Edit/static audit settles these.

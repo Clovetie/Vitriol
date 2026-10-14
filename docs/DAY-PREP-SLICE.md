@@ -1,0 +1,19 @@
+# First day-preparation slice — garage fuel and lamp (2026-10-12)
+
+**Status:** authored and synced to the open Vitriol Studio place in Edit mode; the user reports **“everything is working amazing”** in fresh Play after this slice. Specific two-player contention, death/restock and warning-free Output were not described individually; those paths are covered by headless tests, not separately observed. This is one deliberately small choice, not a full inventory, generator simulation, crafting, HUD or bespoke art pass.
+
+## What is authored
+
+`Workspace.Map.Interactions` contains exactly three anchored, noncolliding blockout Parts: `Garage_FuelCan` on the existing workbench near `(-111, 4, -45)`, `Garage_Generator` near `(-112, 3, -60)`, and `Garage_GeneratorLamp` under the garage roof near `(-91, 17, -52)`. The can and generator have **Edit-mode-authored** ProximityPrompts (`TakeFuel`, `PowerLamp`); the lamp has an authored, initially disabled PointLight (`PoweredLight`). The engine displays the authored prompts; Vitriol creates **no UI, prompts, parts or light Instances during Play**. Existing five town streetlamps remain untouched.
+
+The guarded `jobs/author_dayprep_vitriol.lua` creates/reuses only these seven named Instances and refuses Play, wrong place ID or an unknown map version. First run: **7 created / 0 reused**; second: **0 created / 7 reused**. The read-only `jobs/verify_dayprep_vitriol.lua` checks classes, duplicate count, collision, prompt reach and the initial off state.
+
+## Server-owned loop
+
+During Dawn/Day, one player can take the single can; `DayPrepService` validates a living character, 10-stud distance and phase even if a prompt activation is forged. An atomic non-yielding claim prevents duplicate pickup and two-player contention. `CarryFuelCan` is a replicated player attribute for feedback, **not** the inventory authority; the server service holds the single owner ID. Only that owner can spend the can at the generator to light the garage. A night-time periodic AIR noise impulse and an explicit generator lure make the lit choice risky: if living prey is more than 70 studs from the Braid, it approaches the generator; close prey always wins, keeping the approved chase. The lamp goes out and one can restocks at Dawn. Death/disconnect before use clears ownership and restores the same authored pickup. There is no cross-server persistence or multi-item inventory yet.
+
+## Evidence and Play checklist
+
+Local quality gate **13/13** (smoke **366/366**, existing session **145/145**, dedicated day-prep session **14/14**, client boot **1/1**, official compiler **47/47**). The game source contains no runtime `Instance.new`/`Clone`. The editor author and verifier jobs compile. Studio map/static/day-prep verifiers passed; `DayPrepService` is a ModuleScript; guarded source parity **47/47 zero drift**. The dedicated scenario checks duplicate and competing pickup, exclusive spend, night rejection, generator lure versus near prey, dawn reset, death/disconnect loss and a forged distant attempt. These are headless or Edit-mode checks—not observed gameplay.
+
+**In fresh Studio Play:** (1) during Day, approach the garage workbench and take the can; confirm it disappears and `CarryFuelCan=true`; (2) have another player try to take/use it; (3) use the generator and check garage lamp lights, can is spent; (4) at Night watch the Braid approach the generator from afar but still chase close prey; (5) at Dawn confirm light off and can restocked; (6) die with an unspent can and confirm it returns to the same bench. Check Server Output for Vitriol errors and Client Output for time-sync queue warnings. A running Play session must start **after** the Edit-mode sync; source parity cannot prove runtime behavior. Ask the user to save/publish the place when satisfied. Git push is not configured in this checkout.

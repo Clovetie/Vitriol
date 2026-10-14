@@ -16,6 +16,7 @@
 local MASK32 = 0xFFFFFFFF
 local INV32 = 1 / 4294967296
 local TAU = math.pi * 2
+local band, bxor, lshift, rshift = bit32.band, bit32.bxor, bit32.lshift, bit32.rshift
 
 local RNG = {}
 RNG.__index = RNG
@@ -28,12 +29,12 @@ RNG.__index = RNG
 -- are exact on both, so the seed mixer avoids multiplication entirely. Cost is
 -- irrelevant: this runs once per RNG, not per draw.
 local function mixSeed(seed: number): number
-	local z = (math.floor(seed) + 0x9E3779B9) & MASK32
+	local z = band(math.floor(seed) + 0x9E3779B9, MASK32)
 	for _ = 1, 8 do
-		z = (z ~ (z << 13)) & MASK32
-		z = z ~ (z >> 17)
-		z = (z ~ (z << 5)) & MASK32
-		z = (z + 0x9E3779B9) & MASK32
+		z = band(bxor(z, lshift(z, 13)), MASK32)
+		z = bxor(z, rshift(z, 17))
+		z = band(bxor(z, lshift(z, 5)), MASK32)
+		z = band(z + 0x9E3779B9, MASK32)
 	end
 	-- xorshift32 has an absorbing state at 0; never allow it.
 	if z == 0 then
@@ -59,9 +60,9 @@ end
 -- which normalises in the float domain where the conversion is always exact.
 function RNG:nextInt32(): number
 	local x = self.state
-	x = (x ~ (x << 13)) & MASK32
-	x = x ~ (x >> 17)
-	x = (x ~ (x << 5)) & MASK32
+	x = band(bxor(x, lshift(x, 13)), MASK32)
+	x = bxor(x, rshift(x, 17))
+	x = band(bxor(x, lshift(x, 5)), MASK32)
 	self.state = x
 	self.calls += 1
 	return x
@@ -169,7 +170,7 @@ function RNG:gaussianClamped(mean: number, sd: number, lo: number, hi: number): 
 end
 
 -- Three independent gaussians (for positional error). Returns 3 values.
-function RNG:gaussian3(): number, number, number
+function RNG:gaussian3(): (number, number, number)
 	return self:gaussian(), self:gaussian(), self:gaussian()
 end
 
@@ -185,7 +186,7 @@ end
 
 function RNG.deserialize(data: {state: number, calls: number?}): any
 	local self = setmetatable({}, RNG)
-	self.state = data.state & MASK32
+	self.state = band(data.state, MASK32)
 	if self.state == 0 then
 		self.state = 0x9E3779B9
 	end

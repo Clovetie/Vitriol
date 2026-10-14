@@ -1,5 +1,204 @@
 # Handoff — Vitriol, playable creature slice (2026-09-09 UTC)
 
+> **CURRENT OWNER PRIORITY — independent features before Play verdicts (2026-10-14):**
+> The owner explicitly deferred House/Garage/church verdict work and chose
+> **M6 survival needs**. New pure, workspace-only `SurvivalModel` uses authored
+> activity rates, smooth hunger↔thirst coupling, data-driven debuff effects,
+> stamina, verified-consumption arithmetic, timed exhaustion and a collapse
+> *candidate* predicate: **54/54** focused. A separate pure collapse
+> sequence has **24/24** tests for 1.5-second onset, one retrievable
+> `VIBRATION 0.9` fall request and eight-second crawl timing (NO live noise).
+> A pure **25/25** timed consumption transaction gates food/water effects
+> behind uninterrupted action time and one successful owned-item commit.
+> An unwired server ownership adapter accepts only server fact samplers,
+> drives Health regen, isolates snapshots and can emit into the REAL
+> NoiseField when explicitly invoked offline: **57/57** adapter tests.
+> A server-only timed-consumption seam with FAKE Inventory and REAL headless
+> AIR noise passes **25/25** checks; full gate **49/49**. None is Bootstrapped, Studio-synced, scheduled or live;
+> no Instances/UI or HP writes. **Pacing conflict open:** current config
+> yields thirst 7.2 after 9 walking minutes versus
+> docs/05 Parched≈9min at thirst 80; even 16 continuous baseline sprint
+> minutes only reach thirst33.6/hunger15.2, not Collapse. Neither short
+> Studio phases nor config were silently retuned. Preserve the two-module
+> House-cover candidate as a separate LOCAL-only item; bridge Edit checks
+> remain intermittent. Do not request a Play verdict or claim M6 survival
+> live. See [`docs/M6-SURVIVAL-MODEL-OFFLINE-2026-10-14.md`](docs/M6-SURVIVAL-MODEL-OFFLINE-2026-10-14.md).
+> Older blocks below preserve prior checkpoint history.
+
+> **NEWER HUMAN PLAY / LOCAL-ONLY FOLLOW-UP (2026-10-14):** The
+> owner confirms the Braid **entered House_01 AFTER dislodging its
+> original closet**; the break Output gives outside core(-72.0,8.6,78.0)
+> and genuinely-sensed-prey goal(-87.0,78.0). It needed renewed visibility
+> to break a piece it seemed to be pressing. By explicit owner choice,
+> a narrow, locally tested recent-genuine-indoor-clue contact rule is now
+> pending in CreatureCore + CreatureService (**NOT installed or saved**).
+> Local House-cover 69/69, full repeated-Think breach 11/11 at BOTH houses, and gate 44/44; no new Play verdict for that rule.
+> The Edit bridge `run_luau` guard intermittently returned
+> `loadstring() is not available` despite owner-confirmed Edit. A later
+> successful pre-read guard captured EXACT read-only two-Source backup
+> `backups/vitriol-studio-edit-cover-pre-2026-10-14.zip`, but a subsequent
+> guard again failed. NO Studio Source write occurred; do NOT sync until
+> mode checks are reliable. After reconnect, one of four identical
+> read-only Edit probes STILL failed; `--check` alone passing does not
+> establish reliability. House_01 EXIT remains open, as do
+> House_02, Garage habit, church entrance and actual DayPrep/Time budget
+> overruns (new Time:Publish 0.557/0.050 ms, attributes 0.530). Do NOT
+> claim Edit parity for this local candidate or ask for Play acceptance
+> until a verified guarded sync and NEW cloud save. See
+> [`docs/PLAY-REPORT-2026-10-14-CLOSET-CONTACT-CADENCE.md`](docs/PLAY-REPORT-2026-10-14-CLOSET-CONTACT-CADENCE.md)
+> and [`docs/NEXT-PLAY-SUMMARY-2026-10-13.md`](docs/NEXT-PLAY-SUMMARY-2026-10-13.md).
+> Earlier blocks below record earlier checkpoints.
+
+> **CURRENT Play → guarded M2 follow-up (2026-10-13):** The newest
+> human Play found the grounded Braid spasming OUTSIDE House_01 at
+> X≈−54; it never entered, so this run has NO exit verdict. One `LastKnown`
+> target was inside; a later `Prey` target was outside on the Porch. The
+> old Source bypassed physical House-door staging for a genuinely stored
+> LastKnown goal. A narrow correction was reproduced red→green, guarded-
+> synced ONE Module exact, and the owner verified a NEW Save to Roblox
+> with Notes/Version History entry. **No Play verdict for that fix; the
+> separate Prey spasm remains OPEN.** The owner confirmed Studio-only
+> `NightBaseSeconds=70` is intentional; preserve it. Fresh read-only Edit
+> audit **PASS 10/10 verifiers, 61/61 Sources/classes, zero drift**, local
+> gate **40/40**, House **78/78**. Real Session/DayPrep/BellHoist/Time
+> overruns remain OPEN; do not raise budgets. Focus the next Play on
+> House ingress before exit, M3 Garage or M6 church. See
+> [`docs/NEXT-PLAY-SUMMARY-2026-10-13.md`](docs/NEXT-PLAY-SUMMARY-2026-10-13.md)
+> and [`docs/HOUSE-INGRESS-LASTKNOWN-CORRECTION-2026-10-13.md`](docs/HOUSE-INGRESS-LASTKNOWN-CORRECTION-2026-10-13.md).
+> Later blocks below describe earlier checkpoints.
+
+> **CURRENT saved / owner-approved Edit state (2026-10-13):** The
+> House/Garage `CreatureService` and exact-target `ChurchNavigation` were
+> guarded-synced **2/2 exact**; the owner verified the new post-sync
+> **Save to Roblox with Notes** in Version History (human confirmation,
+> not bridge proof). After read-only preflight, the owner explicitly
+> approved the lever’s ALREADY-AUTHORED `(119,2.5,-199)` position in place
+> of the former Z=-210; **no geometry or game Source was changed** by that
+> decision. Only local verifier/editor jobs and a route fixture were updated.
+> Fresh read-only Edit audit **PASS: 10/10 verifiers, 61/61 Sources/classes,
+> zero unexpected drift**. Full local gate **39/39**. Braid church route,
+> latest House exit, fourth Garage visit and cadence have no fresh human
+> Play verdict; no new publish or Git push is confirmed. See
+> [`docs/CHURCH-LEVER-CURRENT-POSITION-APPROVED-2026-10-13.md`](docs/CHURCH-LEVER-CURRENT-POSITION-APPROVED-2026-10-13.md)
+> and [`docs/HOUSE-CHURCH-GUARDED-EDIT-SYNC-2026-10-13.md`](docs/HOUSE-CHURCH-GUARDED-EDIT-SYNC-2026-10-13.md).
+> Status paragraphs below describe earlier checkpoints.
+
+> **New read-only House exit grid:** The installed Studio/Edit Source was
+> sampled at 15 grounded seeds per house × 4 temporary original-furniture
+> states: **120/120** policy outcomes matched the safe authored-map profile.
+> With a table but no closet, 4 direct exits and 11 indoor stage→exit
+> rechecks per house succeeded; a placed closet safely denied the ray.
+> At most one new candidate ray per synthetic Think. This is **not**
+> planted-foot Play egress or a frame-cadence pass; no Studio write. See
+> [`docs/HOUSE-EXIT-AUTHORED-GRID-EDIT-2026-10-13.md`](docs/HOUSE-EXIT-AUTHORED-GRID-EDIT-2026-10-13.md).
+
+> **Pre-sync read-only place-data protection (2026-10-13):** A separate selected-
+> property ZIP inventories 1,930 Edit Instances across 13 services, with
+> per-member SHA-256 hashes and offline integrity/fail-closed tests **5/5**. It
+> complements the earlier 75-Source ZIP but is NOT a full place, terrain/
+> asset backup, atomic snapshot, Play capture, or cloud save. The two local
+> Source changes remain unsynced. The owner confirms the current Vitriol
+> **published version is visible in Version History** and explicitly allows
+> that version as the pre-sync safety checkpoint. The bridge is not configured
+> here, so no sync can run; after any future sync, Save to Roblox with Notes
+> and verify the NEW checkpoint. This owner report is not an independent
+> Studio/UI verification. See
+> [`docs/STUDIO-EDIT-PROPERTY-INVENTORY-2026-10-13.md`](docs/STUDIO-EDIT-PROPERTY-INVENTORY-2026-10-13.md).
+
+> **PRE-SYNC LOCAL / STUDIO BOUNDARY (2026-10-13):** Two LOCAL-ONLY game
+> Modules are now pending: `CreatureService` (indoor House exit and full-
+> radius pier seam before remembered Garage route) and `ChurchNavigation`
+> (the EXACT preauthored bell lever as a ray endpoint, not wall bypass).
+> Guarded two-Module Edit **read-only** `--check`: prior full Studio Sources
+> and ModuleScript classes 2/2, no writes. Church entrance route failed on
+> the actual lever itself at Z=-199; an in-memory local candidate follows
+> side→main entrance→that lever without moving it. The previously approved
+> lever Z=-210 remains UNRESOLVED; do not move/approve Z=-199 by inference.
+> Current full Edit audit 9/10 verifiers (lever-position defect), 61 classes/
+> Sources, two intended pending code differences; user short phases/road
+> unchanged. House **74/74**, Garage **69/69**, Church route **10/10**,
+> full gate **39/39**, compiler **61/61**. The owner reports the
+> pre-sync published checkpoint verified in Version History, but **not** a
+> post-sync save. Bridge credentials are absent; `--apply` was NOT run.
+> Play, cadence and Git push remain unconfirmed; no Play request now.
+> See [`docs/CHURCH-LEVER-ENDPOINT-READONLY-2026-10-13.md`](docs/CHURCH-LEVER-ENDPOINT-READONLY-2026-10-13.md).
+
+> **PRIOR OFFLINE / STUDIO BOUNDARY (2026-10-13):** The prior four-Module
+> House/Garage Edit sync was verified **4/4 exact AT THAT CHECKPOINT** and
+> 75 Studio script Sources/classes were backed up read-only. A later local
+> **CreatureService-only** change now puts grounded House egress ahead of
+> remembered Garage habit; it is **NOT Studio-synced**. House **74/74**,
+> Garage **69/69**, full gate **37/37**, compiler **61/61**. A guarded
+> single-Module read-only preflight confirmed exact prior Studio Source,
+> no write. Comprehensive current Edit audit: 9/10 verifiers (church lever
+> Z=-199 vs approved -210); 61 classes/Sources, exactly ONE expected pending
+> local code difference (`CreatureService`); two user-preserved Source edits
+> and 13 terminal-LF differences are classified, not overwritten. The
+> user's extended Road_Main passes the fixed *read-only verifier*; the
+> road itself was not modified. **Cloud Save to Roblox and publish remain
+> UNCONFIRMED**; neither script ZIP nor Edit parity is a full-place save.
+> No Play/cadence verdict. See
+> [`docs/HOUSE-GARAGE-HABIT-EGRESS-PRIORITY-2026-10-13.md`](docs/HOUSE-GARAGE-HABIT-EGRESS-PRIORITY-2026-10-13.md)
+> and [`docs/STUDIO-EDIT-SYNC-AND-SOURCE-BACKUP-2026-10-13.md`](docs/STUDIO-EDIT-SYNC-AND-SOURCE-BACKUP-2026-10-13.md).
+
+> **PRIOR OFFLINE FOOT-SUPPORTED EXIT (2026-10-13):** The earlier
+> lower-before-ray goal did not actually lower the planted-foot core: a
+> Lua-only floor/roof frame replay settled near Y=11.38 above the lintel.
+> The idle House sweep now uses a derived, temporary supported crouch;
+> genuinely sensed prey restores high stance and chomp retains its own
+> crouch. Headless House **63/63**, Garage **69/69**, gate **36/36**,
+> compiler **61/61**. HouseAccess + CreatureCore + prior Garage
+> CreatureService/Bootstrap are **FOUR workspace-only Modules**, not synced
+> to Studio (no bridge credentials). Guarded offline plan
+> `python tools/sync-pending-house-garage.py --offline`; later authorized
+> `--check` is read-only and explicit `--apply` must guard all full Sources,
+> classes, place and Edit mode. No human House exit or cadence verdict.
+> See [`docs/HOUSE-EXIT-FOOT-SUPPORTED-LOWERING.md`](docs/HOUSE-EXIT-FOOT-SUPPORTED-LOWERING.md).
+
+> **PRIOR OFFLINE GEOMETRY FOLLOW-UP (2026-10-13):** Angled exit rays
+> passed the pier/placed-furniture CENTER planes while their radius-1.5
+> core clipped near/far corners. HouseAccess now checks the entire
+> radius-expanded pier band and original 5-stud furniture depth **before**
+> spending the same one physical ray. The old `(-84,65)` stage was inside
+> the placed table's expanded envelope; a safer `(-90,65)` stage remains.
+> Synthetic House **58/58**, Garage **69/69**, gate **36/36**, compiler
+> **61/61**. Workspace-only pending HouseAccess/CreatureService/Bootstrap;
+> bridge credentials absent, no Studio sync/Play verdict. Future authorized
+> sync must use `tools/sync-pending-house-garage.py --check` / explicit
+> `--apply` after exact Source/class and Vitriol/Edit guards; do not overwrite
+> user Studio edits. See
+> [`docs/HOUSE-EXIT-CORNER-CLEARANCE.md`](docs/HOUSE-EXIT-CORNER-CLEARANCE.md).
+
+> **PRIOR OFFLINE HOUSE FOLLOW-UP (2026-10-13):** An elevated indoor core
+> now gets a downward-only waypoint BEFORE any outward exit candidate ray;
+> a three-second descent stall returns to local patrol. House **51/51**,
+> Garage **69/69**, gate **36/36**, compiler **61/61**. The HouseAccess
+> change AND previous Bootstrap/CreatureService Garage explanation are
+> **workspace-only**, not Studio-synced (no bridge credentials). Fail-closed
+> four-script offline plan: `python tools/sync-pending-house-garage.py
+> --offline`; Edit-mode `--check` / explicit `--apply` only with authorized
+> bridge access and no Source/class drift. No House/ Garage Play verdict.
+> See [`docs/HOUSE-EXIT-LOWER-BEFORE-RAY.md`](docs/HOUSE-EXIT-LOWER-BEFORE-RAY.md).
+
+> **CURRENT FOLLOW-UP (2026-10-13):** The user cannot test right now.
+> Bounded server-only Garage third-witness/first-lead explanation was added
+> to workspace Bootstrap + CreatureService, emitted only after Cadence times
+> Think. Synthetic Garage **69/69**, full gate **36/36**, compiler **61/61**.
+> **NOT Studio-synced** this turn: bridge credentials absent. For the
+> combined pending four-script guard see the newer House follow-up above.
+> Do not overwrite user edits or claim live Garage/House/budget acceptance. See
+> [`docs/M3-GARAGE-DECISION-OUTPUT.md`](docs/M3-GARAGE-DECISION-OUTPUT.md).
+
+> **SUPERSEDED FOR CURRENT WORK (2026-10-12):** The archived prompt below names
+> an old branch and a runtime-generated Braid/BloodEngine integration. Do NOT
+> follow it. Use `main` only; start with [`NEXT-AGENT.md`](NEXT-AGENT.md),
+> [`INTEGRATION.md`](INTEGRATION.md), [`docs/HOUSE-EGRESS-CLOSET-SLICE.md`](docs/HOUSE-EGRESS-CLOSET-SLICE.md),
+> and [`AGENTS.md`](AGENTS.md). The Braid, remotes and blood parts are preauthored;
+> BloodEngine is inactive. The gate breach is narrowly Play-confirmed; the
+> church-bell decoy's audio and flashes are Play-accepted. The Braid can now
+> enter a house, but the guarded-synced closet-egress correction still awaits
+> fresh Night Play; local gate **30/30**, compiler **58/58**, focused **58/58**.
+
 Everything in this file was produced by running a command in this repository, not
 recalled. Where a claim is unverified it says so. Two iterations of "the doc said X,
 the code did Y, and the test found out" are recorded in §4 for exactly that reason.

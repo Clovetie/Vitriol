@@ -1,8 +1,8 @@
 --!strict
 -- BloodConfig.luau
 -- Location: ReplicatedStorage > Vitriol > Config > BloodConfig  (ModuleScript)
--- Purpose:  The shipped, low-intensity blood presentation policy and the adapter
---           settings for rotntake/BloodEngine. Body integrity and kill timing stay
+-- Purpose:  The shipped, low-intensity blood presentation policy and legacy
+--           dormant rotntake/BloodEngine settings. Body integrity and kill timing stay
 --           in GoreConfig for backwards compatibility; visual blood no longer has
 --           a legacy Gore module dependency.
 -- Requires: Config/GoreConfig

@@ -59,6 +59,15 @@ MonsterConfig.Evolution = {
 -- Senses (docs/02 §2). Ranges are multiplied by the acuity gene at runtime.
 ---------------------------------------------------------------------------
 MonsterConfig.Senses = {
+	-- Eye-less directional sensing and local body-heat detection. Neither
+	-- reveals a hidden player's live coordinates across the entire map.
+	DirectSightStuds = 90,
+	ThermalStuds = 22,
+	LastKnownSeconds = 8,
+	-- First WP6 instinct-only investigation: small physical hearing radius,
+	-- only for a real recent VIBRATION impulse when prey/lures/memory lose priority.
+	NoiseInvestigationStuds = 32,
+	NoiseInvestigationStopStuds = 7,
 	Channels = { "VIBRATION", "AIR", "SCENT", "THERMAL", "EM", "PRESSURE" },
 	-- Localisation error in studs at acuity 0, scaled by distance.
 	ErrorScale = { VIBRATION = 0.35, AIR = 0.20, SCENT = 0.60, THERMAL = 0.10, EM = 0.45, PRESSURE = 0.05 },
@@ -110,7 +119,20 @@ MonsterConfig.Threat = {
 ---------------------------------------------------------------------------
 -- Memory (docs/02 §3)
 ---------------------------------------------------------------------------
+-- Bounded Night-only instinct search. A short physical sweep follows a REAL
+-- clue; a four-point patrol follows when clues are gone. Not learned policy.
+MonsterConfig.InstinctSearch = {
+	ClueSeconds = 25,
+	ClueReachStuds = 32,
+	SweepRadiusStuds = 10,
+	PatrolRadiusStuds = 24,
+	RegionArriveStuds = 12, -- authored road stop after one local circuit
+	ArriveStuds = 5,
+	StallSeconds = 3,
+}
 MonsterConfig.Memory = {
+	GarageVisitsForPrediction = 3, -- after three WITNESSED entries, seek Garage before fourth
+	GarageLeadArriveStuds = 10, -- approach authored east entrance, then resume local search
 	WorkingCapacity = 12,
 	CellSize = 8, -- spatial hash cell, studs
 	Interest = { Kill = 1.0, Grab = 0.6, PreyPerceived = 0.25, LoudNoise = 0.15 },
@@ -222,9 +244,20 @@ MonsterConfig.Rig = {
 	RestBlendIdle = 0.35,
 	RestBlendUrgent = 0.0,
 	DampBaseStiffness = 30,
-	DampTipStiffness = 6,
+	DampTipStiffness = 40, -- feet keep up with fast core travel without trailing
 	NoiseAmplitude = 0.06,
 	NoiseFrequency = 0.7,
+	FreeLegSpanFraction = 0.40, -- at maximum height, reserve a reachable lateral foothold
+	FootHomeLookahead = 0.12, -- velocity lead remains bounded within actual reach
+	FootAdvanceFraction = 0.16, -- step toward prey FIRST, so the supported core can follow
+	FootReplantDistance = 1.9, -- independent drift threshold, varied per tendril
+	FootMaxSwingFraction = 0.50, -- keep at least half the strands planted
+	FootBankSwingFraction = 0.50, -- retain support in both front and rear
+	FootRecoverySeconds = 0.05, -- independent post-landing cooldown; keep up with supported core
+	FootTargetPullFraction = 0.12, -- near reachable prey, each leg searches ahead
+	FootSeekerThreshold = 0.78, -- a few high-drive tendrils probe prey directly
+	FootSwingSeconds = 0.08, -- brisk independent steps feed the steady support centroid
+	FootSwingHeight = 0.52, -- readable but unsynchronized per-leg arc
 	TaperExponent = 0.85, -- radius falloff along the chain
 }
 
@@ -233,7 +266,11 @@ MonsterConfig.Locomotion = {
 	AnchorRaySpreadDeg = 55,
 	MinAnchors = 2,
 	MaxAnchors = 4,
-	HaulSeconds = 0.35,
+	HaulSeconds = 0.12, -- plant/exchange roughly 8 times per second
+	MinGroundHaulSpeed = 22, -- can actually catch a running player; frame-bounded
+	StepBobHeight = 0, -- a steady carried body; legs animate independently
+	StanceBodyLeadFraction = 0.04, -- ray probes cannot push the core ahead of its feet
+	SupportHeightFraction = 0.88, -- near maximum height with reserved lateral reach for planted feet
 	AnchorGrip = { Concrete = 1.0, Wood = 0.9, Metal = 0.8, Grass = 0.5, Glass = 0.2 },
 	GlideSpeedFraction = 0.45, -- open-ground fallback
 	ProbeReachMultiplier = 1.15,
@@ -247,7 +284,7 @@ MonsterConfig.Presentation = {
 	TendrilColor = { 48, 36, 52 },
 	WoundColor = { 96, 28, 32 },
 	Material = "Slate",
-	SegmentDepthMultiplier = 0.90,
+	SegmentDepthMultiplier = 1.10, -- slight overlap hides gaps between damped cylinders
 	CoreTransparency = 0.0,
 	SegmentTransparency = 0.0,
 	Shadow = true,
@@ -274,7 +311,15 @@ MonsterConfig.Spawn = {
 -- separate from Wounds: it can kill a player, but it can never kill the Braid.
 -- CreatureService starts it only after the procedural core reaches this distance.
 MonsterConfig.Kill = {
-	GrabDistance = 5.5,
+	PrepareDistance = 7.5, -- ground-level prey only; commit to a visible crouch
+	TargetHeightAboveFloor = 4.5, -- never crouch for someone far above
+	CrouchSeconds = 0.55,
+	ChompClearance = 0.55, -- lowered core: radius + clearance above support
+	ChargeSeconds = 0.24,
+	ChargeDistance = 4.5,
+	ChompDistance = 3.3, -- validate real body-to-victim distance at contact
+	RecoverySeconds = 0.55,
+	MissCooldownSeconds = 1.2,
 	DurationSeconds = 5.8,
 	DamageAtLift = 8,
 	DamageAtTenderize = 12,

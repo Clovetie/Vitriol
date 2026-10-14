@@ -65,10 +65,15 @@ function HealthService.init(svc: any, services: any): ()
 	svc.GoreConfig = services.GoreConfig or {}
 	svc.OnVictimKillStart = services.OnVictimKillStart
 	svc.Time = services.Time
+	svc.Session = services.Session
 	svc.OnDeath = services.OnDeath
+	svc.OnInventoryWipe = services.OnInventoryWipe
 	svc.log = services.Logger
 
 	svc.states = {}
+	-- Server-run life budget survives disconnect/rejoin; not a cross-server save.
+	svc.runMaxHealth = {}
+	svc.runWaitingDawn = {} -- disconnect/rejoin cannot bypass the night wait
 	svc.count = 0
 	svc.running = false
 	svc.connections = {}
@@ -83,13 +88,15 @@ function HealthService:start(): ()
 	local players = self.Players
 	if players then
 		self.connections[#self.connections + 1] = players.PlayerAdded:Connect(function(player)
-			self:observe(player)
+			local state = self:observe(player)
+			if not state.permadead and not state.awaitingDawn and player.Character == nil then self:spawnCharacter(player) end
 		end)
 		self.connections[#self.connections + 1] = players.PlayerRemoving:Connect(function(player)
 			self:forget(player)
 		end)
 		for _, player in ipairs(players:GetPlayers()) do
-			self:observe(player)
+			local state = self:observe(player)
+			if not state.permadead and not state.awaitingDawn and player.Character == nil then self:spawnCharacter(player) end
 		end
 	end
 	local cadence = self.Cadence
@@ -116,6 +123,34 @@ function HealthService:start(): ()
 	end
 end
 
+-- The engine owns character creation; Vitriol creates no custom Instances. Disable
+-- automatic respawn in Bootstrap, and call the engine only on join or at dawn.
+function HealthService:spawnCharacter(player: any, force: boolean?): boolean
+	if player == nil or (player.Character ~= nil and not force)
+		or (self.Session and self.Session.state == "Ended") then return false end
+	local loader = player.LoadCharacterAsync or player.LoadCharacter
+	if type(loader) ~= "function" then return false end
+	local ok, err = pcall(loader, player)
+	if not ok then self:emit("character load failed: " .. tostring(err)) end
+	return ok
+end
+
+function HealthService:wipeInventory(player: any): ()
+	if player == nil then return end
+	-- Return unique preauthored pool Tools before the generic Tool destruction
+	-- pass. The player still loses them; the server does not lose its only slot.
+	if self.OnInventoryWipe then self.OnInventoryWipe(player) end
+	local function clear(container: any): ()
+		if container == nil then return end
+		for _, child in ipairs(container:GetChildren()) do
+			if child:IsA("Tool") then child:Destroy() end
+		end
+	end
+	clear(player.Character)
+	clear(player:FindFirstChild("Backpack"))
+	clear(player:FindFirstChild("StarterGear"))
+end
+
 -- observe(svc, player) -> state
 -- CharacterAdded rather than a health observation at join: the humanoid does not exist
 -- until the character replicates, and a service that assumes it does is the classic
@@ -138,7 +173,9 @@ function HealthService:observe(player: any): any
 			dripLeft = 0,
 			metersAllowRegen = false,
 			incapacitated = false,
-			dead = false,
+			dead = (self.runMaxHealth[player.UserId] or self.Health.Max) <= 0,
+			awaitingDawn = self.runWaitingDawn[player.UserId] == true,
+			permadead = (self.runMaxHealth[player.UserId] or self.Health.Max) <= 0,
 			kill = nil,
 			humanoid = nil,
 		}
@@ -152,6 +189,9 @@ function HealthService:observe(player: any): any
 			self:attach(state, character)
 		end)
 	end
+	player:SetAttribute("RunMaxHealth", self.runMaxHealth[player.UserId] or self.Health.Max)
+	player:SetAttribute("RunStatus", (state.permadead or (self.Session and self.Session.state == "Ended"))
+		and "Out" or (state.awaitingDawn and "WaitingForDawn" or "Alive"))
 	if player.Character then
 		self:attach(state, player.Character)
 	end
@@ -160,13 +200,32 @@ end
 
 -- attach(svc, state, character) -> ()
 function HealthService:attach(state: any, character: any): ()
+	if state.character == character and state.humanoid ~= nil then return end
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if state.permadead or state.awaitingDawn then
+		-- An out-of-band character cannot evade the life budget or early-respawn.
+		if humanoid then humanoid.Health = 0 end
+		return
+	end
+	-- A respawn is a new life. Keeping dead=true or the old kill scene here
+	-- prevents every subsequent chase/kill and leaves presentation latched.
+	state.wounds, state.woundCount = {}, 0
+	state.bleedRate, state.scentScale = 0, 1
+	state.applied, state.dripLeft = 0, 0
+	state.dead, state.incapacitated, state.kill = false, false, nil
 	state.character = character
 	state.humanoid = humanoid
+	local allowed = self.runMaxHealth[state.UserId] or self.Health.Max
 	if humanoid then
-		state.maxHealth = humanoid.MaxHealth
-		state.health = humanoid.Health
-		state.root = humanoid.RootPart
+		humanoid.MaxHealth = allowed
+		humanoid.Health = allowed
+	end
+	state.maxHealth = allowed
+	state.health = humanoid and humanoid.Health or 0
+	state.root = humanoid and (humanoid.RootPart or character:FindFirstChild("HumanoidRootPart")) or nil
+	if state.wipeOnSpawn then
+		self:wipeInventory(state.player)
+		state.wipeOnSpawn = false
 	end
 end
 
@@ -239,6 +298,11 @@ end
 function HealthService:trackDamage(dt: number): ()
 	self:tickCreatureKills(dt)
 	for _, state in pairs(self.states) do
+		-- CharacterAdded can precede Humanoid insertion. Adopt it on the next
+		-- health cadence without yielding or creating another connection.
+		if state.humanoid == nil and state.character ~= nil then
+			self:attach(state, state.character)
+		end
 		local humanoid = state.humanoid
 		if humanoid ~= nil then
 			local health = humanoid.Health
@@ -485,6 +549,21 @@ function HealthService:tickBleed(dt: number): ()
 	local now = self:now()
 	local health = self.Health
 	for _, state in pairs(self.states) do
+		if state.pendingDawnSpawn then
+			state.pendingDawnSpawn = false
+			local player = state.player
+			if self:spawnCharacter(player, true) then
+				self:wipeInventory(player) -- include starter tools copied during loading
+				player:SetAttribute("RunStatus", "Alive")
+			else
+				state.awaitingDawn = true -- retry next dawn, never silently lose a life
+				self.runWaitingDawn[state.UserId] = true
+			end
+		end
+		if state.wipeAfterRespawn then
+			self:wipeInventory(state.player)
+			state.wipeAfterRespawn = false
+		end
 		local humanoid = state.humanoid
 		if humanoid ~= nil and not state.dead then
 			if state.bleedRate > 0 then
@@ -576,9 +655,22 @@ end
 -- is a threat input (docs/02 §12). The state is kept until the player leaves so the
 -- corpse's wound list can still be read by the butchery/carrying paths.
 function HealthService:onDeath(state: any): ()
+	if state.dead then return end
 	state.dead = true
 	state.kill = nil
 	state.bleedRate = 0
+	local remaining = math.max(0, (self.runMaxHealth[state.UserId] or self.Health.Max)
+		- (self.Health.MaxHpLossPerDeath or 20))
+	self.runMaxHealth[state.UserId] = remaining
+	state.maxHealth = remaining
+	state.awaitingDawn = remaining > 0
+	self.runWaitingDawn[state.UserId] = state.awaitingDawn
+	state.permadead = remaining <= 0
+	self:wipeInventory(state.player)
+	if state.player then
+		state.player:SetAttribute("RunMaxHealth", remaining)
+		state.player:SetAttribute("RunStatus", state.permadead and "Out" or "WaitingForDawn")
+	end
 	local noise = self.Noise
 	local root = state.root
 	if noise ~= nil and root ~= nil then
@@ -601,7 +693,37 @@ function HealthService:onDeath(state: any): ()
 	end
 	-- NOT a session kill: the threat dial counts creatures the group has killed
 	-- (docs/02 §12), so a player dying must never make the hunt harder.
-	self:emit(state.Name .. " died")
+	self:emit(state.Name .. " died; " .. remaining .. " max HP on next dawn")
+	if state.permadead and self.Session and self.Session.state == "Running" and self.Players then
+		local allOut, any = true, false
+		for _, player in ipairs(self.Players:GetPlayers()) do
+			any = true
+			if (self.runMaxHealth[player.UserId] or self.Health.Max) > 0 then allOut = false end
+		end
+		if any and allOut then self.Session:endRound("all survivors exhausted") end
+	end
+end
+
+-- Night -> Dawn is authoritative. Once per edge, only players who died this
+-- run and still have HP return; permanently exhausted players never respawn.
+function HealthService:onDawn(_nightIndex: number): ()
+	if self.Players == nil then return end
+	for userId in pairs(self.runWaitingDawn) do
+		if self.states[userId] == nil then self.runWaitingDawn[userId] = nil end
+	end
+	for _, player in ipairs(self.Players:GetPlayers()) do
+		local state = self.states[player.UserId]
+		if state and state.awaitingDawn and not state.permadead then
+			state.awaitingDawn = false
+			state.pendingDawnSpawn = true
+			self.runWaitingDawn[player.UserId] = nil
+			state.wipeOnSpawn = true
+			state.wipeAfterRespawn = true
+			self:wipeInventory(player)
+			-- Do not yield TimeService's phase boundary in LoadCharacterAsync.
+			-- The existing Health:Slow cadence performs the engine-owned load.
+		end
+	end
 end
 
 -- metersAllowRegen(svc, userId, ok) -> ()

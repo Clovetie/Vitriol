@@ -92,6 +92,13 @@ if (process.argv.includes("--debug-transform")) {
 // ---------------------------------------------------------------------------
 const SHIM = `
 -- ======================= Luau stdlib the modules use =======================
+-- Test-only implementation of Roblox's bit32 in the Lua 5.3/Fengari VM.
+bit32 = {
+  band = function(a, b) return (a & b) & 0xFFFFFFFF end,
+  bxor = function(a, b) return (a ~ b) & 0xFFFFFFFF end,
+  lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+  rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+}
 table.create = function(n, v)
 	local t = {}
 	for i = 1, n do t[i] = v end
@@ -129,6 +136,7 @@ COUNTERS = {
 	heartbeats = 0,
 	heartbeatConnections = 0,
 	remoteFires = 0,
+	runtimeInstanceNew = 0,
 }
 SIM.COUNTERS = COUNTERS
 SIM.now = function() return VTIME end
@@ -249,6 +257,9 @@ end
 function Instance:FindFirstChildWhichIsA(className)
 	return self:FindFirstChildOfClass(className)
 end
+function Instance:IsA(className)
+	return self.ClassName == className or (className == "BasePart" and (self.ClassName == "Part" or self.ClassName == "MeshPart"))
+end
 function Instance:GetChildren()
 	return self.children
 end
@@ -335,11 +346,20 @@ local function instanceNewIndex(inst, key, value)
 		if value == nil then
 			inst:Destroy()
 		else
+			local old = inst.props.Parent
+			if old == value then return end
+			if old then
+				for i, child in ipairs(old.children) do
+					if child == inst then table.remove(old.children, i); break end
+				end
+				if old.byName[inst.Name] == inst then old.byName[inst.Name] = nil end
+			end
 			value:AddChild(inst)
 		end
 		return
 	end
 	inst.props[key] = value
+	if key == "CFrame" and value and value.Position then inst.props.Position = value.Position end
 end
 local makeRemote -- defined in the remotes section below; forward-declared because
 -- Instance.new has to dispatch on class, which means it needs the remote factory
@@ -359,6 +379,7 @@ function SIM.createClass(className, name)
 	return decorate(newNode(className, name or className))
 end
 Instance.new = function(className)
+	COUNTERS.runtimeInstanceNew = COUNTERS.runtimeInstanceNew + 1
 	return SIM.createClass(className)
 end
 SIM.Instance = Instance
@@ -438,6 +459,7 @@ end
 
 local Workspace = service("Workspace", {
 	DistributedGameTime = 0,
+	GetServerTimeNow = function() return VTIME end,
 	Gravity = 196.2,
 	Raycast = function() return nil end,
 	GetPartBoundsInRadius = function() return {} end,
@@ -445,19 +467,24 @@ local Workspace = service("Workspace", {
 local Players = service("Players", { MaxPlayers = 4 })
 Players.list = {}
 Players.GetPlayers = function(self) return self.list end
-Players.FindFirstPlayerByUserId = function(self, userId)
-	for _, player in ipairs(self.list) do
-		if player.UserId == userId then return player end
-	end
+Players.GetPlayerFromCharacter = function(self, character)
+	for _, player in ipairs(self.list) do if player.Character == character then return player end end
 	return nil
 end
 Players.addPlayer = function(self, name, userId)
 	local player = SIM.newNode("Player", name)
 	player.UserId = userId or (1000 + #self.list + 1)
 	player.Character = nil
+	-- Engine-owned character loads are explicit when CharacterAutoLoads=false.
+	player.LoadCharacter = function(self)
+		self.loadCount = (self.loadCount or 0) + 1
+		return SIM.makeCharacter(self)
+	end
 	local added = Signal.new()
 	player.CharacterAdded = added
 	player.leaderstats = SIM.newNode("Folder", "leaderstats")
+	player:AddChild(SIM.newNode("Backpack", "Backpack"))
+	player:AddChild(SIM.newNode("Folder", "StarterGear"))
 	self.list[#self.list + 1] = player
 	self.PlayerAdded:Fire(player)
 	return player
@@ -626,6 +653,176 @@ for _, entry in ipairs(TREE) do
 	created[entry.path] = node
 	NODES[entry.path] = node
 end
+-- Edit-mode-authored fixtures are present before the first server script boots.
+local function authored(parent, className, name)
+	local node = SIM.createClass(className, name)
+	node.Name = name
+	parent:AddChild(node)
+	return node
+end
+local comms = authored(SERVICES.ReplicatedStorage.Vitriol, "Folder", "Comms")
+for _, name in ipairs({ "RE_TimeSync", "RE_SkeletonStream", "RE_CreatureEvent", "RE_SurvivalSync", "RE_ClientIntent", "RE_Destruction" }) do
+	authored(comms, "RemoteEvent", name)
+end
+authored(comms, "RemoteFunction", "RF_DebugQuery")
+-- Authored garage preparation fixtures. Runtime service only toggles their
+-- properties and listens to their pre-existing prompts.
+SIM.map = authored(Workspace, "Folder", "Map")
+SIM.interactions = authored(SIM.map, "Folder", "Interactions")
+-- Both ORIGINAL tables and closets, plus Editor-authored invisible target poses.
+SIM.interiors = authored(SIM.map, "Folder", "Interiors")
+SIM.structures = authored(SIM.map, "Folder", "Structures")
+SIM.coverTargets = authored(SIM.interactions, "Folder", "HouseCoverTargets")
+SIM.houseFurniture = {}
+for _, spec in ipairs({ {"House_01",-100,72}, {"House_02",93,62} }) do
+	local name,x,z = spec[1],spec[2],spec[3]
+	local house = authored(SIM.structures,"Model",name)
+	local floor=authored(house,"Part","Floor")
+	floor.Position={X=x,Y=.4,Z=z};floor.Size={X=42,Y=.8,Z=36}
+	local pier=authored(house,"Part","EastPier_-13")
+	pier.Position={X=x+21,Y=8,Z=z-13}
+	local lintel=authored(house,"Part","EastLintel")
+	lintel.Position={X=x+21,Y=14,Z=z};lintel.Size={X=1,Y=4,Z=16}
+	local roof=authored(house,"Part","Roof")
+	roof.Position={X=x,Y=17,Z=z};roof.Size={X=47,Y=1.4,Z=42}
+	local porch=authored(house,"Part","PorchRoof")
+	porch.Position={X=x+29,Y=13,Z=z};porch.Size={X=17,Y=1,Z=31}
+	for _,kind in ipairs({"Table","Closet"}) do
+		local label=name.."_"..kind
+		local part=authored(SIM.interiors,"Part",label)
+		local home={Position={X=x+(kind=="Table" and 0 or -14),Y=kind=="Table" and 2 or 4,Z=z+(kind=="Table" and 0 or 10)}}
+		part.CFrame=home
+		part.Size=kind=="Table" and {X=9,Y=1.3,Z=5} or {X=6,Y=8,Z=5}
+		part.Anchored=true;part.CanCollide=true
+		local target=authored(SIM.coverTargets,"Part",label.."Target")
+		target.CFrame={Position={X=x+18.5,Y=home.Position.Y,Z=z+(kind=="Table" and -3.5 or 5)}}
+		local move=authored(part,"ProximityPrompt","MoveToEntrance")
+		move.Triggered=Signal.new();move.Enabled=false
+		local assist=authored(part,"ProximityPrompt","AssistHouseCover")
+		assist.Triggered=Signal.new();assist.Enabled=false
+		SIM.houseFurniture[label]={part=part,move=move,assist=assist,target=target,home=home}
+	end
+end
+SIM.fuelCan = authored(SIM.interactions, "Part", "Garage_FuelCan")
+SIM.fuelCan.Position = { X = 0, Y = 0, Z = 0 }
+SIM.takeFuel = authored(SIM.fuelCan, "ProximityPrompt", "TakeFuel")
+SIM.takeFuel.Triggered = Signal.new()
+SIM.generator = authored(SIM.interactions, "Part", "Garage_Generator")
+SIM.generator.Position = { X = 2, Y = 0, Z = 0 }
+SIM.powerLamp = authored(SIM.generator, "ProximityPrompt", "PowerLamp")
+SIM.powerLamp.Triggered = Signal.new()
+SIM.repairGarage = authored(SIM.generator, "ProximityPrompt", "RepairGarageLight")
+SIM.repairGarage.Triggered = Signal.new(); SIM.repairGarage.Enabled = false
+SIM.helpGarage = authored(SIM.generator, "ProximityPrompt", "AssistGarageLight")
+SIM.helpGarage.Triggered = Signal.new(); SIM.helpGarage.Enabled = false
+SIM.lampPart = authored(SIM.interactions, "Part", "Garage_GeneratorLamp")
+authored(SIM.lampPart, "PointLight", "PoweredLight")
+SIM.bellLever = authored(SIM.interactions, "Part", "Church_BellLever")
+SIM.bellLever.Position = { X = 119, Y = 2.5, Z = -136 }
+SIM.primeBell = authored(SIM.bellLever, "ProximityPrompt", "PrimeBell")
+SIM.primeBell.Triggered = Signal.new()
+-- The player's original nested bell/rope replaces the removed cylinder.
+local function bellCF(x,y,z)
+	local cf={Position={X=x,Y=y,Z=z}}
+	function cf:Lerp(other,t)
+		local a,b=self.Position,other.Position
+		return bellCF(a.X+(b.X-a.X)*t,a.Y+(b.Y-a.Y)*t,a.Z+(b.Z-a.Z)*t)
+	end
+	return setmetatable(cf,{__add=function(a,v)
+		return bellCF(a.Position.X+v.X,a.Position.Y+v.Y,a.Position.Z+v.Z)
+	end})
+end
+SIM.bellRoot=authored(SIM.interactions,"Model","Bell")
+SIM.bellHoistPos=authored(SIM.bellRoot,"Part","HoistPos")
+SIM.bellHoistPos.Position={X=119,Y=35.4683,Z=-205}
+SIM.bellRope=authored(SIM.bellRoot,"Part","Rope")
+SIM.bellRope.CFrame=bellCF(119,23.4742,-205)
+SIM.bellModel=authored(SIM.bellRoot,"Model","Bell")
+SIM.bellModel.pivot=bellCF(119,5.4039,-205)
+SIM.bellModel.GetPivot=function(self) return self.pivot end
+SIM.bellModel.PivotTo=function(self,cf)
+	local before=self.pivot.Position
+	local delta={X=cf.Position.X-before.X,Y=cf.Position.Y-before.Y,Z=cf.Position.Z-before.Z}
+	for _,part in ipairs(self:GetDescendants()) do
+		if part:IsA("BasePart") and part.Position then
+			local p=part.Position
+			part.Position={X=p.X+delta.X,Y=p.Y+delta.Y,Z=p.Z+delta.Z}
+		end
+	end
+	self.pivot=cf
+end
+SIM.bellPart=authored(SIM.bellModel,"MeshPart","Bell")
+SIM.bellPart.Position={X=119,Y=5.0261,Z=-205.0072}
+SIM.bering=authored(SIM.bellModel,"Part","bering")
+SIM.bering.Position={X=119,Y=9.8027,Z=-204.9909}
+SIM.bellLight=authored(SIM.bellPart,"PointLight","BellPulse")
+SIM.bellSound=authored(SIM.bellPart,"Sound","BellRing")
+SIM.bellSound.SoundId = "rbxassetid://130139735590457"
+SIM.bellSound.Play = function(self) self.playCount = (self.playCount or 0) + 1 end
+SIM.bellSound.Stop = function(self) self.stopCount = (self.stopCount or 0) + 1 end
+SIM.gate = authored(SIM.interactions, "Part", "Garage_BoardedGate")
+SIM.gate.Position = { X = -61.8, Y = 7, Z = -56 }
+SIM.gate.Size = { X = 1.2, Y = 12.6, Z = 40 }
+SIM.latch = authored(SIM.interactions, "Part", "Garage_BoardingLatch")
+SIM.latch.Position = { X = -66, Y = 2.4, Z = -56 }
+SIM.boardPrompt = authored(SIM.latch, "ProximityPrompt", "BoardGarage")
+SIM.boardPrompt.Triggered = Signal.new()
+-- Edit-mode-authored co-op vote helpers and station switch/beam. Never mint
+-- these at runtime: Bootstrap fails closed if one is missing or wrong-class.
+for _, part in ipairs({SIM.fuelCan,SIM.generator,SIM.bellLever,SIM.latch}) do
+	local helper = authored(part,"ProximityPrompt","AssistPrep")
+	helper.Enabled=false; helper.Triggered=Signal.new()
+end
+SIM.stationSwitch=authored(SIM.interactions,"Part","Station_FloodlightSwitch")
+SIM.stationSwitch.Position={X=-62,Y=4.2,Z=-110}
+SIM.repairPrompt=authored(SIM.stationSwitch,"ProximityPrompt","RepairFloodlight")
+SIM.repairPrompt.Enabled=false;SIM.repairPrompt.Triggered=Signal.new()
+SIM.stationHelper=authored(SIM.stationSwitch,"ProximityPrompt","AssistFloodlight")
+SIM.stationHelper.Enabled=false;SIM.stationHelper.Triggered=Signal.new()
+SIM.stationFixture=authored(SIM.interactions,"Part","Station_Floodlight")
+SIM.stationFixture.Position={X=-88,Y=11.8,Z=-125}
+SIM.stationBeam=authored(SIM.stationFixture,"PointLight","StationBeam")
+SIM.stationBeam.Enabled=false
+-- The Tool remains in ServerStorage in normal Play; all eight board slots and
+-- release prompts already exist before the server boot path runs.
+SIM.tools = authored(SERVICES.ServerStorage.Vitriol, "Folder", "Tools")
+SIM.tool = authored(SIM.tools, "Tool", "BarricadePlankTool")
+SIM.tool.Activated = Signal.new()
+authored(SIM.tool, "Part", "Handle")
+SIM.pool = authored(SERVICES.ServerStorage.Vitriol, "Folder", "BarricadePool")
+SIM.sockets = authored(SIM.map, "Folder", "BarricadeSockets")
+SIM.placed = authored(SIM.map, "Folder", "PlacedBarricades")
+for i, name in ipairs({ "House_01_Door", "House_02_Door" }) do
+	SIM.socket = authored(SIM.sockets, "Part", name)
+	SIM.socket.Position = { X = i == 1 and -79 or 114, Y = 5.4, Z = i == 1 and 72 or 62 }
+	SIM.socket.Size = { X = 1, Y = 10, Z = 15.5 }
+	SIM.socket.CFrame = { Position = SIM.socket.Position,
+		RightVector = { X = 1, Z = 0 }, LookVector = { X = 0, Z = -1 } }
+	SIM.socket:SetAttribute("BarricadeSocket", true)
+end
+for i = 1, 8 do
+	SIM.board = authored(SIM.pool, "Part", string.format("Board_%02d", i))
+	SIM.board.CFrame = { RightVector = { X = 1, Z = 0 }, LookVector = { X = 0, Z = -1 } }
+	SIM.board.Size = { X = 8, Y = 6, Z = 0.8 }
+	SIM.releasePrompt = authored(SIM.board, "ProximityPrompt", "ReleaseBoard")
+	SIM.releasePrompt.Triggered = Signal.new()
+end
+local worldRoot = authored(Workspace, "Folder", "Vitriol")
+local worldFolder = authored(worldRoot, "Folder", "World")
+local timeAnchor = authored(worldFolder, "Part", "TimeAnchor")
+timeAnchor.Size = { X = 0, Y = 0, Z = 0 }
+timeAnchor.Anchored = true
+local creaturesFolder = authored(worldRoot, "Folder", "Creatures")
+local braid = authored(creaturesFolder, "Model", "Braid_1")
+authored(braid, "Part", "Core")
+for i = 1, 14 do
+	for j = 1, 15 do
+		authored(braid, "Part", "Tendril_" .. i .. "_" .. j)
+	end
+end
+local gore = authored(worldRoot, "Folder", "Gore")
+for i = 1, 24 do authored(gore, "Part", "BloodDrop_" .. i) end
+
 function SIM.pathOf(name)
 	for path, node in pairs(NODES) do
 		local leaf = string.match(path, "([^/]+)$")
@@ -654,9 +851,19 @@ function VitriolRequire(name)
 		},
 		CFrame = {
 			new = function(x, y, z) return { X = x or 0, Y = y or 0, Z = z or 0 } end,
-			lookAt = function() return {} end,
+			lookAt = function(at, target)
+				local dx, dz = target.X - at.X, target.Z - at.Z
+				local length = math.sqrt(dx * dx + dz * dz)
+				if length < 1e-6 then length = 1 end
+				return { Position = at, LookVector = { X = dx / length, Y = 0, Z = dz / length },
+					RightVector = { X = -dz / length, Y = 0, Z = dx / length } }
+			end,
+			fromMatrix = function(position, xAxis, yAxis, zAxis)
+				return { Position = position, XVector = xAxis, YVector = yAxis, ZVector = zAxis }
+			end,
 		},
-		Color3 = { new = function() return {} end, fromRGB = function() return {} end },
+		Color3 = { new = function(r, g, b) return { R = r, G = g, B = b } end,
+			fromRGB = function(r, g, b) return { R = r / 255, G = g / 255, B = b / 255 } end },
 		DateTime = {
 			now = function()
 				return { ToUnixTimeMillis = function() return math.floor(VTIME * 1000) end }
@@ -679,6 +886,7 @@ function VitriolRequire(name)
 		table = table,
 		string = string,
 		math = math,
+		bit32 = bit32,
 		os = os,
 		task = task,
 		buffer = buffer,
@@ -794,6 +1002,8 @@ lua.lua_getfield(L, -1, to_luastring("failed"));
 const failed = lua.lua_tonumber(L, -1);
 lua.lua_pop(L, 2);
 
-console.log("");
-console.log(`VITRIOL session test: ${passed} passed, ${failed} failed`);
+// The gate captures stdout through a pipe. console.log() followed immediately
+// by process.exit() can drop the final summary even after all tests pass,
+// spuriously failing the gate; synchronously flush JUST the verdict.
+fs.writeSync(1, `\nVITRIOL session test: ${passed} passed, ${failed} failed\n`);
 process.exit(failed > 0 ? 1 : 0);

@@ -1,5 +1,24 @@
 # VITRIOL — Survival: Hunger, Thirst, Debuffs
 
+> **Implementation status (2026-10-14):** The pure, locally tested
+> `SurvivalModel` implements the *currently authored* real-minute config,
+> timed exhaustion and post-validation consumable meter math. A pure
+> `SurvivalConsumeAction` now verifies authored action time/interruptions
+> and a one-use server inventory-commit callback, but no InventoryService
+> or live item prompts are wired. A separate headless server adapter now
+> uses fake ownership callbacks and the real NoiseField for AIR on successful
+> commit; it is not a live InventoryService or active gameplay. An offline
+> `SurvivalService` adapter owns per-player models and Health regen flags;
+> `SurvivalCollapse` models the one-shot fall event; the explicitly invoked
+> adapter has now emitted it into a **real headless NoiseField** in tests.
+> None is Bootstrapped, scheduled, Studio-synced or running in-game. Section 7's
+> Parched≈9min / Collapse≈16min acceptance targets conflict with these rates:
+> nine walking minutes give thirst **7.2**, not Parched's **80**; even sixteen
+> uninterrupted baseline sprint minutes give thirst **33.6**, hunger **15.2**,
+> not Collapse. Do **not** silently speed up the meters or the owner's short
+> Studio Day/Night phases. The mismatch needs an explicit pacing decision.
+> See [`M6-SURVIVAL-MODEL-OFFLINE-2026-10-14.md`](M6-SURVIVAL-MODEL-OFFLINE-2026-10-14.md).
+
 The survival layer exists for one reason: **to force the player out of hiding.**
 A hiding-only game is a boring game. Hunger and thirst are the clock that makes
 staying still a losing strategy — and because they raise your scent and lower your

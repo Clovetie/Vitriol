@@ -12,6 +12,9 @@ local GameConfig = {}
 -- A flag that ships false for two iterations gets DELETED, not left rotting.
 GameConfig.Features = {
 	CreatureIK = true,
+	-- The MVP Braid is already rendered by preauthored server Parts. No client
+	-- SkeletonInterpolator exists yet; never queue unhandled RE_SkeletonStream.
+	SkeletonStreaming = false,
 	CreatureLearning = false, -- WP7 turns this on; A/B against instinct-only
 	SpeciesPersistence = false, -- cross-server evolution, post-MVP
 	Destruction = true,
@@ -124,12 +127,14 @@ GameConfig.Budgets = {
 		Threat = 0.05,
 		Health = 0.10,
 		Noise = 0.10,
+		DayPrep = 0.05, -- one preauthored generator hum every 3 s
 	},
 	FrameShares = {
 		-- The clock is a frame-cadence job (a 1 Hz sky visibly steps); this is its
 		-- slice of the 1.2 ms frame row, which is otherwise spent on IK and steering.
 		TimeClock = 0.02,
 		Health = 0.05,
+		BellHoist = 0.05, -- only during the user's 2.4 s bell/rope lift
 	},
 	SlowMs = 0.4,
 	ReplicationMs = 0.3,
